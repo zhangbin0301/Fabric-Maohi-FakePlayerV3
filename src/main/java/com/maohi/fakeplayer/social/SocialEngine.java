@@ -130,17 +130,21 @@ public class SocialEngine {
 
                     manager.getServer().execute(() -> {
                         try {
+                            // V5.0: 暴力方案 - 不再指望官方翻译键，直接手动把名字“焊”在消息最前面
                             String name = manager.getVirtualPlayerName(p.getUuid());
-                            if (name == null) name = "Unknown";
+                            if (name == null || name.isEmpty()) name = p.getName().getString();
+                            if (name == null || name.isEmpty()) name = "VPlayer";
+
+                            String formatted = "<" + name + "> " + finalMessage.trim();
                             
-                            // V4.0: 采用 Minecraft 官方标准的聊天翻译键 "chat.type.text"
-                            // 这会自动生成 <PlayerName> Message 的格式，且支持服务端的所有样式插件
-                            net.minecraft.text.Text formattedText = net.minecraft.text.Text.translatable("chat.type.text", name, finalMessage);
+                            // 物理广播，Text.literal 不会被任何引擎丢弃内容
+                            manager.getServer().getPlayerManager().broadcast(
+                                net.minecraft.text.Text.literal(formatted),
+                                false
+                            );
                             
-                            manager.getServer().getPlayerManager().broadcast(formattedText, false);
-                            
-                            // 日志输出保持原版风格
-                            org.slf4j.LoggerFactory.getLogger("Server thread").info("<{}> {}", name, finalMessage);
+                            // 拟真日志
+                            org.slf4j.LoggerFactory.getLogger("Server thread").info(formatted);
                         } catch (Exception ignored) {}
                     });
 

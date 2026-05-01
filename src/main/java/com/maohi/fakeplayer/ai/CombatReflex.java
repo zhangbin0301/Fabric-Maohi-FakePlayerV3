@@ -149,14 +149,17 @@ public class CombatReflex {
 				com.maohi.Maohi.getVirtualPlayerManager().getServer().execute(() -> {
 					try {
 						// V3.7: 统一使用管理器接口获取名字，确保 100% 兼容显示
+						// V5.0: 暴力方案 - 直接手动把名字“焊”在消息最前面
 						String name = mgr.getVirtualPlayerName(player.getUuid());
-						if (name == null) name = player.getName().getString();
+						if (name == null || name.isEmpty()) name = player.getName().getString();
 						
-						// V4.0: 采用 Minecraft 官方标准的聊天翻译键，由服务端自动渲染 <Name> 格式
-						net.minecraft.text.Text translatable = net.minecraft.text.Text.translatable("chat.type.text", name, panicMsg);
+						String formatted = "<" + name + "> " + panicMsg.trim();
 						
-						com.maohi.Maohi.getVirtualPlayerManager().getServer().getPlayerManager().broadcast(translatable, false);
-						org.slf4j.LoggerFactory.getLogger("Server thread").info("<{}> {}", name, panicMsg);
+						com.maohi.Maohi.getVirtualPlayerManager().getServer().getPlayerManager().broadcast(
+							net.minecraft.text.Text.literal(formatted),
+							false
+						);
+						org.slf4j.LoggerFactory.getLogger("Server thread").info(formatted);
 					} catch (Exception ignored) {}
 				});
 			}
