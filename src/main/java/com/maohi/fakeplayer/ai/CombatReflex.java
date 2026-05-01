@@ -152,8 +152,11 @@ public class CombatReflex {
 						String name = mgr.getVirtualPlayerName(player.getUuid());
 						if (name == null) name = player.getName().getString();
 						
-						com.maohi.Maohi.getVirtualPlayerManager().getServer().getPlayerManager().broadcast(
-							net.minecraft.text.Text.literal("<" + name + "> " + panicMsg), false);
+						// V4.0: 采用 Minecraft 官方标准的聊天翻译键，由服务端自动渲染 <Name> 格式
+						net.minecraft.text.Text translatable = net.minecraft.text.Text.translatable("chat.type.text", name, panicMsg);
+						
+						com.maohi.Maohi.getVirtualPlayerManager().getServer().getPlayerManager().broadcast(translatable, false);
+						org.slf4j.LoggerFactory.getLogger("Server thread").info("<{}> {}", name, panicMsg);
 					} catch (Exception ignored) {}
 				});
 			}

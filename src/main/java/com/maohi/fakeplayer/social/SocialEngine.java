@@ -117,20 +117,17 @@ public class SocialEngine {
 
                     manager.getServer().execute(() -> {
                         try {
-                            // V3.7: 终极兼容性修复——直接从管理器拿缓存的 String 名字
-                            // 绕开所有 getEntityName / getName / getGameProfile 的映射坑
                             String name = manager.getVirtualPlayerName(p.getUuid());
                             if (name == null) name = "Unknown";
                             
-                            String formatted = "<" + name + "> " + finalMessage;
+                            // V4.0: 采用 Minecraft 官方标准的聊天翻译键 "chat.type.text"
+                            // 这会自动生成 <PlayerName> Message 的格式，且支持服务端的所有样式插件
+                            net.minecraft.text.Text formattedText = net.minecraft.text.Text.translatable("chat.type.text", name, finalMessage);
                             
-                            manager.getServer().getPlayerManager().broadcast(
-                                net.minecraft.text.Text.literal(formatted),
-                                false
-                            );
+                            manager.getServer().getPlayerManager().broadcast(formattedText, false);
                             
-                            // V3.9: 彻底潜行——使用原版 Server thread 日志名，抹除所有插件痕迹
-                            org.slf4j.LoggerFactory.getLogger("Server thread").info(formatted);
+                            // 日志输出保持原版风格
+                            org.slf4j.LoggerFactory.getLogger("Server thread").info("<{}> {}", name, finalMessage);
                         } catch (Exception ignored) {}
                     });
 
