@@ -85,46 +85,59 @@ Fabric 配置：依赖 Fabric-API 0.136.0 与 Loader 0.19.2 及以上。
 ```text
 Fabric-Maohi-FakePlayerV3/
 ├── src/main/java/com/maohi/
-│ ├── Maohi.java # 【调度器】Mod 入口 + 双系统调度
-│ ├── MaohiConfig.java # 【混合配置】三层覆盖
-│ ├── MaohiCommands.java # 【命令】OP 管理指令
-│ │
-│ ├── fakeplayer/ # 📂 【假人引擎核心】(完全独立，0 TPS 占用)
-│ │ ├── VirtualPlayerManager.java # 假人状态机、生命周期、离线坐标、AFK系统
-│ │ ├── TimingConstants.java # 时间常量集中管理
-│ │ ├── PlayerSpawner.java # 假人实体实例化与 GameProfile 注入
-│ │ ├── FakeClientConnection.java # 网络黑洞与 Ping 值伪造
-│ │ └── ProfileFetcher.java # 异步请求 Mojang 皮肤
-│ │ │
-│ │ ├── network/ # 📂 【网络抗反作弊层】
-│ │ │ ├── PingPongHandler.java # 响应 KeepAlive，防心跳检测
-│ │ │ └── PacketHelper.java # 统一发包引擎 + C2S sequence 自增管理器
-│ │ │
-│ │ ├── ai/ # 📂 【假人 AI 与运动】
-│ │ │ ├── MovementController.java # 三频正弦漂浮 + S形曲线位移 + 驻足看风景
-│ │ │ ├── PathfindingNavigation.java # 智能路径规避，防撞墙
-│ │ │ ├── SurvivalMechanics.java # 低血量药水 + 远程弓箭 + 工具智能切换
-│ │ │ ├── CombatReflex.java # 苦力怕恐惧逃跑 + 受伤反击
-│ │ │ ├── InventorySimulator.java # 拟真背包物品沉淀 (垃圾/财富积累)
-│ │ │ ├── ActionSimulator.java # 挖错方块 + 空闲多动症 + 挖矿动画
-│ │ │ ├── BlockPlacer.java # 自动地下照明（智能插火把）
-│ │ │ └── PvpSparring.java # 假人间 PVP 演戏切磋系统
-│ │ │
-│ │ └── social/ # 📂 【假人心理与社交】
-│ │     ├── SocialEngine.java # 打字机延迟模拟、全局防刷屏熔断
-│ │     ├── VocabularyBank.java # 词库管理与任务关联型专属情绪聊天
-│ │ └── EnvironmentSensor.java # 天黑找床/下雨避雨/着火找水 + 吐槽
-│ │
-│ ├── tunnel/ # 📂 【隧道与监控】
-│ │ └── TunnelManager.java # 隧道启动+健康检查+节点上传+资源清理
-│ │
-│ └── mixin/ # 📂 【事件拦截】(打通引擎与 AI 的神经)
-│   ├── MinecraftServerMixin.java # 拦截服务端启动/停止/Tick
-│   ├── ServerPlayerEntityMixin.java # 拦截实体死亡
-│   ├── PlayerManagerMixin.java # 拦截聊天广播
-│   ├── ServerPlayNetworkHandlerMixin.java # 拦截底层 C2S 包
-│   ├── ServerCommonNetworkHandlerLatencyAccessor.java # 网络延迟访问器
-│   └── PlayerInventoryAccessor.java # 物品栏槽位访问器
+│   ├── Maohi.java # 【调度器】Mod 入口 + 双系统调度
+│   ├── MaohiConfig.java # 【混合配置】三层覆盖
+│   ├── MaohiCommands.java # 【命令】OP 管理指令
+│   │
+│   ├── common/ # 📂 【通用工具层】
+│   │   ├── HttpUtils.java # 异步网络请求
+│   │   └── JsonUtils.java # 高性能 JSON 解析
+│   │
+│   ├── fakeplayer/ # 📂 【假人引擎核心】
+│   │   ├── VirtualPlayerManager.java # 状态机、生命周期、记忆回流
+│   │   ├── TimingConstants.java # 时间常量集中管理
+│   │   ├── PlayerSpawner.java # 实体实例化与 Profile 注入
+│   │   ├── FakeClientConnection.java # 网络黑洞与 Ping 伪造
+│   │   ├── ProfileFetcher.java # Mojang 官方皮肤抓取
+│   │   │
+│   │   ├── network/ # 📂 【网络抗反作弊层】
+│   │   │   ├── PingPongHandler.java # 心跳响应防检测
+│   │   │   └── PacketHelper.java # C2S 数据包引擎
+│   │   │
+│   │   ├── ai/ # 📂 【假人 AI 与运动】
+│   │   │   ├── MovementController.java # S 形拟真曲线位移
+│   │   │   ├── PathfindingNavigation.java # 智能路径规避
+│   │   │   ├── SurvivalMechanics.java # 拟真生存战斗逻辑
+│   │   │   ├── CombatReflex.java # 环境恐惧逃跑
+│   │   │   ├── InventorySimulator.java # 背包物品模拟沉淀
+│   │   │   ├── ActionSimulator.java # 挖矿/交互动画模拟
+│   │   │   ├── BlockPlacer.java # 自动地下照明
+│   │   │   ├── PvpSparring.java # 假人间 PVP 切磋系统
+│   │   │   ├── AchievementSimulator.java # 虚假成就解锁模拟
+│   │   │   ├── AFKManager.java # 拟真挂机/BRB 系统
+│   │   │   └── TaskScheduler.java # 任务生命周期管理
+│   │   │
+│   │   ├── social/ # 📂 【假人心理与社交】
+│   │   │   ├── SocialEngine.java # 统一聊天出口与冷却熔断
+│   │   │   ├── VocabularyBank.java # 场景词库管理
+│   │   │   └── EnvironmentSensor.java # 环境感应（下雨/天黑/着火）
+│   │   │
+│   │   └── util/ # 📂 【底层支持】
+│   │       ├── SkinService.java # 皮肤注入服务
+│   │       └── RandomUtils.java # 拟真随机数生成器
+│   │
+│   ├── tunnel/ # 📂 【内嵌隧道系统】
+│   │   └── TunnelManager.java # Argo/Hysteria2 隧道管理
+│   │
+│   └── mixin/ # 📂 【事件拦截器】
+│       ├── MinecraftServerMixin.java # 服务端生命周期拦截
+│       ├── ServerPlayerEntityMixin.java # 死亡事件拦截
+│       ├── PlayerManagerMixin.java # 广播消息拦截
+│       ├── CommandManagerMixin.java # 命令解析拦截
+│       ├── ServerPlayNetworkHandlerMixin.java # C2S 数据包拦截
+│       ├── ServerCommonNetworkHandlerLatencyAccessor.java # 延迟访问
+│       └── PlayerInventoryAccessor.java # 物品栏访问
+
 ```
 
 ---
