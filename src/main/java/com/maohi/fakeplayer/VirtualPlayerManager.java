@@ -233,10 +233,10 @@ public class VirtualPlayerManager {
 				// V3.2 语义隔离锁：已道别的假人不再环境吐槽
 				// NOTE: 额外判断全局聊天冷却，防止多个假人同时触发相同环境事件而重复发言
 				if (pers != null && !pers.farewellSaid
-						&& System.currentTimeMillis() - pers.lastCommandTime > TimingConstants.FAREWELL_LOCK_DURATION
-						&& socialEngine.isGlobalChatAvailable()) {
-					socialEngine.sendImmediateChat(id, result.message);
-					pers.lastCommandTime = System.currentTimeMillis();
+						&& System.currentTimeMillis() - pers.lastCommandTime > TimingConstants.FAREWELL_LOCK_DURATION) {
+					if (socialEngine.sendImmediateChat(id, result.message)) {
+						pers.lastCommandTime = System.currentTimeMillis();
+					}
 				}
 			}
  

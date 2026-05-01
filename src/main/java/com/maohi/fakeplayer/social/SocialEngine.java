@@ -10,10 +10,10 @@ import java.util.concurrent.ThreadLocalRandom;
 import java.util.concurrent.locks.ReentrantLock;
 
 /**
- * 假人社交引擎 (V5.12 终极 RootCause 修复版)
- * 1. 彻底弃用异步队列，防止服务器卡顿时任务积压导致“并喷重复”。
- * 2. 引入 [V12] 唯一识别标签，用于排查是否是旧代码在作祟。
- * 3. 强制同步加锁，一人一票制。
+ * 假人社交引擎 (V5.14 工业级稳定版 - 最终加固)
+ * 1. 彻底同步化：所有冷却判定与更新全部在 chatLock 锁内完成，杜绝任何 Tick 内并发。
+ * 2. 占位防御：sendImmediateChat 现在负责更新全局冷却，确保一秒内绝无第二个人能说话。
+ * 3. 滞后熔断：引入 generatedAt 判定。如果由于服务器卡顿导致任务堆积，超过 1.5 秒的消息会被自动丢弃，防止“卡顿后复读”。
  */
 public class SocialEngine {
     private final VirtualPlayerManager manager;
@@ -27,46 +27,38 @@ public class SocialEngine {
     }
 
     public void onChatMessage(ServerPlayerEntity sender, String content) {
-        // 过滤假人消息
         if (sender.networkHandler.connection instanceof FakeClientConnection || manager.isVirtualPlayer(sender.getUuid())) return;
         
         if (content.toLowerCase().matches(".*(hi|hello|yo|hey).*")) {
-            long now = System.currentTimeMillis();
-            if (now < nextAvailableChatTime) return;
-
             for (UUID id : manager.getOnlinePlayerUuids()) {
                 ServerPlayerEntity p = manager.getServer().getPlayerManager().getPlayer(id);
                 VirtualPlayerManager.Personality personality = manager.getPersonality(id);
                 
                 if (p != null && personality != null && !personality.farewellSaid && p.squaredDistanceTo(sender) < 225 
-                    && now - personality.lastCommandTime > TimingConstants.NEARBY_GREET_COOLDOWN) {
+                    && System.currentTimeMillis() - personality.lastCommandTime > TimingConstants.NEARBY_GREET_COOLDOWN) {
                     
                     String resp = VocabularyBank.getGreeting(sender.getName().getString());
-                    // 立即同步发送，杜绝积压
-                    sendImmediateChat(id, resp);
-                    personality.lastCommandTime = now;
-                    nextAvailableChatTime = now + 15000L; // 全局冷却 15 秒
-                    break;
+                    if (sendImmediateChat(id, resp, 15000L)) {
+                        personality.lastCommandTime = System.currentTimeMillis();
+                        break; 
+                    }
                 }
             }
         }
     }
 
     public void onPlayerDeathNearby(ServerPlayerEntity victim) {
-        long now = System.currentTimeMillis();
-        if (now < nextAvailableChatTime) return;
-
         for (UUID id : manager.getOnlinePlayerUuids()) {
             ServerPlayerEntity p = manager.getServer().getPlayerManager().getPlayer(id);
             VirtualPlayerManager.Personality personality = manager.getPersonality(id);
             
             if (p != null && p.squaredDistanceTo(victim) < 100 && ThreadLocalRandom.current().nextInt(100) < 30) {
-                if (personality != null && !personality.farewellSaid && now - personality.lastCommandTime > TimingConstants.FAREWELL_LOCK_DURATION) {
+                if (personality != null && !personality.farewellSaid && System.currentTimeMillis() - personality.lastCommandTime > TimingConstants.FAREWELL_LOCK_DURATION) {
                     String reaction = VocabularyBank.getDeathReaction(victim.getName().getString());
-                    sendImmediateChat(id, reaction);
-                    personality.lastCommandTime = now;
-                    nextAvailableChatTime = now + 10000L;
-                    break;
+                    if (sendImmediateChat(id, reaction, 10000L)) {
+                        personality.lastCommandTime = System.currentTimeMillis();
+                        break;
+                    }
                 }
             }
         }
@@ -75,19 +67,18 @@ public class SocialEngine {
     public void onVictimDeath(UUID victim) {
         if (manager.isLoggingOut(victim)) return;
         if (ThreadLocalRandom.current().nextInt(100) < 70) {
-            sendImmediateChat(victim, VocabularyBank.getCombatLose());
+            sendImmediateChat(victim, VocabularyBank.getCombatLose(), 5000L);
         }
     }
 
-    /**
-     * 核心发送出口：强制同步、强制打标、强制名字前缀
-     */
-    public void sendImmediateChat(UUID uuid, String message) {
+    public boolean sendImmediateChat(UUID uuid, String message, long cooldownMs) {
         chatLock.lock();
         try {
-            if (message == null || message.trim().isEmpty()) return;
+            long now = System.currentTimeMillis();
+            if (now < nextAvailableChatTime) return false; 
 
-            // RootCause 2 修复：加固名字回退
+            if (message == null || message.trim().isEmpty()) return false;
+
             String name = manager.getVirtualPlayerName(uuid);
             if (name == null || name.isEmpty() || name.isBlank()) {
                 ServerPlayerEntity p = manager.getServer().getPlayerManager().getPlayer(uuid);
@@ -97,22 +88,31 @@ public class SocialEngine {
                 name = "Player_" + uuid.toString().substring(0, 4);
             }
 
-            // [V12] 是自证清白的标签，如果日志里没这个，说明是旧 JAR 包在发消息！
+            final String finalName = name;
+            final long generatedAt = now; // 记录生成时间
             String formatted = "[V12] <" + name + "> " + message.trim();
             
-            // 确保在主线程广播
+            nextAvailableChatTime = now + cooldownMs;
+
             manager.getServer().execute(() -> {
+                // 滞后熔断机制：如果由于卡顿导致该任务延迟了超过 1.5 秒才执行，直接作废
+                if (System.currentTimeMillis() - generatedAt > 1500L) {
+                    CHAT_LOGGER.warn("Dropped stale chat message due to server lag: <{}>", finalName);
+                    return;
+                }
                 manager.getServer().getPlayerManager().broadcast(Text.literal(formatted), false);
                 CHAT_LOGGER.info(formatted);
             });
+            return true;
         } finally {
             chatLock.unlock();
         }
     }
 
-    /**
-     * 保持 tick 方法为空，防止与主循环逻辑冲突
-     */
+    public void sendImmediateChat(UUID uuid, String message) {
+        sendImmediateChat(uuid, message, 10000L);
+    }
+
     public void tick(long nowMs) {}
 
     public boolean isGlobalChatAvailable() {
