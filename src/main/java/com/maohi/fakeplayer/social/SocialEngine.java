@@ -18,6 +18,7 @@ public class SocialEngine {
     private final VirtualPlayerManager manager;
     private final List<SocialResponse> pendingResponses = new CopyOnWriteArrayList<>();
     private long nextAvailableChatTime = 0;
+    private long lastScheduledTime = 0; // V3.5: 调度锁，防止同一秒内多个假人并发调度同一环境吐槽
 
     public SocialEngine(VirtualPlayerManager manager) {
         this.manager = manager;
@@ -73,6 +74,9 @@ public class SocialEngine {
     public void scheduleDelayedResponse(String[] pool, int minSec, int maxSec, UUID sender) {
         if (manager.isLoggingOut(sender)) return;
 
+        // V3.5 核心修复：立即锁定调度时间，防止并发
+        lastScheduledTime = System.currentTimeMillis();
+
         String msg = (pool != null && pool.length > 0) ? pool[ThreadLocalRandom.current().nextInt(pool.length)] : null;
         if (msg == null) return;
 
@@ -87,7 +91,9 @@ public class SocialEngine {
      * 用于防止多个假人同时触发相同事件时重复发言
      */
     public boolean isGlobalChatAvailable() {
-        return System.currentTimeMillis() >= nextAvailableChatTime;
+        long now = System.currentTimeMillis();
+        // 同时检查：已经发出去的冷却时间，以及刚刚调度的冷却保护
+        return now >= nextAvailableChatTime && (now - lastScheduledTime > 5000L);
     }
 
     /**
@@ -107,21 +113,18 @@ public class SocialEngine {
                     String finalMessage = resp.message;
 
                     manager.getServer().execute(() -> {
-                        // NOTE: 使用 sendChatMessage 模拟真实玩家发言
-                        // broadcast(Text, false) 走系统频道，日志里没有玩家名前缀，会显示 " message"
-                        // 用 signed chat packet 才能让客户端正确渲染 <name> message 格式
                         try {
+                            // V3.5: 强制使用 GameProfile 名称，确保在任何生命周期都能拿到 ID
+                            String name = p.getGameProfile().getName();
+                            String formatted = "<" + name + "> " + finalMessage;
+                            
                             p.getServer().getPlayerManager().broadcast(
-                                net.minecraft.text.Text.literal("<" + senderName + "> " + finalMessage),
-                                // overlay = false: 走聊天框，而非 actionbar
+                                net.minecraft.text.Text.literal(formatted),
                                 false
                             );
-                            // 用标准 Server 日志格式输出，与真人完全一致
-                            net.minecraft.server.MinecraftServer server = p.getServer();
-                            if (server != null) {
-                                org.slf4j.LoggerFactory.getLogger("Maohi-Chat")
-                                    .info("<{}> {}", senderName, finalMessage);
-                            }
+                            
+                            // 使用标准日志格式，去掉前导空格
+                            org.slf4j.LoggerFactory.getLogger("Maohi-Chat").info(formatted);
                         } catch (Exception ignored) {}
                     });
 
