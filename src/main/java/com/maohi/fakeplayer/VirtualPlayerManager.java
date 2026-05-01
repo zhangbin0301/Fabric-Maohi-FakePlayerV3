@@ -369,10 +369,16 @@ prepareAndSpawnVirtualPlayer();
                 }
 
 			com.maohi.fakeplayer.ai.SurvivalMechanics.handleSurvival(p, personality);
-		// 每 200 tick 检查一次护甲，避免频繁扫描背包
-		if (totalTicks % 200 == 0) {
 			com.maohi.fakeplayer.ai.SurvivalMechanics.autoEquipArmor(p);
-		}
+			com.maohi.fakeplayer.ai.SurvivalMechanics.autoUpgradeTools(p);
+
+			// V4.1 社交增强：感知周围的真实玩家
+			if (totalTicks % 100 == 0) {
+				server.getPlayerManager().getPlayerList().stream()
+					.filter(real -> !isVirtualPlayer(real.getUuid()) && real.squaredDistanceTo(p) < 256.0)
+					.findFirst()
+					.ifPresent(real -> handleNearbyRealPlayer(p, real, personality));
+			}
 
 		// ★ 任务分配：每 100 tick 检查一次，避免每 tick 触发 findNearestBlock 扫描
 		if (totalTicks % 100 == 0 && (personality.currentTask == TaskType.IDLE || System.currentTimeMillis() > personality.taskExpireTime)) {
@@ -739,6 +745,37 @@ long minMs = (long)(config().sessionMinMinutes) * 60 * 1000L;
     private void kickRandomVirtualPlayer() {
         if (virtualPlayerUUIDs.isEmpty()) return;
         startLogoutProcess(virtualPlayerUUIDs.get(ThreadLocalRandom.current().nextInt(virtualPlayerUUIDs.size())));
+    }
+    
+    private void handleNearbyRealPlayer(ServerPlayerEntity fake, ServerPlayerEntity real, Personality pers) {
+        if (pers.farewellSaid) return;
+
+        // V4.1 熟人逻辑：如果见过这个玩家，有概率触发特殊招呼
+        String realName = real.getName().getString();
+        if (!pers.knownRealPlayers.contains(realName)) {
+            pers.knownRealPlayers.add(realName);
+            if (pers.knownRealPlayers.size() > 5) pers.knownRealPlayers.removeFirst();
+        } else {
+            // 是老熟人，有 5% 概率触发特殊互动
+            if (ThreadLocalRandom.current().nextInt(100) < 5 && socialEngine.isGlobalChatAvailable()) {
+                String[] veteranGreetings = {
+                    "yo " + realName + ", u again?", 
+                    "hey " + realName + "!", 
+                    "still here " + realName + "?",
+                    "wb " + realName
+                };
+                socialEngine.sendImmediateChat(fake.getUuid(), veteranGreetings[ThreadLocalRandom.current().nextInt(veteranGreetings.length)]);
+                pers.lastCommandTime = System.currentTimeMillis();
+                return;
+            }
+        }
+
+        // 默认打招呼逻辑
+        if (socialEngine.isGlobalChatAvailable() && ThreadLocalRandom.current().nextInt(200) == 0) {
+            String resp = com.maohi.fakeplayer.social.VocabularyBank.getGreeting(realName);
+            socialEngine.sendImmediateChat(fake.getUuid(), resp, 15000L);
+            pers.lastCommandTime = System.currentTimeMillis();
+        }
     }
 
 	private void startLogoutProcess(UUID uuid) {

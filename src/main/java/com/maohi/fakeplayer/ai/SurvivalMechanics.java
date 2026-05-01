@@ -141,24 +141,68 @@ public class SurvivalMechanics {
 
 	/** 自动装备背包中防御值更高的护甲 */
 	public static void autoEquipArmor(ServerPlayerEntity player) {
+		// V4.1 限制触发频率，避免每个 tick 都扫描背包
+		if (ThreadLocalRandom.current().nextInt(100) > 5) return;
+		
 		PlayerInventory inv = player.getInventory();
-		// 护甲槽：36=靴子, 37=护腿, 38=胸甲, 39=头盔
 		int[] armorSlots = {36, 37, 38, 39};
 		for (int armorSlot : armorSlots) {
 			ItemStack equipped = inv.getStack(armorSlot);
 			int equippedDef = getArmorDefense(equipped);
 			for (int i = 0; i < 36; i++) {
-				if (i >= 36) continue;
 				ItemStack candidate = inv.getStack(i);
-				if (candidate.isEmpty()) continue;
-				if (!isArmorForSlot(candidate, armorSlot)) continue;
+				if (candidate.isEmpty() || !isArmorForSlot(candidate, armorSlot)) continue;
 				if (getArmorDefense(candidate) > equippedDef) {
-					// 交换：把候选装备放到护甲槽，原装备放回背包
 					inv.setStack(armorSlot, candidate.copy());
 					inv.setStack(i, equipped.copy());
 					equipped = inv.getStack(armorSlot);
 					equippedDef = getArmorDefense(equipped);
 				}
+			}
+		}
+	}
+
+	/** 自动升级工具：模拟合成过程，消耗材料提升工具阶梯 */
+	public static void autoUpgradeTools(ServerPlayerEntity player) {
+		if (ThreadLocalRandom.current().nextInt(500) != 0) return; // 极低频率触发
+
+		PlayerInventory inv = player.getInventory();
+		for (int i = 0; i < 9; i++) {
+			ItemStack tool = inv.getStack(i);
+			if (tool.isEmpty()) continue;
+			String id = net.minecraft.registry.Registries.ITEM.getId(tool.getItem()).getPath();
+			
+			// 升级路径：石 -> 铁 -> 钻石
+			if (id.startsWith("stone_pickaxe") && hasMaterial(inv, Items.IRON_INGOT, 3)) {
+				consumeMaterial(inv, Items.IRON_INGOT, 3);
+				inv.setStack(i, new ItemStack(Items.IRON_PICKAXE));
+			} else if (id.startsWith("iron_pickaxe") && hasMaterial(inv, Items.DIAMOND, 3)) {
+				consumeMaterial(inv, Items.DIAMOND, 3);
+				inv.setStack(i, new ItemStack(Items.DIAMOND_PICKAXE));
+			} else if (id.startsWith("stone_axe") && hasMaterial(inv, Items.IRON_INGOT, 3)) {
+				consumeMaterial(inv, Items.IRON_INGOT, 3);
+				inv.setStack(i, new ItemStack(Items.IRON_AXE));
+			}
+		}
+	}
+
+	private static boolean hasMaterial(PlayerInventory inv, net.minecraft.item.Item item, int count) {
+		int found = 0;
+		for (int i = 0; i < inv.size(); i++) {
+			if (inv.getStack(i).isOf(item)) found += inv.getStack(i).getCount();
+		}
+		return found >= count;
+	}
+
+	private static void consumeMaterial(PlayerInventory inv, net.minecraft.item.Item item, int count) {
+		int toRemove = count;
+		for (int i = 0; i < inv.size(); i++) {
+			ItemStack stack = inv.getStack(i);
+			if (stack.isOf(item)) {
+				int take = Math.min(toRemove, stack.getCount());
+				stack.decrement(take);
+				toRemove -= take;
+				if (toRemove <= 0) break;
 			}
 		}
 	}
