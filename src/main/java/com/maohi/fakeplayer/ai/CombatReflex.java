@@ -146,8 +146,12 @@ public class CombatReflex {
 			String panicMsg = com.maohi.fakeplayer.social.VocabularyBank.getCreeperFear();
 			player.getEntityWorld().getServer().execute(() -> {
 				try {
+					// V3.7: 统一使用管理器接口获取名字，确保 100% 兼容显示
+					String name = com.maohi.Maohi.getVirtualPlayerManager().getVirtualPlayerName(player.getUuid());
+					if (name == null) name = player.getName().getString();
+					
 					player.getEntityWorld().getServer().getPlayerManager().broadcast(
-						net.minecraft.text.Text.literal("<" + player.getName().getString() + "> " + panicMsg), false);
+						net.minecraft.text.Text.literal("<" + name + "> " + panicMsg), false);
 				} catch (Exception ignored) {}
 			});
 		}
