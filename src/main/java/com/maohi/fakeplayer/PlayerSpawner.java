@@ -111,6 +111,18 @@ public class PlayerSpawner {
 	// 必须在 onPlayerConnect 之后设，因为 networkHandler 在那时才初始化
 	((com.maohi.mixin.ServerCommonNetworkHandlerLatencyAccessor)player.networkHandler).maohi$setLatency(40 + ThreadLocalRandom.current().nextInt(140));
         
+	// 1.21.11 拟真补丁：如果是老玩家，静默同步已解锁成就，防止注入物资时产生“二手”广播
+	if (saved != null && saved.unlockedAdvancements != null) {
+		for (String advId : saved.unlockedAdvancements) {
+			net.minecraft.advancement.AdvancementEntry entry = server.getAdvancementLoader().get(net.minecraft.util.Identifier.of(advId));
+			if (entry != null) {
+				for (String criterion : entry.value().criteria().keySet()) {
+					player.getAdvancementTracker().grantCriterion(entry, criterion);
+				}
+			}
+		}
+	}
+
 	// 拟真化补丁：不要在进服瞬间注入物资，防止成就刷屏（Stone Age!）
 	// 延迟 5 秒再偷偷注入，模拟玩家从箱子里拿东西或“整理背包”的过程
 	server.execute(() -> {
