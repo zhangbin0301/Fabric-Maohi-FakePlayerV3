@@ -9,8 +9,6 @@ import java.nio.charset.StandardCharsets;
 /**
  * HTTP 请求工具类 (V3)
  */
- * 假人系统与隧道系统共用，无反向依赖
- */
 public final class HttpUtils {
 
     private HttpUtils() {} // 工具类禁止实例化

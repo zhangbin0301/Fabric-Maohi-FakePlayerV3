@@ -14,12 +14,6 @@ import java.util.concurrent.ThreadLocalRandom;
 /**
  * 战斗反射系统 (V3)
  */
- * 保留的拟真特性：
- * - 苦力怕优先躲避
- * - 攻击冷却遵守（只在冷却≥90%时才攻击）
- * - 转向对准目标
- * - 逃跑延迟模拟
- */
 public class CombatReflex {
 
 	/** 操作延迟：假人不会"零延迟"反应，模拟 100-300ms 人类反应时间 */
