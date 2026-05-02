@@ -97,7 +97,7 @@ public class SocialEngine {
             if (name == null || name.trim().isEmpty()) {
                 if (p != null) {
                     // 1. 优先取 GameProfile 名 (直接访问 name 属性或通过 getEntityName)
-                    name = p.getEntityName(); 
+                    name = p.getName().getString();
                 }
             }
             if (name == null || name.trim().isEmpty()) {
