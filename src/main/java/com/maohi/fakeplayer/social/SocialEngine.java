@@ -92,31 +92,38 @@ public class SocialEngine {
             if (message == null || message.trim().isEmpty()) return false;
 
             String name = manager.getVirtualPlayerName(uuid);
-            if (name == null || name.isEmpty() || name.isBlank()) {
-                ServerPlayerEntity p = manager.getServer().getPlayerManager().getPlayer(uuid);
-                if (p != null) name = p.getName().getString();
-            }
+            ServerPlayerEntity p = manager.getServer().getPlayerManager().getPlayer(uuid);
+            
+            // 增强型名字获取逻辑：双重保障
             if (name == null || name.isEmpty()) {
-                name = "Player_" + uuid.toString().substring(0, 4);
+                if (p != null) {
+                    name = p.getName().getString();
+                } else {
+                    name = "Player_" + uuid.toString().substring(0, 4);
+                }
             }
 
             final String finalName = name;
-            final long generatedAt = now; // 记录生成时间
-            String formatted = "<" + name + "> " + message.trim();
+            final String finalMessage = message.trim();
+            final long generatedAt = now;
             
             nextAvailableChatTime = now + cooldownMs;
 
             manager.getServer().execute(() -> {
-                // 滞后熔断机制：如果由于卡顿导致该任务延迟了超过 1.5 秒才执行，直接作废
                 if (System.currentTimeMillis() - generatedAt > 1500L) {
-                    CHAT_LOGGER.warn("Dropped stale chat message due to server lag: <{}>", finalName);
                     return;
                 }
-                // 逐个发送给所有在线玩家，避免 broadcast() 吞掉 <name> 标签
-                for (net.minecraft.server.network.ServerPlayerEntity online : manager.getServer().getPlayerManager().getPlayerList()) {
-                    online.sendMessage(Text.literal(formatted));
+                
+                // 构造最接近原版的聊天格式
+                Text chatText = Text.literal("<" + finalName + "> " + finalMessage);
+                
+                // 1. 广播给所有玩家
+                for (ServerPlayerEntity online : manager.getServer().getPlayerManager().getPlayerList()) {
+                    online.sendMessage(chatText);
                 }
-                manager.getServer().sendMessage(Text.literal(formatted));
+                
+                // 2. 专门为控制台打印一条标准的 INFO 日志，确保审计记录完美
+                org.slf4j.LoggerFactory.getLogger("MaohiChat").info("<{}> {}", finalName, finalMessage);
             });
             return true;
         } finally {
