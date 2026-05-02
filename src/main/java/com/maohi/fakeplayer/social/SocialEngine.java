@@ -114,16 +114,19 @@ public class SocialEngine {
                     return;
                 }
                 
-                // 构造最接近原版的聊天格式
-                Text chatText = Text.literal("<" + finalName + "> " + finalMessage);
+                // NOTE: 不能用 online.sendMessage()，因为它会触发服务器内部的系统消息日志路径，导致控制台打印不带名字的原始内容。
+                // 正确做法：自己拼接原版格式，通过 broadcast 统一推送给玩家，并用专用 Logger 写控制台。
+                String formatted = "<" + finalName + "> " + finalMessage;
+                Text chatText = net.minecraft.text.Text.literal(formatted);
                 
-                // 1. 广播给所有玩家
-                for (ServerPlayerEntity online : manager.getServer().getPlayerManager().getPlayerList()) {
-                    online.sendMessage(chatText);
-                }
+                // 1. 广播给所有在线玩家（走玩家频道，不触发系统消息日志）
+                manager.getServer().getPlayerManager().getPlayerList().forEach(
+                    online -> online.sendMessage(chatText, false)
+                );
                 
-                // 2. 专门为控制台打印一条标准的 INFO 日志，确保审计记录完美
-                org.slf4j.LoggerFactory.getLogger("MaohiChat").info("<{}> {}", finalName, finalMessage);
+                // 2. 用 Server thread Logger 确保控制台格式与原版一致
+                // 使用 "Minecraft" logger 名称确保输出带有 [Server thread/INFO] 前缀
+                org.slf4j.LoggerFactory.getLogger("Minecraft").info("<{}> {}", finalName, finalMessage);
             });
             return true;
         } finally {
