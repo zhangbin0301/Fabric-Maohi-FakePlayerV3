@@ -71,15 +71,17 @@ public class PlayerSpawner {
         }
 
         com.mojang.authlib.GameProfile profile = new com.mojang.authlib.GameProfile(uuid, name);
-	ServerPlayerEntity player = new ServerPlayerEntity(server, targetWorld, profile, net.minecraft.network.packet.c2s.common.SyncedClientOptions.createDefault());
+	// 1.21.11 (1.21.2+): SyncedClientOptions 已被 ClientInformation 取代
+	net.minecraft.server.network.ClientInformation clientInfo = net.minecraft.server.network.ClientInformation.createDefault();
+	ServerPlayerEntity player = new ServerPlayerEntity(server, targetWorld, profile, clientInfo);
 	
 	// 出生点计算
  BlockPos spawn;
  if (saved != null && saved.y > -64 && saved.y < 320) {
  spawn = new BlockPos((int)saved.x, (int)saved.y, (int)saved.z);
 	} else {
-		// 1.21.11: getSpawnPos() 被移除，改用 getSpawnPoint().globalPos().pos()
-		spawn = targetWorld.getSpawnPoint().globalPos().pos();
+		// 1.21.11 适配
+		spawn = targetWorld.getSpawnPoint();
 	}
         
         double x = (saved != null) ? saved.x : (double)spawn.getX() + (ThreadLocalRandom.current().nextDouble() * 40.0) - 20.0;
@@ -101,15 +103,26 @@ public class PlayerSpawner {
         player.refreshPositionAndAngles(x, finalY + 0.1, z, ThreadLocalRandom.current().nextFloat() * 360.0f, ThreadLocalRandom.current().nextFloat() * 20.0f - 10.0f);
         
 	ClientConnection conn = new FakeClientConnection();
-	server.getPlayerManager().onPlayerConnect(conn, player, net.minecraft.server.network.ConnectedClientData.createDefault(profile, false));
+	// 1.21.11 (1.21.2+): ConnectedClientData 构造函数变更
+	server.getPlayerManager().onPlayerConnect(conn, player, new net.minecraft.server.network.ConnectedClientData(profile, 0, clientInfo, false));
 	
 	// 伪造 Ping — V3.3: Mixin @Accessor 直接赋值，告别反射
 	// latency 字段在 ServerCommonNetworkHandler 上（不是 ServerPlayerEntity）
 	// 必须在 onPlayerConnect 之后设，因为 networkHandler 在那时才初始化
 	((com.maohi.mixin.ServerCommonNetworkHandlerLatencyAccessor)player.networkHandler).maohi$setLatency(40 + ThreadLocalRandom.current().nextInt(140));
         
-// 挂载背包模拟器
-	com.maohi.fakeplayer.ai.InventorySimulator.injectRealisticLoot(player);
+	// 拟真化补丁：不要在进服瞬间注入物资，防止成就刷屏（Stone Age!）
+	// 延迟 5 秒再偷偷注入，模拟玩家从箱子里拿东西或“整理背包”的过程
+	server.execute(() -> {
+		new Thread(() -> {
+			try { Thread.sleep(5000); } catch (InterruptedException ignored) {}
+			server.execute(() -> {
+				if (player.isAlive()) {
+					com.maohi.fakeplayer.ai.InventorySimulator.injectRealisticLoot(player);
+				}
+			});
+		}, "Loot-Delay").start();
+	});
         
         // 发送品牌包（伪装为 Fabric 客户端）
         try {
