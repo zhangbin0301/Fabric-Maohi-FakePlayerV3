@@ -18,7 +18,6 @@ import java.util.concurrent.locks.ReentrantLock;
 public class SocialEngine {
     private final VirtualPlayerManager manager;
     private final ReentrantLock chatLock = new ReentrantLock();
-    private static final org.slf4j.Logger CHAT_LOGGER = org.slf4j.LoggerFactory.getLogger("MaohiChat");
     
     private long nextAvailableChatTime = 0;
 
@@ -97,12 +96,12 @@ public class SocialEngine {
             // 增强型名字获取逻辑：三重保障
             if (name == null || name.trim().isEmpty()) {
                 if (p != null) {
-                    name = p.getGameProfile().getName(); // 1. 优先取原始 Profile 名
-                    if (name == null || name.isEmpty()) name = p.getName().getString(); // 2. 备选 Text 名
+                    // 1. 优先取 GameProfile 名 (直接访问 name 属性或通过 getEntityName)
+                    name = p.getEntityName(); 
                 }
             }
             if (name == null || name.trim().isEmpty()) {
-                name = "Player_" + uuid.toString().substring(0, 4); // 3. 终极保底
+                name = "Player_" + uuid.toString().substring(0, 4); // 2. 终极保底
             }
             
             // 彻底清理名字中的潜在换行符
