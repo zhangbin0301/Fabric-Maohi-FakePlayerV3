@@ -49,8 +49,8 @@ public final class TimingConstants {
 	public static final long AFK_CHECK_JITTER = 600_000L;
 
 	// === 成就解锁（累计在线毫秒）===
-	/** 第一档成就 (Stone Age 挖石头)：在线1分钟 (60,000ms) */
-	public static final long ACHIEVEMENT_TIER1_PLAYTIME = 60_000L;
+	/** 第一档成就 (Stone Age 挖石头)：在线3分钟 (180_000ms) */
+	public static final long ACHIEVEMENT_TIER1_PLAYTIME = 180_000L;
 	/** 第二档成就 (Getting an Upgrade 石镐)：在线3分钟 (180,000ms) */
 	public static final long ACHIEVEMENT_TIER2_PLAYTIME = 180_000L;
 	/** 第三档成就 (Acquire Hardware 熔铁)：在线10分钟 (600,000ms) */
