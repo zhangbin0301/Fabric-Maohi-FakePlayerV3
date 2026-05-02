@@ -94,16 +94,19 @@ public class SocialEngine {
             String name = manager.getVirtualPlayerName(uuid);
             ServerPlayerEntity p = manager.getServer().getPlayerManager().getPlayer(uuid);
             
-            // 增强型名字获取逻辑：双重保障
-            if (name == null || name.isEmpty()) {
+            // 增强型名字获取逻辑：三重保障
+            if (name == null || name.trim().isEmpty()) {
                 if (p != null) {
-                    name = p.getName().getString();
-                } else {
-                    name = "Player_" + uuid.toString().substring(0, 4);
+                    name = p.getGameProfile().getName(); // 1. 优先取原始 Profile 名
+                    if (name == null || name.isEmpty()) name = p.getName().getString(); // 2. 备选 Text 名
                 }
             }
-
-            final String finalName = name;
+            if (name == null || name.trim().isEmpty()) {
+                name = "Player_" + uuid.toString().substring(0, 4); // 3. 终极保底
+            }
+            
+            // 彻底清理名字中的潜在换行符
+            final String finalName = name.replaceAll("[\\r\\n]", "").trim();
             final String finalMessage = message.trim();
             final long generatedAt = now;
             
@@ -122,9 +125,10 @@ public class SocialEngine {
                     online -> online.sendMessage(chatText, false)
                 );
                 
-                // 2. 终极修复：直接向标准输出打印。这是确保控制台日志出现 [<Name> msg] 的最稳妥方案
-                // 这样能避开所有日志框架的过滤，格式与原版完全一致
-                System.out.println("[" + java.time.LocalTime.now().format(java.time.format.DateTimeFormatter.ofPattern("HH:mm:ss")) + "] [Server thread/INFO]: <" + finalName + "> " + finalMessage);
+                // 2. 终极修复：直接向标准输出打印。
+                // 注意：不要手动加时间戳和 [INFO] 前缀，服务器会自动加。
+                // 只打印标准聊天内容格式: <Name> Message
+                System.out.println("<" + finalName + "> " + finalMessage);
             });
             return true;
         } finally {
