@@ -60,8 +60,9 @@ public final class RandomUtils {
 				return (seeded.nextBoolean() ? FIRST_NAMES[seeded.nextInt(FIRST_NAMES.length)] : ROOTS[seeded.nextInt(ROOTS.length)]) + SUFFIXES[seeded.nextInt(SUFFIXES.length)];
 			}
 		} else {
-			// 40% 预设库
-			return COMMON_POOL[rand.nextInt(COMMON_POOL.length)];
+			// 40% Root+数字组合，避免固定名字池碰撞
+			java.util.Random seeded = new java.util.Random(seed + System.nanoTime());
+			return ROOTS[seeded.nextInt(ROOTS.length)] + (100 + seeded.nextInt(900));
 		}
 	}
 
