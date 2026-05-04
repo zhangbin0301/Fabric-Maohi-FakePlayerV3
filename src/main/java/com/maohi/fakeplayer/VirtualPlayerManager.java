@@ -478,9 +478,22 @@ prepareAndSpawnVirtualPlayer();
         virtualPlayerNames.put(player.getUuid(), name);
         // 恢复记忆：如果是老玩家回归，加载其保存的个性与成就记录
 	Personality pState = (saved != null && saved.personality != null) ? saved.personality : new Personality();
+	
+	// V5.5: 初始化成长阶段与时间线
+	if (pState.growthPhase == null) { pState.growthPhase = GrowthPhase.STONE_AGE; }
+	if (pState.phaseEnteredAt <= 0L) { pState.phaseEnteredAt = System.currentTimeMillis(); }
+	if (pState.firstJoinAt <= 0L) { pState.firstJoinAt = System.currentTimeMillis(); }
+	if (saved == null) {
+		pState.growthPhase = GrowthPhase.STONE_AGE;
+		pState.phaseEnteredAt = System.currentTimeMillis();
+		pState.firstJoinAt = System.currentTimeMillis();
+		pState.hasMinedDiamondOre = false;
+		pState.lastDiamondOreMinedAt = 0L;
+	}
+
 	pState.hasUnlockedThisSession = false; // 重置会话荣誉限制
 	pState.farewellSaid = false; // V3.2 语义隔离锁重置：新会话可以正常社交
-        playerPersonalities.put(player.getUuid(), pState);
+	playerPersonalities.put(player.getUuid(), pState);
         fakeConnections.put(player.getUuid(), conn);
         loginTimes.put(player.getUuid(), System.currentTimeMillis());
         
@@ -855,6 +868,13 @@ long minMs = (long)(config().sessionMinMinutes) * 60 * 1000L;
 
 		// M2 fix: per-player 攻击计时（从 CombatReflex static 迁移而来）
 		public long lastAttackTick = 0;
+
+		// V5.5 拟真加固：成长阶段追踪
+		public GrowthPhase growthPhase = GrowthPhase.STONE_AGE;
+		public long phaseEnteredAt = 0L;
+		public long firstJoinAt = 0L;
+		public boolean hasMinedDiamondOre = false; // 是否真正挖到过钻石矿，用来限制 Diamonds! 成就
+		public long lastDiamondOreMinedAt = 0L;
 
 		/** 根据 ServerPlayerEntity 获取对应 Personality（供 CombatReflex 等外部模块调用） */
 		public static Personality get(ServerPlayerEntity player) {
