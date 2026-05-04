@@ -178,6 +178,9 @@ public class InventorySimulator {
 		if (dropped > 0) {
 			com.maohi.fakeplayer.network.PacketHelper.swingHand(player, net.minecraft.util.Hand.MAIN_HAND);
 		}
+		return dropped > 0;
+	}
+
 	/**
 	 * 模拟真人强迫症：整理背包（V5.3）
 	 * 并不是实质性的排序，而是随机交换两个物品的位置，模拟正在挑选或调整布局的行为。
@@ -201,9 +204,6 @@ public class InventorySimulator {
 		if (ThreadLocalRandom.current().nextInt(1000) == 0) {
 			pers.inventoryOcdTicks = 60 + ThreadLocalRandom.current().nextInt(100); // 整理 3-8 秒
 		}
-	}
-
-	return dropped > 0;
 	}
 
 	/** 物品条目（待放入背包的物品） */

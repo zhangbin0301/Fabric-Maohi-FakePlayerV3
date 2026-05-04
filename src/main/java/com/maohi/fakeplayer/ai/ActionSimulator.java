@@ -269,6 +269,8 @@ public class ActionSimulator {
 			// 动作模拟
 			com.maohi.fakeplayer.network.PacketHelper.swingHand(player, net.minecraft.util.Hand.MAIN_HAND);
 		}
+	}
+
 	/**
 	 * 审美建造者模块 (V5.3)
 	 * 真人玩家会进行无意义的地形美化：填平苦力怕坑、修整地面。
