@@ -184,7 +184,7 @@ public class SocialEngine {
             // 1. 蹲起问候 (40% 概率，冷却 1 分钟)
             if (nowMs - pers.lastNonVerbalTick > 60000 && ThreadLocalRandom.current().nextInt(100) < 40) {
                 pers.lastNonVerbalTick = nowMs;
-                final ServerPlayerEntity finalP = p;
+                p.setSneaking(true);
                 pers.sneakRemainingTicks = 4; // 延迟 4 tick (约 200ms) 后自动起身
             }
 

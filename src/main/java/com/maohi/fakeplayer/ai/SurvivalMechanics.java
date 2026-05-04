@@ -156,12 +156,15 @@ public class SurvivalMechanics {
 
 	/**
 	 * 石器时代初始合成：圆石够了就合成镐+剑+斧三件套
+	 * 触发合成状态机，由 tickCrafting() 处理实际合成
 	 */
 	public static void autoCraftStoneTools(ServerPlayerEntity player) {
 		com.maohi.fakeplayer.VirtualPlayerManager.Personality pers = com.maohi.fakeplayer.VirtualPlayerManager.Personality.get(player);
 		if (pers == null || pers.currentTask == com.maohi.fakeplayer.VirtualPlayerManager.TaskType.CRAFTING) return;
 
 		PlayerInventory inv = player.getInventory();
+
+		// 检查已有的工具
 		boolean hasPickaxe = false, hasSword = false, hasAxe = false;
 		for (int i = 0; i < inv.size(); i++) {
 			String id = net.minecraft.registry.Registries.ITEM.getId(inv.getStack(i).getItem()).getPath();
@@ -179,6 +182,8 @@ public class SurvivalMechanics {
 		else if (!hasAxe && hasMaterial(inv, material, needed)) target = Items.STONE_AXE;
 
 		if (target == null) return;
+
+		// 进入合成状态机
 		pers.currentTask = com.maohi.fakeplayer.VirtualPlayerManager.TaskType.CRAFTING;
 		pers.craftingTarget = target;
 		pers.craftingTicks = 40 + ThreadLocalRandom.current().nextInt(20);

@@ -230,6 +230,7 @@ public class ActionSimulator {
 		if (real.isSneaking() && ThreadLocalRandom.current().nextInt(10) < 3) {
 			com.maohi.fakeplayer.VirtualPlayerManager.Personality pers = com.maohi.fakeplayer.VirtualPlayerManager.Personality.get(fake);
 			if (pers != null) {
+				fake.setSneaking(true);
 				pers.sneakRemainingTicks = 4; // 延迟 4 tick 后自动站起
 			}
 		}

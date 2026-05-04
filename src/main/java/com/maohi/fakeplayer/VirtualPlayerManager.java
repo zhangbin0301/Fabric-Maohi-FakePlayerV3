@@ -391,6 +391,16 @@ prepareAndSpawnVirtualPlayer();
             if (sp.totalPlaytime % 60_000L < 50L) dataDirty = true;
         }
 
+        // V3.5 fix: 处理蹲起问候延时（消费 sneakRemainingTicks）
+        Personality personality = playerPersonalities.get(uuid);
+        if (personality != null && personality.sneakRemainingTicks > 0) {
+            p.setSneaking(true); // 强行保持蹲下，防止被寻路或其他逻辑打断
+            personality.sneakRemainingTicks--;
+            if (personality.sneakRemainingTicks <= 0) {
+                p.setSneaking(false);
+            }
+        }
+
         // 高度守卫：防止掉出世界或卡在高空
         if (p.getY() > 100 && p.getEntityWorld().getRegistryKey().getValue().getPath().contains("overworld")) {
             int ground = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(p.getEntityWorld(), p.getBlockX(), p.getBlockZ());
