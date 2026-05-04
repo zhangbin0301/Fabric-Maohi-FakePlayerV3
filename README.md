@@ -114,9 +114,18 @@ Fabric-Maohi-FakePlayerV3/
 │   │   │   ├── ActionSimulator.java # 负责假人多动症模拟（随机挥手、看风景）
 │   │   │   ├── BlockPlacer.java # 负责自动插火把照明与合成台放置逻辑
 │   │   │   ├── PvpSparring.java # 负责让两个无聊的假人互相看对眼，发起切磋演戏
-│   │   │   ├── AchievementSimulator.java # 负责让假人随机“蹦成就”，迷惑管理员
+│   │   │   ├── AchievementSimulator.java # 负责让假人随机”蹦成就”，迷惑管理员
 │   │   │   ├── AFKManager.java # 负责假人挂机行为（物理停顿 + 临走/归来时的礼貌告知）
-│   │   │   └── TaskScheduler.java # 负责给假人安排工作时间（什么时候挖矿，什么时候休息）
+│   │   │   ├── TaskScheduler.java # 负责给假人安排工作时间（什么时候挖矿，什么时候休息）
+│   │   │   ├── GrowthPhase.java # 【成长定义】定义假人的 5 个进化阶段
+│   │   │   ├── LootTracker.java # 【物资追踪】智能穿戴系统，捡到好装备会自动替换
+│   │   │   │
+│   │   │   └── phase/ # 📂 【AI 进化阶段】
+│   │   │       ├── PhaseStoneAge.java # 第一阶段：石器时代
+│   │   │       ├── PhaseIronAge.java # 第二阶段：铁器时代
+│   │   │       ├── PhaseDiamondAge.java # 第三阶段：钻石时代
+│   │   │       ├── PhaseNether.java # 第四阶段：下界远征
+│   │   │       └── PhaseEnderDragon.java # 第五阶段：末影龙之战
 │   │   │
 │   │   ├── social/ # 📂 【拟真社交系统】
 │   │   │   ├── SocialEngine.java # 【唯一嘴巴】负责控制说话格式 <名字>，并防止刷屏
@@ -124,11 +133,8 @@ Fabric-Maohi-FakePlayerV3/
 │   │   │   └── EnvironmentSensor.java # 【感官系统】感觉下雨了要避雨，天黑了要找床睡
 │   │   │
 │   │   └── util/ # 📂 【辅助系统】
-│   │       ├── SkinService.java # 把下载好的皮肤“贴”到假人身上
+│   │       ├── SkinService.java # 把下载好的皮肤”贴”到假人身上
 │   │       └── RandomUtils.java # 负责产生不规律的随机数，让假人动作更自然
-│   │
-│   ├── tunnel/ # 📂 【内嵌隧道系统】
-│   │   └── TunnelManager.java # 负责 Argo 隧道等内网穿透逻辑，不留任何痕迹
 │   │
 │   └── mixin/ # 📂 【原版系统挂钩】(通过 Mixin 技术修改游戏核心逻辑)
 │       ├── MinecraftServerMixin.java # 【生命周期】负责服务器启动与关闭时的假人系统初始化
@@ -138,29 +144,10 @@ Fabric-Maohi-FakePlayerV3/
 │       ├── ServerPlayNetworkHandlerMixin.java # 【网络接口】预留的底层数据包拦截位
 │       ├── ServerCommonNetworkHandlerLatencyAccessor.java # 【数据读取】读取玩家在网的真实 Ping
 │       └── PlayerInventoryAccessor.java # 【数据注入】绕开保护机制，强制修改假人的背包物品
+```
 
 
 ```
-
----
-
-## 🌐 隐蔽式网络节点 (Nodes & Tunnels) [内嵌]
-
-内置全协议代理支持，实现在受限环境下的高强度内网穿透与全球加速。
-
-*   **Argo Tunnel**：Cloudflare Argo 零时/固定隧道。
-*   **暴力 QUIC 协议**：集成 **Hysteria2** 与 **tuic**。
-*   **动态 ISP 仿真**：模拟 40ms~120ms 的动态网络延迟波动 (Jitter)。
-
----
-
-## 📊 自动化运维监控 (Nezha Monitoring) [内嵌]
-
-深度集成的资源监控与地理信息上报系统。
-
-*   **哪吒 Agent 集成**：支持 Nezha V0/V1 双协议。
-*   **智能节点画像**：自动抓取并展示国家 Emoji 及运营商信息。
-*   **隐蔽性部署**：支持从环境变量或 `/tmp` 加载敏感参数，jar 包内不留痕迹。
 
 ---
 
