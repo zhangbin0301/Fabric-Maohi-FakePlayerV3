@@ -1,4 +1,4 @@
-## Maohi FakePlayer V5.7 (ML-Proof Anti-Detection Edition)
+## Maohi FakePlayer V5.21 (Session Distribution Edition)
 
 **打造终极图灵级拟真假人系统 - 完全对抗机器学习检测**
 
@@ -76,8 +76,10 @@ Fabric 配置：依赖 Fabric-API 0.136.0 与 Loader 0.19.2 及以上。
 | `botEnabled` | `true` | **假人总开关** (true: 开启, false: 禁用并清场) |
 | `maxVirtualPlayers` | `6` | 假人最大并发在线容量 |
 | `minVirtualPlayers` | `2` | 任何时刻的最少保底在线人数 |
-| `sessionMinHours` | `0.33` | 假人单次在线最短时长（约20分钟） |
-| `sessionMaxHours` | `2.0` | 假人单次在线最长时长（小时） |
+| `sessionMinMinutes` | `120` | 常规会话时长下限（约 98% 假人落在这段，默认 2h） |
+| `sessionMaxMinutes` | `240` | 常规会话时长上限（约 98% 假人落在这段，默认 4h） |
+| `sessionShortPercent` / `sessionShortMin/MaxMinutes` | `1%` / `45~75` | 短会话段：约 1% 假人一小时内就下线（模拟"上线看看就走"） |
+| `sessionLongPercent` / `sessionLongMin/MaxMinutes` | `1%` / `240~600` | 长会话段：约 1% 假人挂 4~10h，上限硬卡 10h 防止露馅 |
 | `offlineMinMinutes` | `30` | 假人下线休息最短时长（分钟） |
 | `offlineMaxMinutes` | `120` | 假人下线休息最长时长（分钟） |
 | `respawnDelayMinSec` | `5` | 假人死亡后复活最短延迟（秒） |
@@ -97,7 +99,6 @@ Fabric 配置：依赖 Fabric-API 0.136.0 与 Loader 0.19.2 及以上。
 | `TASK_TIMEOUT_WORK` | 10s | 工作（挖矿/砍树）任务超时 |
 | `JITTER_MIN_MS` | 2s | 操作抖动延迟下限 |
 | `JITTER_MAX_MS` | 15s | 操作抖动延迟上限 |
-| `ACHIEVEMENT_TIER1~5` | 5m~50h | 成就解锁阶梯：累计在线时长阈值 |
 
 ### 🛠️ 管理命令 (OP 4)
 
@@ -121,13 +122,23 @@ Fabric-Maohi-FakePlayerV3/
 │   │
 │   ├── common/ # 📂 【底层工具包】
 │   │   ├── HttpUtils.java # 负责从网上下载皮肤、上报节点状态
-│   │   └── JsonUtils.java # 负责读写本地配置文件和玩家存档
+│   │   └── JsonUtils.java # 通用 JSON 解析工具
 │   │
 │   ├── fakeplayer/ # 📂 【假人引擎核心】
 │   │   ├── VirtualPlayerManager.java # 【核心大脑】控制假人什么时候上/下线、去哪、干什么
 │   │   ├── TimingConstants.java # 【时间表】规定了假人说话、动作、任务的各种间隔
 │   │   ├── PlayerSpawner.java # 【出生点】把代码里的假人变成游戏里的实体玩家
 │   │   ├── ProfileFetcher.java # 【皮肤管家】专门去正版服务器下载真实的皮肤数据
+│   │   ├── Personality.java # 【数字灵魂】每个假人的全部运行时状态(任务/记忆/进化属性)
+│   │   ├── SavedPlayer.java # 【存档载体】Gson 持久化的假人档案数据结构
+│   │   ├── TaskType.java # 【任务枚举】IDLE/EXPLORING/MINING/HUNTING 等 9 种任务类型
+│   │   ├── GrowthPhase.java # 【成长定义】定义假人的 5 个进化阶段
+│   │   │
+│   │   ├── storage/ # 📂 【持久化层】
+│   │   │   └── PlayerStorage.java # 玩家存档读写：Gson 序列化 + 原子写入 + 容量裁剪
+│   │   │
+│   │   ├── tick/ # 📂 【tick 工具层】
+│   │   │   └── BlockScanCache.java # findNearestBlock 查找缓存 + MSPT 自适应半径
 │   │   │
 │   │   ├── network/ # 📂 【防检测网络层】
 │   │   │   ├── FakeClientConnection.java # 【网络面具】伪造假人的延迟(Ping)和网络连接
@@ -138,19 +149,27 @@ Fabric-Maohi-FakePlayerV3/
 │   │   │   ├── BehavioralDistributionValidator.java # ⭐ V5.6 机器学习对抗：Box-Muller 正态分布对齐
 │   │   │   ├── MovementController.java # ⭐ V5.7 菲茨定律 + 过冲模拟：4 阶段鼠标轨迹
 │   │   │   ├── PathfindingNavigation.java # 负责危险规避、路径规划与跳跃避障检测
-│   │   │   ├── SurvivalMechanics.java # 负责生存求生、熟练度成长与【全链路隐身合成】
+│   │   │   ├── EatingBehavior.java # 进食/喝药水/远程攻击(use-item 行为子模块)
+│   │   │   ├── EquipmentBehavior.java # 自动装备护甲 + 任务相关工具切换
+│   │   │   ├── CraftingBehavior.java # 全链路隐身合成(开 Crafting 窗口 + 挥手 + 结算)
+│   │   │   ├── SmeltingBehavior.java # 自动冶炼 raw_iron → iron_ingot(便携小窑模型)
 │   │   │   ├── CombatReflex.java # 负责危险感应(苦力怕)与【PVP 矢量预判攻击】
 │   │   │   ├── InventorySimulator.java # 负责背包物品沉淀，模拟真实生存战利品
 │   │   │   ├── ActionSimulator.java # 负责假人多动症模拟（随机挥手、看风景）
 │   │   │   ├── BlockPlacer.java # 负责自动插火把照明与合成台放置逻辑
 │   │   │   ├── PvpSparring.java # 负责让两个无聊的假人互相看对眼，发起切磋演戏
-│   │   │   ├── AchievementSimulator.java # 负责让假人随机”蹦成就”，迷惑管理员
+│   │   │   ├── AchievementSimulator.java # 负责让假人随机"蹦成就"，迷惑管理员
 │   │   │   ├── AFKManager.java # 负责假人挂机行为（物理停顿 + 临走/归来时的礼貌告知）
 │   │   │   ├── TaskScheduler.java # 负责给假人安排工作时间（什么时候挖矿，什么时候休息）
-│   │   │   ├── GrowthPhase.java # 【成长定义】定义假人的 5 个进化阶段
 │   │   │   ├── LootTracker.java # 【物资追踪】智能穿戴系统，捡到好装备会自动替换
+│   │   │   ├── MilestoneActions.java # 长线里程碑：填岩浆桶、扔末影之眼、繁殖动物、长途旅行
+│   │   │   ├── VillageDefender.java # 村庄保卫者：发现村民并参与袭击战斗(Hero of the Village)
+│   │   │   ├── BeaconQuest.java # 信标长线任务：从打凋零骷髅到放置信标的完整流程
+│   │   │   ├── BeaconQuestStage.java # 信标任务的 11 个状态枚举
 │   │   │   │
 │   │   │   └── phase/ # 📂 【AI 进化阶段】
+│   │   │       ├── Phase.java # ⭐ V5.20 阶段策略接口(替代之前的 5-case switch)
+│   │   │       ├── PhaseContext.java # 共用查找回调容器(findOre/findLog/findHunt)
 │   │   │       ├── PhaseStoneAge.java # 第一阶段：石器时代
 │   │   │       ├── PhaseIronAge.java # 第二阶段：铁器时代
 │   │   │       ├── PhaseDiamondAge.java # 第三阶段：钻石时代
@@ -163,7 +182,7 @@ Fabric-Maohi-FakePlayerV3/
 │   │   │   └── EnvironmentSensor.java # 【感官系统】感觉下雨了要避雨，天黑了要找床睡
 │   │   │
 │   │   └── util/ # 📂 【辅助系统】
-│   │       ├── SkinService.java # 把下载好的皮肤”贴”到假人身上
+│   │       ├── SkinService.java # 把下载好的皮肤"贴"到假人身上
 │   │       └── RandomUtils.java # 负责产生不规律的随机数，让假人动作更自然
 │   │
 │   └── mixin/ # 📂 【原版系统挂钩】(通过 Mixin 技术修改游戏核心逻辑)
@@ -177,12 +196,29 @@ Fabric-Maohi-FakePlayerV3/
 ```
 
 
-```
 ---
 
 ## 📋 版本更新日志 (Changelog)
 
-### V5.7 (Latest) - ML-Proof Anti-Detection Edition
+### V5.21 (Latest) - Session Distribution & Milestone Boost
+- ✅ **会话时长三段分布**：1% 约 1 小时下线 / 98% 常规 2–4h 不定时下线 / 1% 挂机党 4–10h（硬上限 10h 防穿帮）
+- ✅ **删除累计在线时长成就门槛**：完全交给 vanilla advancement 驱动，不再按"小时"节流
+- ✅ **基础成就达成率提升**：Hot Stuff / 繁殖动物 / Adventuring Time 节流放宽 3~6 倍；石器/铁器阶段降低走神与网络抖动摸鱼率
+
+### V5.20 - Refactored Architecture Edition
+- ✅ **代码结构整理**:VirtualPlayerManager 从 1513 行瘦身到 ~1260 行
+- ✅ **SurvivalMechanics 拆分**:进食/装备/合成/冶炼 → 4 个独立 Behavior 类
+- ✅ **Personality 提升为顶级类型**:同时提取 SavedPlayer / TaskType / GrowthPhase
+- ✅ **Phase 接口化**:5 个成长阶段统一契约,5-case switch 改为 Map registry 派发
+- ✅ **PlayerStorage 子包**:Gson 持久化逻辑独立(原子写入 + 容量裁剪)
+- ✅ **BlockScanCache 子包**:findNearestBlock 缓存独立(MSPT 自适应半径)
+
+### V5.19 - Long-Quest System
+- ✅ **BeaconQuest**:完整信标长线任务(下界要塞 → 凋零 → 信标)
+- ✅ **VillageDefender**:村庄保卫者(Hero of the Village)
+- ✅ **MilestoneActions**:岩浆桶/末影之眼/繁殖动物/长途旅行
+
+### V5.7 - ML-Proof Anti-Detection Edition
 - ✅ **BehavioralDistributionValidator**: Box-Muller 变换生成正态分布随机数
 - ✅ **MovementController V5.7**: 菲茨定律 + 过冲模拟（4 阶段鼠标轨迹）
 - ✅ **Circadian Rhythm**: 昼夜节律仿真（凌晨迷糊期 -30% 速度）

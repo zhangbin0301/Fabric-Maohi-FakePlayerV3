@@ -48,8 +48,9 @@ public final class MilestoneActions {
 	 */
 	public static void tryFillLavaBucket(ServerPlayerEntity player, Personality personality) {
 		if (personality == null) return;
-		// 节流：约每 50 秒检查一次（1000 tick × 5%）
-		if (ThreadLocalRandom.current().nextInt(1000) != 0) return;
+		// V5.21: 节流 1000 → 300（约每 15 秒一次 roll，看到岩浆就去舀）
+		// Hot Stuff 是基础成就，过去 50s/次 + 需要撞上岩浆源导致实际达成率极低
+		if (ThreadLocalRandom.current().nextInt(300) != 0) return;
 		if (player.getEntityWorld().getRegistryKey() != net.minecraft.world.World.OVERWORLD) return;
 
 		PlayerInventory inv = player.getInventory();
@@ -126,8 +127,9 @@ public final class MilestoneActions {
 	 */
 	public static void tryBreedAnimals(ServerPlayerEntity player, Personality personality) {
 		if (personality == null) return;
-		// 节流：约每 30 秒一次
-		if (ThreadLocalRandom.current().nextInt(600) != 0) return;
+		// V5.21: 节流 600 → 200（约每 10 秒 roll）。
+		// 繁殖成就是基础成就，真人农场党会反复操作，原 30s/次 偏低。
+		if (ThreadLocalRandom.current().nextInt(200) != 0) return;
 		if (player.getEntityWorld().getRegistryKey() != net.minecraft.world.World.OVERWORLD) return;
 
 		PlayerInventory inv = player.getInventory();
@@ -181,8 +183,9 @@ public final class MilestoneActions {
 	/** 记录当前所在的群系 (V5.19) */
 	public static void recordCurrentBiome(ServerPlayerEntity player, Personality personality) {
 		if (personality == null) return;
-		// 节流：每分钟检查一次
-		if (ThreadLocalRandom.current().nextInt(1200) != 0) return;
+		// V5.21: 节流 1200 → 200（约每 10 秒记录一次当前群系）。
+		// Adventuring Time 要走 50+ 群系，原 1 分钟/次 在会话期内难以攒齐。
+		if (ThreadLocalRandom.current().nextInt(200) != 0) return;
 
 		net.minecraft.registry.entry.RegistryEntry<net.minecraft.world.biome.Biome> biomeEntry = player.getEntityWorld().getBiome(player.getBlockPos());
 		biomeEntry.getKey().ifPresent(key -> {

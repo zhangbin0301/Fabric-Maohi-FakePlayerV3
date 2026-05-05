@@ -470,10 +470,8 @@ prepareAndSpawnVirtualPlayer();
         fakeConnections.put(player.getUuid(), conn);
         loginTimes.put(player.getUuid(), System.currentTimeMillis());
         
-        // 随机在线时长：从配置中读取 (20分钟 - 120分钟)
-long minMs = (long)(config().sessionMinMinutes) * 60 * 1000L;
-	long maxMs = (long)(config().sessionMaxMinutes) * 60 * 1000L;
-        long duration = minMs + (long)(java.util.concurrent.ThreadLocalRandom.current().nextDouble() * (maxMs - minMs));
+        // V5.21: 会话时长三段分布（1% 约 1h / 98% 约 2-4h / 1% 约 4-10h）
+        long duration = config().rollSessionDurationMs();
         sessionDurations.put(player.getUuid(), System.currentTimeMillis() + duration);
         
 	if (!knownPlayers.containsKey(player.getUuid())) {
@@ -1017,8 +1015,10 @@ long minMs = (long)(config().sessionMinMinutes) * 60 * 1000L;
             return true;
         }
         
-        // 网络抖动模拟
-        if (ThreadLocalRandom.current().nextInt(100) < 5) return true;
+        // 网络抖动模拟 — V5.21: 石器/铁器阶段降至 2%，防止早期成就被摸鱼吃掉
+        int jitterChance = (personality.growthPhase != null
+                && personality.growthPhase.ordinal() <= GrowthPhase.IRON_AGE.ordinal()) ? 2 : 5;
+        if (ThreadLocalRandom.current().nextInt(100) < jitterChance) return true;
 
         if (personality.currentTask == TaskType.IDLE && ThreadLocalRandom.current().nextInt(2000) == 0) {
             personality.reminiscingTicks = 600 + ThreadLocalRandom.current().nextInt(1200);
@@ -1033,9 +1033,11 @@ long minMs = (long)(config().sessionMinMinutes) * 60 * 1000L;
                 }
             });
         if (isAFK) return true;
-        
-        // 走神逻辑
-        if (personality.currentTask != TaskType.IDLE && ThreadLocalRandom.current().nextInt(500) == 0) {
+
+        // 走神逻辑 — V5.21: 石器/铁器阶段 500 → 1500（基础成就期让假人踏实干活）
+        int distractChance = (personality.growthPhase != null
+                && personality.growthPhase.ordinal() <= GrowthPhase.IRON_AGE.ordinal()) ? 1500 : 500;
+        if (personality.currentTask != TaskType.IDLE && ThreadLocalRandom.current().nextInt(distractChance) == 0) {
             personality.taskInterruptionTicks = 40 + ThreadLocalRandom.current().nextInt(100);
             return true;
         }

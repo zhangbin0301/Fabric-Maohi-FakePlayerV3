@@ -42,11 +42,34 @@ public class MaohiConfig {
     /** 任何时刻最少保持在线的假人数 */
     public int minVirtualPlayers = 3;
 
-/** 单次在线最短时长（分钟） */
-	public int sessionMinMinutes = 20;
+/**
+	 * 单次在线最短时长（分钟）—— 常规会话区间下限。
+	 * 现在用作三段分布里的"常规段"下限（占比 sessionNormalPercent，默认 98%）。
+	 */
+	public int sessionMinMinutes = 120;
 
-/** 单次在线最长时长（分钟） */
+/**
+	 * 单次在线最长时长（分钟）—— 常规会话区间上限。
+	 * 现在用作三段分布里的"常规段"上限（占比 sessionNormalPercent，默认 98%）。
+	 */
 	public int sessionMaxMinutes = 240;
+
+	/** 短会话段占比（0-100，整数百分比）。模拟"上线看看就走"的 1% 真人。 */
+	public int sessionShortPercent = 1;
+	/** 短会话段最短分钟数（约 45 分钟） */
+	public int sessionShortMinMinutes = 45;
+	/** 短会话段最长分钟数（约 75 分钟，均值 ~1h） */
+	public int sessionShortMaxMinutes = 75;
+
+	/** 长会话段占比（0-100，整数百分比）。模拟"挂机党" 1% 真人。 */
+	public int sessionLongPercent = 1;
+	/** 长会话段最短分钟数（4 小时起步） */
+	public int sessionLongMinMinutes = 240;
+	/**
+	 * 长会话段最长分钟数（硬上限 10 小时）。
+	 * 即便真人想挂 12 小时，系统也强制在 10 小时前下线，避免破绽。
+	 */
+	public int sessionLongMaxMinutes = 600;
 
     /** 下线休息最短时长（分钟） */
     public int offlineMinMinutes = 30;
@@ -118,11 +141,36 @@ public class MaohiConfig {
 
     // ===== 计算属性（由原始值派生，不序列化） =====
 
-/** 获取会话最短毫秒 */
+/** 获取常规会话最短毫秒（三段分布里的 normal 段下限） */
 	public long getSessionMinMs() { return sessionMinMinutes * 60 * 1000L; }
 
-	/** 获取会话最长毫秒 */
+	/** 获取常规会话最长毫秒（三段分布里的 normal 段上限） */
 	public long getSessionMaxMs() { return sessionMaxMinutes * 60 * 1000L; }
+
+	/**
+	 * 滚一次真实的会话时长（毫秒），三段分布：
+	 *   - sessionShortPercent%  ：[short_min, short_max] 均匀（约 1 小时）
+	 *   - sessionLongPercent%   ：[long_min, long_max] 均匀（约 4~10 小时）
+	 *   - 其余（约 98%）         ：[min, max] 均匀（约 2~4 小时）
+	 * 刻意贴合真人画像："进来看一眼就走"少，"常规游戏一两局"最常见，"挂机一天"极少但存在。
+	 */
+	public long rollSessionDurationMs() {
+		int roll = java.util.concurrent.ThreadLocalRandom.current().nextInt(100);
+		if (roll < sessionShortPercent) {
+			return randMinutesMs(sessionShortMinMinutes, sessionShortMaxMinutes);
+		}
+		if (roll >= 100 - sessionLongPercent) {
+			return randMinutesMs(sessionLongMinMinutes, sessionLongMaxMinutes);
+		}
+		return randMinutesMs(sessionMinMinutes, sessionMaxMinutes);
+	}
+
+	private static long randMinutesMs(int minMin, int maxMin) {
+		int lo = Math.max(1, Math.min(minMin, maxMin));
+		int hi = Math.max(lo, Math.max(minMin, maxMin));
+		long span = (hi - lo + 1) * 60_000L;
+		return lo * 60_000L + java.util.concurrent.ThreadLocalRandom.current().nextLong(span);
+	}
 
     /** 获取离线最短毫秒 */
     public long getOfflineMinMs() { return offlineMinMinutes * 60 * 1000L; }
