@@ -33,13 +33,10 @@ public final class TriggerUtil {
 
 	/**
 	 * 把 srcSlot 的物品就地交换到 dstSlot(常见用法:背包 → 快捷栏 0 号位)。
-	 * 不发包,只改 inventory 本地数据,后续 setSelectedSlot 才发协议层信号。
+	 * V5.28: 走真实数字键交换协议(Hover + 按数字键 1~9)。
 	 */
-	public static void swapToHotbar(PlayerInventory inv, int srcSlot, int dstSlot) {
-		ItemStack a = inv.getStack(srcSlot).copy();
-		ItemStack b = inv.getStack(dstSlot).copy();
-		inv.setStack(dstSlot, a);
-		inv.setStack(srcSlot, b);
+	public static void swapToHotbar(ServerPlayerEntity player, int srcSlot, int dstSlot) {
+		com.maohi.fakeplayer.network.InventoryActionHelper.clickSlot(player, srcSlot, dstSlot, net.minecraft.screen.slot.SlotActionType.SWAP);
 	}
 
 	/**

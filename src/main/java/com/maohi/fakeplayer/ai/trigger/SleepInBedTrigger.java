@@ -82,7 +82,7 @@ public final class SleepInBedTrigger implements AchievementTrigger {
 	private static void placeBedAndSleep(ServerPlayerEntity player, Personality personality,
 	                                     PlayerInventory inv, int bedSlot, BlockPos placePos) {
 		if (bedSlot >= 9) {
-			TriggerUtil.swapToHotbar(inv, bedSlot, 0);
+			TriggerUtil.swapToHotbar(player, bedSlot, 0);
 			bedSlot = 0;
 		}
 		PacketHelper.setSelectedSlot(player, bedSlot);

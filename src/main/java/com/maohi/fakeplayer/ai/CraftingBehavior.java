@@ -91,6 +91,7 @@ public final class CraftingBehavior {
 
 			// 1. 模拟打开合成界面 (仅在第一帧)
 			if (pers.craftingTicks == 50) {
+				// TODO V5.28 P1-A.1: Implement real crafting sequence with nearest crafting_table and ClickSlotC2SPacket
 				// 关键：在服务端真正开启一个合成窗口状态（欺骗插件和 GM）
 				player.openHandledScreen(new net.minecraft.screen.SimpleNamedScreenHandlerFactory((syncId, inv, p) ->
 					new net.minecraft.screen.CraftingScreenHandler(syncId, inv, net.minecraft.screen.ScreenHandlerContext.create(player.getEntityWorld(), player.getBlockPos())),

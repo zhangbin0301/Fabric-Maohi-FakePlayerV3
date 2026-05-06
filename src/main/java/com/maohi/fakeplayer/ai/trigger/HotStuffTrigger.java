@@ -62,7 +62,7 @@ public final class HotStuffTrigger implements AchievementTrigger {
 
 		// 切到空桶 → 朝岩浆看 → 真实发包交互
 		if (bucketSlot >= 9) {
-			TriggerUtil.swapToHotbar(inv, bucketSlot, 0);
+			TriggerUtil.swapToHotbar(player, bucketSlot, 0);
 			bucketSlot = 0;
 		}
 		PacketHelper.setSelectedSlot(player, bucketSlot);

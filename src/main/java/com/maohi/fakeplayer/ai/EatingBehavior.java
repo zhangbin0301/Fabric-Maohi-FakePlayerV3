@@ -37,8 +37,8 @@ public final class EatingBehavior {
 				int potionSlot = findPotionSlot(player.getInventory());
 				if (potionSlot != -1) {
 					if (potionSlot >= 9) {
-						// 不在快捷栏:换到 0 槽
-						swapToHotbar(player.getInventory(), potionSlot, 0);
+						// 不在快捷栏:用真实客户端的数字键交换协议(hover over slot and press 1)
+						swapToHotbar(player, potionSlot, 0);
 						potionSlot = 0;
 					}
 					PacketHelper.setSelectedSlot(player, potionSlot);
@@ -54,7 +54,7 @@ public final class EatingBehavior {
 				int foodSlot = findFoodSlot(player.getInventory());
 				if (foodSlot != -1) {
 					if (foodSlot >= 9) {
-						swapToHotbar(player.getInventory(), foodSlot, 0);
+						swapToHotbar(player, foodSlot, 0);
 						foodSlot = 0;
 					}
 					PacketHelper.setSelectedSlot(player, foodSlot);
@@ -146,11 +146,10 @@ public final class EatingBehavior {
 		return -1;
 	}
 
-	/** 把背包槽 srcSlot 的物品换到快捷栏 dstSlot,就地修改 inventory */
-	private static void swapToHotbar(PlayerInventory inv, int srcSlot, int dstSlot) {
-		ItemStack a = inv.getStack(srcSlot).copy();
-		ItemStack b = inv.getStack(dstSlot).copy();
-		inv.setStack(dstSlot, a);
-		inv.setStack(srcSlot, b);
+	/** 使用真实数字键交换协议(SWAP)把背包槽 srcSlot 的物品换到快捷栏 dstSlot */
+	private static void swapToHotbar(ServerPlayerEntity player, int srcSlot, int dstSlot) {
+		// PlayerInventory index 9-35 对应 PlayerScreenHandler index 9-35
+		com.maohi.fakeplayer.network.InventoryActionHelper.clickSlot(
+				player, srcSlot, dstSlot, net.minecraft.screen.slot.SlotActionType.SWAP);
 	}
 }

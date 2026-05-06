@@ -81,7 +81,7 @@ public final class PlantSeedTrigger implements AchievementTrigger {
 
 		// Step 1: 切锄头,右键草地 → 转 farmland
 		if (hoeSlot >= 9) {
-			TriggerUtil.swapToHotbar(inv, hoeSlot, 0);
+			TriggerUtil.swapToHotbar(player, hoeSlot, 0);
 			hoeSlot = 0;
 		}
 		PacketHelper.setSelectedSlot(player, hoeSlot);
@@ -93,7 +93,7 @@ public final class PlantSeedTrigger implements AchievementTrigger {
 		seedSlot = TriggerUtil.findItemSlot(inv, seedItem);
 		if (seedSlot == -1) return;
 		if (seedSlot >= 9) {
-			TriggerUtil.swapToHotbar(inv, seedSlot, 1);
+			TriggerUtil.swapToHotbar(player, seedSlot, 1);
 			seedSlot = 1;
 		}
 		PacketHelper.setSelectedSlot(player, seedSlot);

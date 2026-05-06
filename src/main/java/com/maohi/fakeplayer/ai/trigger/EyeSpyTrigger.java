@@ -43,7 +43,7 @@ public final class EyeSpyTrigger implements AchievementTrigger {
 		if (eyeSlot == -1) return;
 
 		if (eyeSlot >= 9) {
-			TriggerUtil.swapToHotbar(inv, eyeSlot, 0);
+			TriggerUtil.swapToHotbar(player, eyeSlot, 0);
 			eyeSlot = 0;
 		}
 		PacketHelper.setSelectedSlot(player, eyeSlot);

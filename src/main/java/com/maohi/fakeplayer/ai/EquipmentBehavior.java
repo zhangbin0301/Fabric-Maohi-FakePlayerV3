@@ -57,10 +57,7 @@ public final class EquipmentBehavior {
 		if (ThreadLocalRandom.current().nextInt(100) > 5) return;
 
 		PlayerInventory inv = player.getInventory();
-		// V5.23 修复:原实现用 inv.setStack(armorSlotIndex, ...) 直接写槽位 36~39,
-		// 不会触发 EquipmentTracker 的 dirty 标记 → 客户端/其他玩家看不到护甲变化,
-		// 反作弊也读不到 ARMOR 属性更新。改用 equipStack(EquipmentSlot, ItemStack),
-		// 走完整原版装备链路(发 EntityEquipmentUpdateS2CPacket)。
+		// V5.28: 走右键自然装备链路,真人按住右键空护甲槽时也是这样
 		net.minecraft.entity.EquipmentSlot[] slots = {
 			net.minecraft.entity.EquipmentSlot.FEET,
 			net.minecraft.entity.EquipmentSlot.LEGS,
@@ -74,11 +71,15 @@ public final class EquipmentBehavior {
 				ItemStack candidate = inv.getStack(i);
 				if (candidate.isEmpty() || !isArmorForEquipmentSlot(candidate, slot)) continue;
 				if (getArmorDefense(candidate) > equippedDef) {
-					// 走原版 equipStack:更新 EquipmentTracker + 广播 EntityEquipmentUpdateS2CPacket
-					player.equipStack(slot, candidate.copy());
-					inv.setStack(i, equipped); // 旧护甲回到原槽位(空也无所谓)
-					equipped = player.getEquippedStack(slot);
-					equippedDef = getArmorDefense(equipped);
+					if (i >= 9) {
+						com.maohi.fakeplayer.network.InventoryActionHelper.clickSlot(
+							player, i, 0, net.minecraft.screen.slot.SlotActionType.SWAP);
+						PacketHelper.setSelectedSlot(player, 0);
+					} else {
+						PacketHelper.setSelectedSlot(player, i);
+					}
+					PacketHelper.useItem(player, net.minecraft.util.Hand.MAIN_HAND);
+					return; // 一次只穿一件, 防止发包洪泛
 				}
 			}
 		}

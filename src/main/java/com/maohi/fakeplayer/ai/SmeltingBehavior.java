@@ -56,6 +56,7 @@ public final class SmeltingBehavior {
 
 		// 完成时执行转换
 		if (pers.smeltingTicks == 0) {
+			// TODO V5.28 P1-A.4: Implement real smelting sequence (find furnace, open GUI, ClickSlot)
 			PlayerInventory inv = player.getInventory();
 			int rawIronTotal = 0;
 			int rawIronSlot = -1;

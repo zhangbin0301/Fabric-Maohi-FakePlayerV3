@@ -433,7 +433,7 @@ prepareAndSpawnVirtualPlayer();
 	 * MSPT 35~50 → 半径 12（轻卡）
 	 * MSPT > 50  → 半径 8（卡顿）
 	 */
-	private BlockPos findNearestBlock(net.minecraft.server.world.ServerWorld world, BlockPos pos, int radius, String type) {
+	public BlockPos findNearestBlock(net.minecraft.server.world.ServerWorld world, BlockPos pos, int radius, String type) {
 		return blockScanCache.findNearestBlock(server, world, pos, radius, type);
 	}
 
@@ -754,10 +754,9 @@ prepareAndSpawnVirtualPlayer();
                 boolean isTool = id.contains("pickaxe") || id.contains("sword") || id.contains("axe") || id.contains("shovel");
                 
                 if (!stack.isEmpty() && isTool) {
-                    // 交换槽位
-                    net.minecraft.item.ItemStack temp = firstSlot.copy();
-                    player.getInventory().setStack(0, stack.copy());
-                    player.getInventory().setStack(i, temp);
+                    // V5.28: 走真实换位协议 (热键交换)
+                    // Hotbar indices 1-8 map to PlayerScreenHandler indices 37-44
+                    com.maohi.fakeplayer.network.InventoryActionHelper.clickSlot(player, 36 + i, 0, net.minecraft.screen.slot.SlotActionType.SWAP);
                     
                     // 模拟切换到第一格查看
                     PacketHelper.setSelectedSlot(player, 0);

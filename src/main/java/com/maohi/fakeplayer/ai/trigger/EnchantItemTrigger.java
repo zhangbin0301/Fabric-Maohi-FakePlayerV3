@@ -142,6 +142,7 @@ public final class EnchantItemTrigger implements AchievementTrigger {
 		}
 
 		// Slot.setStack → markDirty → SimpleInventory(匿名)markDirty → onContentChanged → enchantmentPower 同步算好
+		// TODO V5.28 P1-A.5: Implement real ClickSlotC2SPacket sequence for enchanting
 		Slot itemSlotInHandler = handler.getSlot(0);
 		Slot lapisSlotInHandler = handler.getSlot(1);
 		itemSlotInHandler.setStack(singleItem);

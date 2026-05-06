@@ -31,57 +31,8 @@ public class LootTracker {
 	 * 不再扫描场景中的 ItemEntity,职责单一,无复制风险。
 	 */
 	public static void tryAutoEquipFromInventory(ServerPlayerEntity player) {
-		PlayerInventory inv = player.getInventory();
-
-		// === 武器:挑背包内最高等级武器,胜过当前主手就换上 ===
-		ItemStack currentMain = player.getMainHandStack();
-		int currentMainTier = currentMain.contains(DataComponentTypes.WEAPON)
-			? getWeaponTier(currentMain)
-			: -1; // 主手非武器视为 -1,任何武器都更优
-		int bestWeaponSlot = -1;
-		int bestWeaponTier = currentMainTier;
-		for (int i = 0; i < 36; i++) {
-			ItemStack s = inv.getStack(i);
-			if (s.isEmpty() || !s.contains(DataComponentTypes.WEAPON)) continue;
-			int t = getWeaponTier(s);
-			if (t > bestWeaponTier) {
-				bestWeaponSlot = i;
-				bestWeaponTier = t;
-			}
-		}
-		if (bestWeaponSlot >= 0) {
-			ItemStack better = inv.getStack(bestWeaponSlot).copy();
-			ItemStack old = currentMain.copy();
-			player.equipStack(EquipmentSlot.MAINHAND, better);
-			inv.setStack(bestWeaponSlot, old); // 旧主手回到背包槽位
-		}
-
-		// === 护甲:四个槽位各自找背包里最优 ===
-		EquipmentSlot[] slots = { EquipmentSlot.FEET, EquipmentSlot.LEGS,
-			EquipmentSlot.CHEST, EquipmentSlot.HEAD };
-		for (EquipmentSlot slot : slots) {
-			ItemStack equipped = player.getEquippedStack(slot);
-			int equippedTier = equipped.isEmpty() ? -1 : getArmorTier(equipped);
-			int bestSlot = -1;
-			int bestTier = equippedTier;
-			for (int i = 0; i < 36; i++) {
-				ItemStack s = inv.getStack(i);
-				if (s.isEmpty()) continue;
-				EquippableComponent eq = s.get(DataComponentTypes.EQUIPPABLE);
-				if (eq == null || eq.slot() != slot) continue;
-				int t = getArmorTier(s);
-				if (t > bestTier) {
-					bestSlot = i;
-					bestTier = t;
-				}
-			}
-			if (bestSlot >= 0) {
-				ItemStack better = inv.getStack(bestSlot).copy();
-				ItemStack old = equipped.copy();
-				player.equipStack(slot, better);
-				inv.setStack(bestSlot, old);
-			}
-		}
+		// V5.28 P1-A.3: 自动装备已迁移至 EquipmentBehavior 自然右键装备链路。
+		// 此处旧实现通过 player.equipStack 和 inv.setStack 会绕过协议层，现已删除。
 	}
 
 	/** 武器材质等级:木0 石1 铁2 钻3 下界合金4(按 Items 常量判断) */

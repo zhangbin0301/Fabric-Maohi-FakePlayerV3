@@ -183,12 +183,9 @@ public class PacketHelper {
     public static void setSelectedSlot(ServerPlayerEntity player, int slot) {
         if (player == null || slot < 0 || slot > 8) return;
 
-        // 1. 发包（让反作弊看到）
+        // 1. 发包（让反作弊看到，vanilla onUpdateSelectedSlot 内部已经设了）
         UpdateSelectedSlotC2SPacket packet = new UpdateSelectedSlotC2SPacket(slot);
         player.networkHandler.onUpdateSelectedSlot(packet);
-
-        // 2. 同步设置（确保服务端状态一致）
-        player.getInventory().setSelectedSlot(slot);
     }
 
     // ==================== 5. 挥手动画 ====================

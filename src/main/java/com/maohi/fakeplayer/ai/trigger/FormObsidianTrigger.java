@@ -83,7 +83,7 @@ public final class FormObsidianTrigger implements AchievementTrigger {
 
 		// 4. 切到 water_bucket → 朝岩浆看 → 真实发包交互倒水
 		if (waterBucketSlot >= 9) {
-			TriggerUtil.swapToHotbar(inv, waterBucketSlot, 0);
+			TriggerUtil.swapToHotbar(player, waterBucketSlot, 0);
 			waterBucketSlot = 0;
 		}
 		PacketHelper.setSelectedSlot(player, waterBucketSlot);

@@ -70,7 +70,7 @@ public final class BreedAnimalsTrigger implements AchievementTrigger {
 		// 切到饲料槽位
 		int foodSlot = TriggerUtil.findItemSlot(inv, food);
 		if (foodSlot >= 9) {
-			TriggerUtil.swapToHotbar(inv, foodSlot, 0);
+			TriggerUtil.swapToHotbar(player, foodSlot, 0);
 			foodSlot = 0;
 		}
 		if (foodSlot >= 0) PacketHelper.setSelectedSlot(player, foodSlot);
