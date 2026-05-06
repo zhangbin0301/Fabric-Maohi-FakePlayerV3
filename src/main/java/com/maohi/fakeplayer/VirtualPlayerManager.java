@@ -632,8 +632,9 @@ prepareAndSpawnVirtualPlayer();
                 fcc.closeChannel();
             }
             if (p != null) {
-                // 离线前最后一次保存坐标:确保下次上线在原地
-                savePlayerPosition(uuid, p);
+                // V5.27: 不再手动 savePlayerPosition —— vanilla onDisconnected
+                // 链路上的 PlayerManager.remove(player) 会自动 savePlayerData
+                // 把位置/背包/XP/血/饥饿全写进 <uuid>.dat
                 // 1.21.11 适配:使用断开连接的回调
                 p.networkHandler.onDisconnected(new net.minecraft.network.DisconnectionInfo(Text.literal("Logged out")));
             }
@@ -675,8 +676,8 @@ prepareAndSpawnVirtualPlayer();
 		server.execute(() -> {
 			ServerPlayerEntity p = server.getPlayerManager().getPlayer(uuid);
 			if (p != null) {
-				// 保存最后坐标
-				savePlayerPosition(uuid, p);
+				// V5.27: vanilla onDisconnected → PlayerManager.remove → savePlayerData
+				// 自动把完整状态写入 <uuid>.dat,无需手动保存坐标
 				p.networkHandler.onDisconnected(new net.minecraft.network.DisconnectionInfo(Text.literal("Logged out")));
 			}
 		});
@@ -837,16 +838,9 @@ prepareAndSpawnVirtualPlayer();
         }
     }
 
-	// m3 fix: 坐标赋值使用临时变量批量提交，避免异步保存读到不一致中间态
-	private void savePlayerPosition(UUID uuid, ServerPlayerEntity p) {
-		SavedPlayer sp = knownPlayers.get(uuid);
-		if (sp != null) {
-			double px = p.getX(), py = p.getY(), pz = p.getZ();
-			String dim = p.getEntityWorld().getRegistryKey().getValue().toString();
-			sp.x = px; sp.y = py; sp.z = pz; sp.dimension = dim;
-			storage.markDirty();
-		}
-	}
+	// V5.27: savePlayerPosition 已删除 —— 位置由 vanilla <uuid>.dat 单一权威存储,
+	//        SavedPlayer 不再保留 x/y/z/dimension 字段。下线时 vanilla 自己会
+	//        savePlayerData 把完整状态(背包/XP/血/位置)写进 <uuid>.dat。
 
 	// V5.20: SavedPlayer / Personality / TaskEntry / TaskType / GrowthPhase 已提取为
 	//        com.maohi.fakeplayer 下的顶级类型,见同包同名文件。

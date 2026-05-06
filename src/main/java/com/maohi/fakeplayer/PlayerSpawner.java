@@ -6,17 +6,10 @@ import com.maohi.MaohiConfig;
 import net.minecraft.network.ClientConnection;
 import net.minecraft.server.MinecraftServer;
 import net.minecraft.server.network.ServerPlayerEntity;
-import net.minecraft.util.math.BlockPos;
 
-import net.minecraft.util.math.ChunkPos;
-import net.minecraft.world.chunk.ChunkStatus;
-import net.minecraft.world.chunk.Chunk;
-import net.minecraft.world.Heightmap;
 import java.util.ArrayList;
-import java.util.Collections;
 import java.util.List;
 import java.util.UUID;
-import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ThreadLocalRandom;
 
 /**
@@ -55,58 +48,31 @@ public class PlayerSpawner {
 
     /**
      * 实际的实例化逻辑
+     *
+     * V5.27: 完全交给 vanilla 处理位置/维度/背包/XP/血/饥饿。
+     *   - 新假人:vanilla ServerPlayerEntity 构造器置于 world.getSpawnPos()
+     *     (= 真新人首次进服)
+     *   - 老假人:vanilla PlayerManager.onPlayerConnect → loadPlayerData →
+     *     从 <uuid>.dat 读上次下线的完整状态(= 真回归玩家)
+     *   - 维度切换由 vanilla 根据 NBT 中 "Dimension" 字段自行处理,
+     *     构造器统一传 overworld 即可
      */
     public static void spawn(VirtualPlayerManager manager, String name, SkinService.SkinProperty skin) {
         MinecraftServer server = manager.getServer();
         UUID uuid = manager.getNameToUuidIndex().getOrDefault(name, UUID.randomUUID());
         if (server.getPlayerManager().getPlayer(uuid) != null) return; // already online, skip
-        
-        SavedPlayer saved = manager.getKnownPlayers().get(uuid);
 
-        net.minecraft.server.world.ServerWorld targetWorld = server.getOverworld();
-        if (saved != null && saved.dimension != null) {
-            for (net.minecraft.server.world.ServerWorld world : server.getWorlds()) {
-                if (world.getRegistryKey().getValue().toString().equals(saved.dimension)) {
-                    targetWorld = world;
-                    break;
-                }
-            }
-        }
+        SavedPlayer saved = manager.getKnownPlayers().get(uuid);
 
         com.mojang.authlib.GameProfile profile = new com.mojang.authlib.GameProfile(uuid, name);
 	// 1.21.11 适配：使用 SyncedClientOptions
 	net.minecraft.network.packet.c2s.common.SyncedClientOptions clientInfo = net.minecraft.network.packet.c2s.common.SyncedClientOptions.createDefault();
-	ServerPlayerEntity player = new ServerPlayerEntity(server, targetWorld, profile, clientInfo);
-	
-	// 出生点计算
- BlockPos spawn;
- if (saved != null && saved.y > -64 && saved.y < 320) {
- spawn = new BlockPos((int)saved.x, (int)saved.y, (int)saved.z);
-	} else {
-		// 1.21.11 适配：调用 getSpawnPoint().getPos() (结构对齐 1.21.2)
-		spawn = targetWorld.getSpawnPoint().getPos();
-	}
-        
-        double x = (saved != null) ? saved.x : (double)spawn.getX() + (ThreadLocalRandom.current().nextDouble() * 40.0) - 20.0;
-        double z = (saved != null) ? saved.z : (double)spawn.getZ() + (ThreadLocalRandom.current().nextDouble() * 40.0) - 20.0;
-        
-        double finalY;
-        if (saved != null && saved.y > -64) {
-            finalY = saved.y;
-        } else {
-            // 1.21.11 适配：使用 Chunk-based Heightmap API
-            ChunkPos chunkPos = new ChunkPos((int)x, (int)z);
-            Chunk chunk = targetWorld.getChunkManager().getChunk(chunkPos.x, chunkPos.z, ChunkStatus.FULL, false);
-            int topY = (chunk != null) 
-                ? chunk.getHeightmap(Heightmap.Type.MOTION_BLOCKING).get((int)x & 15, (int)z & 15) 
-                : targetWorld.getBottomY();
-            finalY = (topY <= 0 || topY > 310) ? (double)spawn.getY() : (double)topY;
-        }
-        
-        player.refreshPositionAndAngles(x, finalY + 0.1, z, ThreadLocalRandom.current().nextFloat() * 360.0f, ThreadLocalRandom.current().nextFloat() * 20.0f - 10.0f);
-        
+	ServerPlayerEntity player = new ServerPlayerEntity(server, server.getOverworld(), profile, clientInfo);
+
 	ClientConnection conn = new FakeClientConnection();
 	// 1.21.11 适配：使用静态工厂方法创建进服数据
+	// vanilla onPlayerConnect → loadPlayerData → 若 <uuid>.dat 存在则按 NBT 中
+	// Dimension/Pos/Inventory 等还原(等同真回归玩家);否则沿用构造器的 overworld spawn。
 	server.getPlayerManager().onPlayerConnect(conn, player, net.minecraft.server.network.ConnectedClientData.createDefault(profile, false));
 	
 	// 伪造 Ping — V3.3: Mixin @Accessor 直接赋值，告别反射
@@ -140,8 +106,10 @@ public class PlayerSpawner {
 	//   login) have a totally different distribution - ML anticheats catch this in seconds. Now
 	//   new bots spawn with empty inventory, identical to real new accounts; early advancements
 	//   (plant_seed/sleep_in_bed/hot_stuff) unlock via real mining/crafting, ~10-30 min later but
-	//   fully natural. To keep the "old miner persona", switch to NBT injection (write fake
-	//   player.dat so vanilla readNbt loads it - same code path as a returning player).
+	//   fully natural.
+	// V5.27: 不再考虑给新假人注入"老矿工背包" —— 真人新号本来就是空手,
+	//   "新号一上线就一身破装备"才是反人设。老假人的物品由 vanilla loadPlayerData
+	//   从 <uuid>.dat 读上次下线的真实库存,等同真回归玩家,无需任何注入。
         
         // 发送品牌包（伪装为 Fabric 客户端）
         try {
