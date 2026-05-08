@@ -98,13 +98,14 @@ public class PlayerSpawner {
 	//     - 老假人 (saved != null):仍然由 onPlayerConnect → loadPlayerData 从 NBT 覆写,
 	//       此处的预设值会被覆盖,无副作用
 	{
-		net.minecraft.util.math.BlockPos spawnPos = overworld.getSpawnPos();
-		// 角度用 0.0F:vanilla 真新人面朝的 yaw 是 LevelProperties.getSpawnAngle(),通常也是 0,
-		// 即使不是,假人 AI 上线后 MovementController 第一秒就会自行转向,这点角度差肉眼不可辨。
+		// 1.21.11 yarn:ServerWorld 没暴露 getSpawnPos(),走 LevelProperties.getSpawnX/Y/Z
+		// (V5.34 已验证此路径可编译)。角度用 0.0F:LevelProperties.getSpawnAngle 在 yarn 1.21.x
+		// 抖动过,且角度差肉眼不可辨,假人 AI 上线后 MovementController 第一秒就会自行转向。
+		net.minecraft.world.WorldProperties props = overworld.getLevelProperties();
 		player.refreshPositionAndAngles(
-			spawnPos.getX() + 0.5,
-			spawnPos.getY(),
-			spawnPos.getZ() + 0.5,
+			props.getSpawnX() + 0.5,
+			props.getSpawnY(),
+			props.getSpawnZ() + 0.5,
 			0.0F,
 			0.0F);
 	}
