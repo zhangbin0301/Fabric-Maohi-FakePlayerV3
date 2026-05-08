@@ -91,13 +91,16 @@ public class PlayerSpawner {
 	//   一行 log 就能确诊"(0,0,0) 是服务端 SpawnX/Y/Z=0 还是 vanilla 构造器没把位置塞进去"。
 	//   多服都看到 (0,0,0) 后此 log 会立刻给出根因(worldSpawn 是不是 0,0,0)。
 	//   稳定后这行可以删,留 [MaohiTask] 前缀方便 grep。
+	//   实现注:Yarn API 在 1.21.x 里 spawn 访问方法名抖动过多次(getSpawnX/Y/Z, getSpawnPos, ...),
+	//   写死任何一个都可能被下个 yarn build 砸到,所以用反射兜底:对 ServerWorld 和
+	//   getLevelProperties() 各试一遍 getSpawnPos / getSpawnX-Y-Z,谁先命中就用谁。
 	{
-		net.minecraft.world.WorldProperties props = server.getOverworld().getLevelProperties();
+		String worldSpawnDesc = describeWorldSpawn(server.getOverworld());
 		org.slf4j.LoggerFactory.getLogger("Server thread").info(
-			"[MaohiTask] spawn_diag name={} ctorPos=({},{},{}) worldSpawn=({},{},{}) saved={}",
+			"[MaohiTask] spawn_diag name={} ctorPos=({},{},{}) worldSpawn={} saved={}",
 			name,
 			player.getX(), player.getY(), player.getZ(),
-			props.getSpawnX(), props.getSpawnY(), props.getSpawnZ(),
+			worldSpawnDesc,
 			(saved != null));
 	}
 
@@ -162,5 +165,42 @@ public class PlayerSpawner {
 
         // 注册到管理器
         manager.registerSpawnedPlayer(player, conn, name, saved);
+    }
+
+    /**
+     * V5.30+ 诊断辅助: 跨 Yarn 版本兼容地读 world spawn。
+     * 反射形式:不依赖具体接口名,试 props.getSpawnPos / getSpawnX-Y-Z 任一命中。
+     * 注:dev 环境(gradle runServer)有效;production 对 jar 做 intermediary 重映射后
+     *      此 reflection 会返 "<no-api>" — 但 ctorPos 字段已足够诊断 worldSpawn 是不是 0。
+     * 稳定后整段删除即可。
+     */
+    private static String describeWorldSpawn(net.minecraft.server.world.ServerWorld world) {
+        if (world == null) return "<null-world>";
+        try {
+            Object props = world.getLevelProperties();
+            if (props == null) return "<null-props>";
+            Object pos = invokeNoArg(props, "getSpawnPos");
+            if (pos != null) return pos.toString();
+            Object sx = invokeNoArg(props, "getSpawnX");
+            Object sy = invokeNoArg(props, "getSpawnY");
+            Object sz = invokeNoArg(props, "getSpawnZ");
+            if (sx != null && sy != null && sz != null) {
+                return "(" + sx + "," + sy + "," + sz + ")";
+            }
+        } catch (Throwable t) {
+            return "<err:" + t.getClass().getSimpleName() + ">";
+        }
+        return "<no-api>";
+    }
+
+    private static Object invokeNoArg(Object target, String methodName) {
+        if (target == null) return null;
+        try {
+            return target.getClass().getMethod(methodName).invoke(target);
+        } catch (NoSuchMethodException ignored) {
+            return null;
+        } catch (Throwable t) {
+            return null;
+        }
     }
 }
