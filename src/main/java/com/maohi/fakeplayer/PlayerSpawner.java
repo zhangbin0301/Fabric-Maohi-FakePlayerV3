@@ -85,12 +85,34 @@ public class PlayerSpawner {
         }
 	// 1.21.11 适配：使用 SyncedClientOptions
 	net.minecraft.network.packet.c2s.common.SyncedClientOptions clientInfo = net.minecraft.network.packet.c2s.common.SyncedClientOptions.createDefault();
-	ServerPlayerEntity player = new ServerPlayerEntity(server, server.getOverworld(), profile, clientInfo);
+	net.minecraft.server.world.ServerWorld overworld = server.getOverworld();
+	ServerPlayerEntity player = new ServerPlayerEntity(server, overworld, profile, clientInfo);
+
+	// V5.37: 1.21.11 vanilla ServerPlayerEntity 构造器不再把新实体放到 world.getSpawnPos()。
+	//   真人客户端走 ConfigurationState→PlayState 转换时由 PlayerManager 的内部流程 + 客户端
+	//   PlayerPositionLookS2C 修正,但我们的假人路径直接 onPlayerConnect,且 FakeClientConnection
+	//   吃掉所有 S2C → 实体被永久卡在 (0,0,0)。证据:`/setworldspawn 0 80 0` 后假人仍然
+	//   `logged in ... at (0.0, 0.0, 0.0)` (Y=0 而非 80,排除"spawn 是 0,0,0"的可能性)。
+	//   这里在 onPlayerConnect 前先把位置校到 world spawn:
+	//     - 新假人 (saved == null):停在 world spawn,等同真新人
+	//     - 老假人 (saved != null):仍然由 onPlayerConnect → loadPlayerData 从 NBT 覆写,
+	//       此处的预设值会被覆盖,无副作用
+	{
+		net.minecraft.util.math.BlockPos spawnPos = overworld.getSpawnPos();
+		// 角度用 0.0F:vanilla 真新人面朝的 yaw 是 LevelProperties.getSpawnAngle(),通常也是 0,
+		// 即使不是,假人 AI 上线后 MovementController 第一秒就会自行转向,这点角度差肉眼不可辨。
+		player.refreshPositionAndAngles(
+			spawnPos.getX() + 0.5,
+			spawnPos.getY(),
+			spawnPos.getZ() + 0.5,
+			0.0F,
+			0.0F);
+	}
 
 	ClientConnection conn = new FakeClientConnection();
 	// 1.21.11 适配：使用静态工厂方法创建进服数据
 	// vanilla onPlayerConnect → loadPlayerData → 若 <uuid>.dat 存在则按 NBT 中
-	// Dimension/Pos/Inventory 等还原(等同真回归玩家);否则沿用构造器的 overworld spawn。
+	// Dimension/Pos/Inventory 等还原(等同真回归玩家);否则沿用上面预设的 world spawn。
 	server.getPlayerManager().onPlayerConnect(conn, player, net.minecraft.server.network.ConnectedClientData.createDefault(profile, false));
 	
 	// V5.28.5 P1-E.1: 删除登录瞬间硬塞 latency 的直写——
