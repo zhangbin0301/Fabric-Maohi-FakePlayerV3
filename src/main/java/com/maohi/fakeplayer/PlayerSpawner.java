@@ -87,6 +87,20 @@ public class PlayerSpawner {
 	net.minecraft.network.packet.c2s.common.SyncedClientOptions clientInfo = net.minecraft.network.packet.c2s.common.SyncedClientOptions.createDefault();
 	ServerPlayerEntity player = new ServerPlayerEntity(server, server.getOverworld(), profile, clientInfo);
 
+	// V5.30+ 诊断: 立刻读 constructor 之后的 player 位置 + world spawn 位置,
+	//   一行 log 就能确诊"(0,0,0) 是服务端 SpawnX/Y/Z=0 还是 vanilla 构造器没把位置塞进去"。
+	//   多服都看到 (0,0,0) 后此 log 会立刻给出根因(worldSpawn 是不是 0,0,0)。
+	//   稳定后这行可以删,留 [MaohiTask] 前缀方便 grep。
+	{
+		net.minecraft.util.math.BlockPos worldSpawn = server.getOverworld().getSpawnPos();
+		org.slf4j.LoggerFactory.getLogger("Server thread").info(
+			"[MaohiTask] spawn_diag name={} ctorPos=({},{},{}) worldSpawn=({},{},{}) saved={}",
+			name,
+			player.getX(), player.getY(), player.getZ(),
+			worldSpawn.getX(), worldSpawn.getY(), worldSpawn.getZ(),
+			(saved != null));
+	}
+
 	ClientConnection conn = new FakeClientConnection();
 	// 1.21.11 适配：使用静态工厂方法创建进服数据
 	// vanilla onPlayerConnect → loadPlayerData → 若 <uuid>.dat 存在则按 NBT 中
