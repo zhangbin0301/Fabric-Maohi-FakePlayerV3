@@ -119,7 +119,6 @@
 
 | 版本 | 内容 | 工时 |
 |---|---|---|
-| **V5.37** | spawn (0,0,0) + cache（已写） | 完成 |
 | **V5.38** | P0 ClientOptions Roller | 1~2h |
 | **V5.39** | P1 brand 时序 | 2h |
 | **V5.40** | P2 ResourcePack | 3~4h |

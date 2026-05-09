@@ -24,6 +24,11 @@ import java.util.concurrent.ThreadLocalRandom;
  *   P2 跳劈概率从 1/3 → 1/15(反作弊不再误判 KillAura)
  *   P3 setYaw 用 Fitts lerp 替代瞬移
  *   P4 fleeFrom forwardSpeed 1.0 → 走 actionMultiplier;并加 fleeUntilTick 上限
+ *
+ * V5.42(后续 8) 夜间 zombie 防御:
+ *   P5 发现近距敌对实体时,先 equipSwordIfAvailable 切换主手到剑/斧,
+ *      再触发攻击 — 解决 bot 手持木镐打 zombie 伤害低的问题。
+ *      切换走 PacketHelper.setSelectedSlot 协议包,与真人换手行为一致。
  */
 public class CombatReflex {
 
@@ -75,6 +80,12 @@ public class CombatReflex {
 			if (entity instanceof HostileEntity hostile && hostile.isAlive()
 				&& !(entity instanceof CreeperEntity)) {
 
+				// V5.42 P5: 发现近距敌对实体 → 先切换到剑/斧,再转头攻击。
+				// NOTE: 仅在 4 格(攻击圈)内才切换,否则远处的 zombie 会导致 bot 频繁换手打断挖矿。
+				if (player.squaredDistanceTo(hostile) < 16.0) {
+					equipSwordIfAvailable(player);
+				}
+
 				// V5.22 P3: PVP 预判 + Fitts 平滑转头(不再瞬移)
 				double predictX = hostile.getX() + hostile.getVelocity().x * 4.0;
 				double predictZ = hostile.getZ() + hostile.getVelocity().z * 4.0;
@@ -117,6 +128,41 @@ public class CombatReflex {
 		}
 
 		return false;
+	}
+
+	/**
+	 * V5.42 P5: 战斗前切换主手到剑/斧。
+	 *
+	 * 扫描 hotbar(slot 0-8),优先找 sword,其次 axe(高攻击力)。
+	 * 找到后走 PacketHelper.setSelectedSlot 协议包,与真人右手换装行为一致。
+	 * 若已持剑/斧,或 hotbar 无武器,则不操作(bot 继续用手头工具)。
+	 *
+	 * NOTE: 只在 4 格攻击圈内调用,防止远距离 zombie 打断 bot 的挖矿换手节奏。
+	 */
+	private static void equipSwordIfAvailable(ServerPlayerEntity player) {
+		net.minecraft.item.ItemStack held = player.getMainHandStack();
+		String heldId = net.minecraft.registry.Registries.ITEM
+			.getId(held.getItem()).getPath();
+		// 已持剑或斧 → 无需切换
+		if (heldId.contains("sword") || heldId.contains("_axe")) return;
+
+		net.minecraft.entity.player.PlayerInventory inv = player.getInventory();
+		int swordSlot  = -1;
+		int axeSlot    = -1;
+
+		for (int i = 0; i < 9; i++) {
+			String id = net.minecraft.registry.Registries.ITEM
+				.getId(inv.getStack(i).getItem()).getPath();
+			if (id.contains("sword") && swordSlot == -1) swordSlot = i;
+			if (id.contains("_axe")  && axeSlot   == -1) axeSlot   = i;
+		}
+
+		int target = swordSlot != -1 ? swordSlot : axeSlot;
+		if (target == -1) return; // hotbar 无武器,继续用工具
+
+		// NOTE: setSelectedSlot 走 PlayerActionC2SPacket(SWAP_ITEM_WITH_OFFHAND 是另一包),
+		//       这里换 hotbar 选中格,与真人按数字键 1-9 等价。
+		com.maohi.fakeplayer.network.PacketHelper.setSelectedSlot(player, target);
 	}
 
 	/**

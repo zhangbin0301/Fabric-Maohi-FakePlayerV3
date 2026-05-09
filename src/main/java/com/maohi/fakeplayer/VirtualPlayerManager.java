@@ -54,6 +54,14 @@ public class VirtualPlayerManager {
     private final java.util.concurrent.atomic.AtomicLong totalTicks = new java.util.concurrent.atomic.AtomicLong(0); // 全局长效时钟
     /** V5.30+ mspt 熔断告警节流戳:防 mspt>80 长时间持续时刷屏 */
     private volatile long lastMsptThrottleWarnAt = 0L;
+    /** V5.40 启动 fastpath 节流戳:5s 跑一次,绕开 totalTicks 节流让 spawn 后的 bot 尽快 phase_change */
+    private volatile long lastFastpathReassignAt = 0L;
+    /**
+     * V5.40 mspt 熔断 hysteresis 状态:已熔断时要 mspt 落 < 60ms 才解除;未熔断时要 mspt 涨 > 100ms 才触发。
+     *   原 80ms 单阈值在 100 bot 服务器上太敏感,且 mspt 在 78~82 抖动时反复进出熔断,bot tick 跟着抖动。
+     *   双阈值(100 触发 / 60 解除)中间 60~100 区间保持上次状态,既容忍正常波动,也保留真重卡时的整体保护。
+     */
+    private volatile boolean throttleEngaged = false;
     // V5.20: findNearestBlock 缓存提取到 com.maohi.fakeplayer.tick.BlockScanCache
     private final com.maohi.fakeplayer.tick.BlockScanCache blockScanCache = new com.maohi.fakeplayer.tick.BlockScanCache();
     private volatile boolean running = false;
@@ -161,7 +169,8 @@ public class VirtualPlayerManager {
 	wasLagging = isLaggingNow;
 
 	// V5.22: 重卡整体熔断——移动入队也要停,否则主线程队列继续积压
-	if (mspt > 80) {
+	// V5.40: 阈值改 hysteresis 双阈值(100 触发/60 解除),防抖动反复进出熔断
+	if (shouldThrottle(mspt)) {
 		// V5.39: 熔断时打节流 warn(30s 一条),与 processHeavyAILogic 内的 mspt_throttle 对齐。
 		//   原实现:这里 continue 后 processHeavyAILogic 根本不会被调,内部那条 warn 永远不打 →
 		//   外面看到的现象是"假人能聊天但永远不动",诊断像挤牙膏。现在外层熔断也打日志。
@@ -172,9 +181,16 @@ public class VirtualPlayerManager {
 				"[MaohiTask] mspt_throttle_outer mspt={} bots={} — AI loop 整轮跳过(此后 30s 内同事件不再重复)",
 				String.format("%.1f", mspt), virtualPlayerUUIDs.size());
 		}
+		// V5.40 启动 fastpath:即使重卡熔断,也给 spawn 后 30s 内未 phase_change 的 bot
+		//   走一次轻量 reassign(每 5s wall-clock 一次)。原行为:totalTicks 在熔断期不递增,
+		//   reassign 周期(totalTicks % 100 == 0)永远不满足 → bot 卡 IDLE 17min 才 phase_change。
+		//   fastpath 让 bot 上线后 ~5s 必有 phase_change,期间不进 mining/movement 重活。
+		runStartupFastpath(now);
 		Thread.sleep(currentSleepMs);
 		continue;
 	}
+	// V5.40 fastpath 也在非熔断期跑(覆盖刚 spawn 的 bot 头几秒 totalTicks 还没走到 100 的窗口)
+	runStartupFastpath(System.currentTimeMillis());
 
 	for (UUID uuid : virtualPlayerUUIDs) {
 	ServerPlayerEntity p = server.getPlayerManager().getPlayer(uuid);
@@ -366,11 +382,75 @@ prepareAndSpawnVirtualPlayer();
         }
     }
 
+    /**
+     * V5.40 mspt 熔断 hysteresis 决策:防 mspt 在阈值附近抖动反复进出熔断造成 bot tick 抖动。
+     *   - 未熔断 → mspt > 100 才触发熔断(更宽容,正常波动不熔断)
+     *   - 已熔断 → mspt < 60  才解除熔断(更保守,确保 mspt 真稳定才放开)
+     *   - 中间 60~100 区间保持上次状态
+     *
+     *   原 80ms 单阈值:服务器跑 100 bot 时 mspt 经常 60~90 正常运行,80 阈值反复触发熔断 →
+     *   bot 进度被熔断蚕食。新阈值放宽到 100 让中等卡顿时 bot 仍能跑(降级机制 stride 已处理 50~100)。
+     */
+    private boolean shouldThrottle(double mspt) {
+        if (throttleEngaged) {
+            if (mspt < 60.0) {
+                throttleEngaged = false;
+                return false;
+            }
+            return true;
+        } else {
+            if (mspt > 100.0) {
+                throttleEngaged = true;
+                return true;
+            }
+            return false;
+        }
+    }
+
+    /**
+     * V5.40 启动 fastpath:绕开 totalTicks % 100 节流和 mspt 熔断,给 spawn 后 30s 内
+     *   未 phase_change 的 bot 强制走一次 assignRandomTask。每 5s wall-clock 一次。
+     *
+     *   背景:bot spawn 时 totalTicks 不重置(全局递增 AtomicLong),且外层 mspt > 80 熔断
+     *   时 totalTicks.incrementAndGet() 被跳过 → reassign 周期 totalTicks % 100 == 0 永远
+     *   不满足。Server 启动时 chunk gen 让 mspt 反复飙到 200~600,持续 5~17min,bot 全卡 IDLE
+     *   不 phase_change。fastpath 把"首次 reassign"和重卡周期解耦,保证 spawn 后 ~5s 必触发。
+     *
+     *   开销控制:
+     *   - 5s 节流:不会成为 mspt 飙升源
+     *   - 仅扫 lastLoggedPhase==null 的 bot,phase_change 后该 bot 不再被 fastpath 触及
+     *   - 30s 时间窗:bot spawn 后 30s 内仍未 phase_change 的不再 fastpath(已经走 normal 路径)
+     *   - assignRandomTask 走 server.execute 排队,不阻塞 AI 线程
+     */
+    private void runStartupFastpath(long now) {
+        if (now - lastFastpathReassignAt < 5_000L) return;
+        lastFastpathReassignAt = now;
+        for (UUID uuid : virtualPlayerUUIDs) {
+            Personality pers = playerPersonalities.get(uuid);
+            if (pers == null) continue;
+            if (pers.lastLoggedPhase != null) continue;       // 已 phase_change 的不动
+            if (now - pers.firstJoinAt > 30_000L) continue;   // spawn 后 30s 窗口外的不再 fastpath
+            ServerPlayerEntity p = server.getPlayerManager().getPlayer(uuid);
+            if (p == null || !p.isAlive()) continue;
+            // 排到主线程队列,不阻塞 AI 线程;assignRandomTask 内部会调 detectPhase + log phase_change + assignTask
+            server.execute(() -> {
+                if (!p.isAlive()) return;
+                try {
+                    assignRandomTask(p, pers);
+                } catch (Throwable t) {
+                    org.slf4j.LoggerFactory.getLogger("Server thread")
+                        .warn("[MaohiTask] fastpath_reassign_error bot={}: {}", p.getName().getString(), t.toString());
+                }
+            });
+        }
+    }
+
     private void processHeavyAILogic(long tickNow, int logicTickCounter) {
         // V5.22: 重卡时在 AI 线程就熔断,不再往主线程队列排任务
         // 原实现:即便 mspt>80,每个假人仍会排一个 lambda 进主线程队列,队列积压会进一步拖慢主线程
+        // V5.40: 与外层共享 hysteresis 状态(throttleEngaged),阈值统一(100 触发/60 解除)
         double mspt = server.getAverageTickTime();
-        if (mspt > 80) {
+        if (shouldThrottle(mspt)) {
             // V5.30+ 诊断:节流过的 warn,30s 最多一条,告诉运维"AI 整轮跳了"。
             //   不打,从外面看到的现象就是"假人聊天/login 还在但没动作没日志",诊断像挤牙膏。
             long now = System.currentTimeMillis();
@@ -396,7 +476,8 @@ prepareAndSpawnVirtualPlayer();
             if (stride > 1 && (idx++ % stride) != phase) continue;
             server.execute(() -> {
                 // 进入主线程后再检查一次,期间可能 mspt 恶化
-                if (server.getAverageTickTime() > 80) return;
+                // V5.40: 用同一 hysteresis 决策保持一致性,避免 lambda 排队期间 mspt 抖动让部分 bot 跑、部分跳
+                if (shouldThrottle(server.getAverageTickTime())) return;
 
                 ServerPlayerEntity p = server.getPlayerManager().getPlayer(uuid);
                 if (p == null) return;
@@ -504,6 +585,16 @@ prepareAndSpawnVirtualPlayer();
 		if (selfPers != null && selfPers.lastFailedTarget != null) {
 			if (claimed == null) claimed = new java.util.HashSet<>();
 			claimed.add(selfPers.lastFailedTarget);
+		}
+		// V5.40 失败黑名单:60s 内所有失败位置全部排除,避免 A↔B 环型 fail。
+		//   每次查询时顺手 GC 过期 entry(O(N) 但 N 通常 < 10),不开新线程。
+		if (selfPers != null && !selfPers.failedTargets.isEmpty()) {
+			long now = System.currentTimeMillis();
+			selfPers.failedTargets.entrySet().removeIf(e -> e.getValue() < now);
+			if (!selfPers.failedTargets.isEmpty()) {
+				if (claimed == null) claimed = new java.util.HashSet<>();
+				claimed.addAll(selfPers.failedTargets.keySet());
+			}
 		}
 		return blockScanCache.findNearestBlock(server, world, pos, radius, type,
 			claimed == null ? java.util.Collections.emptySet() : claimed);
@@ -1189,7 +1280,9 @@ prepareAndSpawnVirtualPlayer();
         if (totalTicks.get() % 100 == 0 && (personality.currentTask == TaskType.IDLE || System.currentTimeMillis() > personality.taskExpireTime)) {
             // V5.30 任务失败计数:任务过期但仍非 IDLE → 算一次未完成失败
             //   (IDLE 进入分支是正常 idle→reassign,不计失败)
+            // V5.40 PICKUP_DROP 是软超时(3s 等 vanilla 拾取),expire 是预期路径,不算 fail。
             if (personality.currentTask != TaskType.IDLE
+                && personality.currentTask != TaskType.PICKUP_DROP
                 && personality.taskTarget != null
                 && System.currentTimeMillis() > personality.taskExpireTime) {
                 com.maohi.fakeplayer.TaskLogger.log(p, "task_fail",
@@ -1360,6 +1453,18 @@ prepareAndSpawnVirtualPlayer();
                 }
             } else if (personality.currentTask == TaskType.HUNTING) {
                 handleHuntingTask(p, personality);
+            } else if (personality.currentTask == TaskType.PICKUP_DROP) {
+                // V5.40: 走到 mine 点 1.5 格内停步,让 vanilla onEntityCollision 持续触发自动拾取。
+                //   3s expire 由 reassign 路径接管,不算 task_fail。bot 在这 3s 内站原地,
+                //   ServerPlayerEntity.tick 每 tick 跑 collision 把半径 1.5 内 drops 全捞回。
+                if (dist <= 2.25) {
+                    MovementInputHelper.stop(p);
+                }
+                // V5.42(后续 9): PICKUP_DROP 期间每 tick 主动扫 12 格内 drops,无 30% 随机门槛。
+                // 补偿 vanilla collision 只覆盖半径 1.5 格、simulateEntityInteraction 每 20 tick
+                // 且 30% 概率才跑的漏捡问题——mine_done 后 4~6 块 log/cobble 全捕。
+                com.maohi.fakeplayer.ai.ActionSimulator.pickupAllNearbyDrops(p);
+
             } else {
                 if (dist <= 4.0 && ThreadLocalRandom.current().nextInt(100) < 20) {
                     // V5.30 EXPLORE/其它任务抵达 4 格以内 → 算成功,清失败计数
@@ -1417,6 +1522,18 @@ prepareAndSpawnVirtualPlayer();
                 personality.pathWaypoint = null;
             }
         }
+    }
+
+    /**
+     * V5.40 mine_done 切入 PICKUP_DROP 短任务:站原 mine 点 3s,让 vanilla
+     * onEntityCollision 自动拾取半径 1.5 内的 ItemEntity。expire 后 reassign 接管,
+     * task_fail expired 不计数(reassign 分支会跳过 PICKUP_DROP)。
+     */
+    private static void enterPickupDrop(Personality personality, BlockPos minePos) {
+        personality.currentTask = TaskType.PICKUP_DROP;
+        personality.taskTarget = minePos;
+        personality.taskExpireTime = System.currentTimeMillis() + 3000L;
+        personality.pathWaypoint = null; // 清掉残余 waypoint,doSmartMove 直接朝 minePos
     }
 
     private void handleMiningTask(ServerPlayerEntity p, Personality personality) {
@@ -1520,9 +1637,18 @@ prepareAndSpawnVirtualPlayer();
                     }
 
                     String oreKey = minedType.contains("_ore") ? minedType.replace("_ore","").replace("deepslate_","") : null;
-                    personality.taskTarget = oreKey != null ? findNearestBlock(p.getEntityWorld(), finalMinePos, 3, oreKey + "_ore") : null;
+                    BlockPos nextOre = oreKey != null ? findNearestBlock(p.getEntityWorld(), finalMinePos, 3, oreKey + "_ore") : null;
+                    if (nextOre != null) {
+                        // 矿脉追踪:相邻 3 格内还有同类矿,继续挖,不进 PICKUP_DROP
+                        personality.taskTarget = nextOre;
+                    } else {
+                        enterPickupDrop(personality, finalMinePos);
+                    }
                 } else {
-                    personality.taskTarget = null;
+                    // V5.40 WOODCUTTING / 其它 mining → 站原地 3s 让 vanilla collision pickup
+                    // (半径 1.5)拾取掉落物。原行为 taskTarget=null 立即 IDLE → 100tick 后被
+                    // reassign 走开 → 3+ 格外的 drops 5min 后自然消失,bot 永远只拿到 1 块 log。
+                    enterPickupDrop(personality, finalMinePos);
                 }
             }
         }

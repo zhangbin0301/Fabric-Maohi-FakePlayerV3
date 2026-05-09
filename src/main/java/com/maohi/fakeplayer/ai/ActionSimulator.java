@@ -48,7 +48,7 @@ public class ActionSimulator {
 				xpEntity.onPlayerCollision(player);
 				continue;
 			}
-			// 2) 物品:每 tick 最多捡一件,且必须落在 6 格内(原行为)
+			// 2) 物品:每 tick 最多捧一件,且必须落在 6 格内(原行为)
 			if (doItemPickup && !pickedOneItem
 				&& entity instanceof ItemEntity itemEntity
 				&& !itemEntity.cannotPickup()
@@ -64,6 +64,52 @@ public class ActionSimulator {
 		// V5.23: LootTracker 旧 tryAutoEquipNearby(扫场景+消费 ItemEntity 双路径)已移除,
 		// 改成只在背包内比对换装,职责清晰、无复制风险。
 		if (pickedOneItem) {
+			com.maohi.fakeplayer.ai.LootTracker.tryAutoEquipFromInventory(player);
+		}
+	}
+
+	/**
+	 * V5.42(后续 9) PICKUP_DROP 专用全量拾取方法。
+	 *
+	 * 与 simulateEntityInteraction 的区别:
+	 *   - 无 30% 随机门槛 — PICKUP_DROP 是专门等拾取的任务,必须全力捕获
+	 *   - 拾取半径 12 格(> 常规 6 格) — mine_done 后 drop 可能弹到坐矿点 4~6 格外
+	 *   - 每次最多拾 5 件(不止一件) — 树木 4~6 块 log 全捕
+	 *   - 同样拾完后进行自动穿戴流程
+	 *
+	 * 调用时机: VPM.tickWorldInteraction 在 PICKUP_DROP 状态下每 tick 直接调用(不对齐 20 tick)。
+	 */
+	public static void pickupAllNearbyDrops(ServerPlayerEntity player) {
+		boolean inventoryFull = player.getInventory().getEmptySlot() == -1;
+		if (inventoryFull) return;
+
+		// NOTE: 12 格半径 — mine_done 后 drop 可能被物理东西弹走,视野更大才能全部捕获
+		double sqDist12 = 12.0 * 12.0;
+		List<net.minecraft.entity.Entity> nearby = player.getEntityWorld().getOtherEntities(
+			player, player.getBoundingBox().expand(12.0)
+		);
+
+		int xpLevel = player.experienceLevel;
+		int pickedCount = 0;
+
+		for (net.minecraft.entity.Entity entity : nearby) {
+			if (!entity.isAlive()) continue;
+			if (pickedCount >= 5) break; // 每次最多拾 5 件,避免单 tick 内财物过多
+
+			if (entity instanceof ExperienceOrbEntity xpEntity) {
+				xpEntity.onPlayerCollision(player);
+				continue;
+			}
+			if (entity instanceof ItemEntity itemEntity
+				&& !itemEntity.cannotPickup()
+				&& player.squaredDistanceTo(entity) <= sqDist12
+				&& shouldPickupItem(itemEntity, xpLevel)) {
+				itemEntity.onPlayerCollision(player);
+				pickedCount++;
+			}
+		}
+
+		if (pickedCount > 0) {
 			com.maohi.fakeplayer.ai.LootTracker.tryAutoEquipFromInventory(player);
 		}
 	}
@@ -105,7 +151,7 @@ public class ActionSimulator {
 		// Lv5+：不捡纯废品
 		if (xpLevel >= 5) {
 			if (itemId.equals("dirt") || itemId.equals("sand") || itemId.equals("gravel")
-				|| itemId.equals("flint") || itemId.equals("clay_ball") || itemId.equals("cobblestone")
+				|| itemId.equals("flint") || itemId.equals("clay_ball")
 				|| itemId.equals("netherrack") || itemId.equals("deepslate")) return false;
 		}
 		// Lv10+：不捡木质/石质工具、皮革护甲

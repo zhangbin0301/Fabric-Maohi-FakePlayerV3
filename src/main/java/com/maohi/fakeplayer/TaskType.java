@@ -10,6 +10,10 @@ public enum TaskType {
 	WOODCUTTING,
 	MINING,
 	COLLECTING,
+	// V5.40 mine_done 后短暂停留(3s)让 vanilla collision pickup 触发,
+	// 解决 bot 挖完立即被 reassign 走开 → 掉落物 5min 自然消失的问题。
+	// 与 mineflayer-collectblock 的 "goto drop → wait pickup" 一步等价。
+	PICKUP_DROP,
 	AFK,
 	RECONNECTING,
 	HUNTING,

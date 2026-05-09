@@ -82,6 +82,11 @@ public class Personality {
 	public int taskFailCount = 0;
 	public BlockPos lastFailedTarget = null;
 	public long lastTaskFailTime = 0L;
+	// V5.40 失败黑名单:key=失败 BlockPos,value=过期时间戳(System.currentTimeMillis() + TTL)。
+	//   原单值 lastFailedTarget 只能排除 1 个失败位置 → bot fail A 后选 B,fail B 后又选回 A,
+	//   形成 A↔B 环。Map+TTL 让最近 60s 所有失败位置同时被 findNearestBlock 排除,bot 必须扩大
+	//   搜索半径选第三个目标。Gson 默认能序列化 HashMap<BlockPos, Long>(BlockPos 是 record-like)。
+	public java.util.Map<BlockPos, Long> failedTargets = new java.util.HashMap<>();
 
 	// V5.30 调试日志:记录上次 detectPhase 输出,用于在切换时打 phase_change 日志(避免每 tick 重复)
 	public GrowthPhase lastLoggedPhase = null;
@@ -257,11 +262,17 @@ public class Personality {
 		p.taskFailCount++;
 		p.lastFailedTarget = failedTarget;
 		p.lastTaskFailTime = System.currentTimeMillis();
+		// V5.40 黑名单累积 60s
+		if (failedTarget != null) {
+			p.failedTargets.put(failedTarget, System.currentTimeMillis() + 60_000L);
+		}
 	}
 
 	public static void resetTaskFailCount(Personality p) {
 		if (p == null) return;
 		p.taskFailCount = 0;
 		p.lastFailedTarget = null;
+		// V5.40 真实成功 → 清黑名单,允许下次重新评估这些坐标
+		p.failedTargets.clear();
 	}
 }
