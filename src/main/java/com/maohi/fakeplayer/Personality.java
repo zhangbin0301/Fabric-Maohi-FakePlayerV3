@@ -70,6 +70,11 @@ public class Personality {
 
 	public float actionMultiplier = com.maohi.fakeplayer.ai.BehavioralDistributionValidator.getAlignedActionMultiplier();
 	public TaskType currentTask = TaskType.IDLE; public BlockPos taskTarget = null; public long taskExpireTime = 0;
+	// V5.40 修复:寻路被阻挡时 A* 算出来的下一步路径点。原代码把这个塞回 taskTarget,
+	// 导致 handleMiningTask 用 path step(脚下 air 方块)当挖矿目标 → target_is_air 死循环。
+	// 新行为:doSmartMove 优先朝 pathWaypoint 走;到达后清空,后续 tick 自动回到朝 taskTarget 走。
+	// taskTarget 在整个任务期间保持指向真正的目标(树/矿/EXPLORING 终点),不被路径计算污染。
+	public BlockPos pathWaypoint = null;
 
 	// V5.30 任务失败计数:同一/相邻目标连续失败 → 阈值后强制远征,避免反复撞同一棵够不到的树。
 	// recordTaskFailure 在以下场景调用:任务过期未完成、寻路死路、工具无法破坏目标、挖掘目标变空气。

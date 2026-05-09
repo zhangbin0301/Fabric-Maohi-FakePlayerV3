@@ -80,6 +80,25 @@ public class PathfindingNavigation {
 	}
 
 	/**
+	 * V5.40 spawn 专用:用 MOTION_BLOCKING_NO_LEAVES 跳过树叶,避免 bot 落在树冠层。
+	 *   getSafeTopY 用 MOTION_BLOCKING(包含 leaves)→ 森林里 spawn 落在 leaves 顶 y=80+,
+	 *   bot 被叶子包围 → 走不出 → 反复 task_fail → 永远 0 成就。
+	 *   NO_LEAVES 把树叶当透明,heightmap 落到 leaves 下面的真实地表(草/土/石头)。
+	 *   找不到时回退普通 getSafeTopY。
+	 */
+	public static int getSafeSpawnY(ServerWorld world, int x, int z, int fallbackY) {
+		int chunkX = x >> 4;
+		int chunkZ = z >> 4;
+		Chunk chunk = (Chunk) world.getChunkManager().getChunk(chunkX, chunkZ, ChunkStatus.FULL, false);
+		if (chunk == null) return fallbackY;
+		int localX = x & 15;
+		int localZ = z & 15;
+		int height = chunk.getHeightmap(Heightmap.Type.MOTION_BLOCKING_NO_LEAVES).get(localX, localZ);
+		if (height <= world.getBottomY()) return getSafeTopY(world, x, z, fallbackY);
+		return height;
+	}
+
+	/**
 	 * 判定前方是否为危险区域(如熔岩或高处坠落风险)
 	 */
 	public static boolean isDangerAhead(ServerWorld world, BlockPos pos) {

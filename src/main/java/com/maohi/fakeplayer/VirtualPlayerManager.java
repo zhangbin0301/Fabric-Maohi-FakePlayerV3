@@ -1329,9 +1329,21 @@ prepareAndSpawnVirtualPlayer();
             float speedMod = (ageDays > 50 ? 0.85f : 1.0f) * (isSleepy ? 0.7f : 1.0f);
             double moveStep = (0.15 + (personality.actionMultiplier * 0.1)) * speedMod / 20.0;
 
+            // V5.40: 寻路被阻挡时 A* 算了 pathWaypoint(中间点),朝它走;贴近后清空回到朝 taskTarget。
+            //   关键:不把 pathWaypoint 塞回 taskTarget,否则 mining 状态机会拿路径点当挖矿目标
+            //   (路径点是脚下空气)→ target_is_air 死循环。
+            BlockPos moveGoal = personality.taskTarget;
+            if (personality.pathWaypoint != null) {
+                if (p.getBlockPos().getSquaredDistance(personality.pathWaypoint) <= 4.0) {
+                    personality.pathWaypoint = null; // 走到了,继续朝 taskTarget
+                } else {
+                    moveGoal = personality.pathWaypoint;
+                }
+            }
+
             // 执行智能移动
             boolean blocked = com.maohi.fakeplayer.ai.MovementController.doSmartMove(
-                p, personality.taskTarget, moveStep,
+                p, moveGoal, moveStep,
                 personality.noisePhaseYaw, personality.noisePhasePitch);
 
             if (blocked) {
@@ -1390,7 +1402,10 @@ prepareAndSpawnVirtualPlayer();
                 com.maohi.fakeplayer.ai.PathfindingNavigation.findPath(
                     p.getEntityWorld(), p.getBlockPos(), personality.taskTarget);
             if (!path.isEmpty()) {
-                personality.taskTarget = path.get(0);
+                // V5.40: 改写中间路径点到 pathWaypoint,不动 taskTarget。
+                //   原代码 personality.taskTarget = path.get(0) 让 mining 状态机用路径点(空气)
+                //   当挖矿目标,target_is_air 死循环 — 见 BraveClumsy 几十轮 fail 同一坐标。
+                personality.pathWaypoint = path.get(0);
             } else {
                 // V5.30 真正的死路:既被阻挡,A* 也找不到路 → 计一次失败
                 com.maohi.fakeplayer.TaskLogger.log(p, "task_fail",
@@ -1399,6 +1414,7 @@ prepareAndSpawnVirtualPlayer();
                 Personality.recordTaskFailure(personality, personality.taskTarget);
                 personality.currentTask = TaskType.IDLE;
                 personality.taskTarget = null;
+                personality.pathWaypoint = null;
             }
         }
     }

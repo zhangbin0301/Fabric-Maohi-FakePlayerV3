@@ -280,10 +280,16 @@ public class PlayerSpawner {
         java.util.concurrent.ThreadLocalRandom rng = java.util.concurrent.ThreadLocalRandom.current();
         for (int attempt = 0; attempt < 10; attempt++) {
             double angle = rng.nextDouble() * Math.PI * 2.0;
-            double distance = rng.nextDouble() * radius;
+            // V5.40: sqrt 让面积分布均匀,避免线性 distance 让 bot 大概率挤在原点附近;
+            // 同时强制 minDistance=2 让第一个 bot 不会落在精确 (0,0) base 上。
+            double distance = (radius < 4)
+                ? rng.nextDouble() * radius
+                : 2.0 + Math.sqrt(rng.nextDouble()) * (radius - 2);
             int candidateX = base.getX() + (int) Math.round(Math.cos(angle) * distance);
             int candidateZ = base.getZ() + (int) Math.round(Math.sin(angle) * distance);
-            int candidateY = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(
+            // V5.40: getSafeSpawnY 用 NO_LEAVES heightmap,跳过树叶落到真实地表;
+            // 否则森林环境 bot spawn 在 y=80+ 树冠层,被叶子包住走不出,task 全部 fail。
+            int candidateY = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeSpawnY(
                 world, candidateX, candidateZ, Integer.MIN_VALUE);
             if (candidateY != Integer.MIN_VALUE && candidateY > world.getBottomY()) {
                 return new net.minecraft.util.math.BlockPos(candidateX, candidateY, candidateZ);
