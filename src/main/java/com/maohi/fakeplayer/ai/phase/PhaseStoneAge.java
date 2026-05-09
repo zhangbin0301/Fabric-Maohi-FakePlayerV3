@@ -57,6 +57,11 @@ public final class PhaseStoneAge implements Phase {
     /** STONE_TOOL 内,cobble 攒到该值之后才允许 IDLE 等 craft;否则继续挖以备多产物(石剑/石斧/熔炉) */
     private static final int COBBLE_STABLE_THRESHOLD = 8;
 
+    /** V5.42 死锁 #1: bot 远离工作台时,在该半径内回找自己放过的 CRAFTING_TABLE */
+    private static final int WORKBENCH_RETURN_RADIUS = 32;
+    /** V5.42 死锁 #1: bot 与工作台的"贴近"距离平方,与 CraftingBehavior.findCraftingTable(6) 同语义 */
+    private static final double WORKBENCH_NEARBY_SQ = 36.0;
+
     /**
      * V5.30 STONE_AGE 内部细分子状态。
      * public 让 TaskLogger / debug 工具可以查询当前 sub-phase。
@@ -148,11 +153,35 @@ public final class PhaseStoneAge implements Phase {
             case STONE_START -> assignMineStone(player, personality, ctx);
 
             case STONE_TOOL -> {
-                // CraftingBehavior 会自动合石镐;cobble 没到稳态先继续挖
-                if (d.cobbleCount < COBBLE_STABLE_THRESHOLD) {
+                // V5.42 死锁 #1 修复:cobble 够了但 bot 远离工作台时主动走过去。
+                //   原行为 cobble≥8 → setIdle → autoCraftStoneTools 要求 workbenchNearby
+                //   → bot 在矿洞下 false → 不进合成态 → setIdle 5s → reassign → ♾ 永远拿不到石镐。
+                if (d.cobbleCount < COBBLE_FOR_STONE_PICK) {
+                    // 不够合石镐 → 继续挖
                     assignMineStone(player, personality, ctx);
                 } else {
-                    setIdle(personality, player, 5_000L);
+                    BlockPos workbench = com.maohi.fakeplayer.ai.CraftingBehavior
+                        .findCraftingTable(player, WORKBENCH_RETURN_RADIUS);
+                    boolean nearWorkbench = workbench != null
+                        && player.getBlockPos().getSquaredDistance(workbench) <= WORKBENCH_NEARBY_SQ;
+                    if (nearWorkbench) {
+                        // 工作台 6 格内 → IDLE 等 autoCraftStoneTools 自然推 STONE_PICKAXE
+                        setIdle(personality, player, 5_000L);
+                    } else if (d.cobbleCount < COBBLE_STABLE_THRESHOLD) {
+                        // 远离工作台但 cobble<8 → 继续挖,攒齐再一次性回去合石镐+石剑+石斧+熔炉,
+                        //   减少来回奔波(避免 cobble=3 就跑回 → 合完 → 又跑出去挖 的颠簸)。
+                        assignMineStone(player, personality, ctx);
+                    } else if (workbench != null) {
+                        // cobble≥8 + 工作台 6~32 格外:复用 EXPLORING 任务走过去。
+                        //   到达后 (dist≤4) reassign 路径会 clear taskTarget,下个周期重新评估,
+                        //   此时 nearWorkbench=true → setIdle → craft 触发。
+                        set(personality, TaskType.EXPLORING, workbench);
+                    } else {
+                        // cobble≥8 但 32 格内没自己放过的工作台 → 继续挖。
+                        //   bot 后续 plank≥4 时 autoCraftStoneTools 会触发新工作台合成 (!hasTable + !workbench),
+                        //   自然摆脱死锁(代价是多 4 plank,可接受)。
+                        assignMineStone(player, personality, ctx);
+                    }
                 }
             }
 

@@ -343,8 +343,17 @@ prepareAndSpawnVirtualPlayer();
                         });
                         
                         // 拟真下线/轮换逻辑：会话到期进入道别流程 (2.70 修复：杜绝凭空消失)
+                        // V5.42 min 保底:踢这个会跌破 configMin 时,延后该 session 5-15 分钟,
+                        //   避免多个会话短时间集中到期把在线压到 0。
+                        //   注:kickRandomVirtualPlayer 路径不会跌破 min,因为它由 size > currentTargetCount
+                        //   触发,而 currentTargetCount 永远 ≥ configMin(updateTargetCount 已保证)。
                         for (UUID uuid : virtualPlayerUUIDs) {
                             if (nowMs > sessionDurations.getOrDefault(uuid, Long.MAX_VALUE)) {
+                                if (virtualPlayerUUIDs.size() <= config().minVirtualPlayers) {
+                                    long bufferMs = (5 + ThreadLocalRandom.current().nextInt(11)) * 60_000L;
+                                    sessionDurations.merge(uuid, bufferMs, Long::sum);
+                                    break;
+                                }
                                 startLogoutProcess(uuid);
                                 break;
                             }
@@ -537,11 +546,14 @@ prepareAndSpawnVirtualPlayer();
         //   30 格 fall = 27 点伤害(满血玩家不戴鞋必死),vanilla 真人此时通常断网保命/吓掉线;
         //   bot 摔死会掉光装备 + 等级,严重污染统计指纹(假人异常死亡率高)。
         //   走 startLogoutProcess = 真实 disconnect 包,vanilla 自动 savePlayerData,下线点保留。
+        // V5.42 min 保底:踢这个会跌破 configMin 时不下线,让 bot 走 vanilla 摔伤路径
+        //   (vs. 在线人数跌破保底)— 选小恶。下次摔仍可能触发,直到补位。
         if (personality != null && !isLoggingOut(uuid)
             && p.getEntityWorld().getRegistryKey() == net.minecraft.world.World.OVERWORLD
             && p.fallDistance > 30f
             && !p.isOnGround()
-            && p.getVelocity().y < -0.5) {
+            && p.getVelocity().y < -0.5
+            && virtualPlayerUUIDs.size() > config().minVirtualPlayers) {
             startLogoutProcessInternal(uuid);
             return;
         }
@@ -716,18 +728,24 @@ prepareAndSpawnVirtualPlayer();
             lastTargetUpdate = now;
 
             // V5.5 昼夜节律仿真：根据服务器当前时间（假设 UTC+8）动态调整目标人数
+            // V5.42 min 保底语义修正:原 `min = configMin * timeFactor` 让凌晨 timeFactor=0.3
+            //   时 min 被压到 30%(配置 min=8 → 实际 min=2),与"min = 保底人数"的语义违背。
+            //   新行为:min 永远 = configMin,timeFactor 只缩 max;若 max*factor < configMin,
+            //   以 configMin 兜底(currentTargetCount 永远 ≥ configMin)。
             int hour = java.time.LocalTime.now().getHour();
             float timeFactor = 1.0f;
             if (hour >= 2 && hour <= 6) timeFactor = 0.3f; // 凌晨低谷
             else if (hour >= 19 && hour <= 23) timeFactor = 1.4f; // 黄金时段
-            
+
             // 周末加成
             java.time.DayOfWeek day = java.time.LocalDate.now().getDayOfWeek();
             if (day == java.time.DayOfWeek.SATURDAY || day == java.time.DayOfWeek.SUNDAY) timeFactor *= 1.5f;
 
-            int min = (int) (config().minVirtualPlayers * timeFactor);
-            int max = (int) (config().maxVirtualPlayers * timeFactor);
-            
+            int configMin = config().minVirtualPlayers;
+            int configMax = config().maxVirtualPlayers;
+            int min = configMin;
+            int max = Math.max((int) (configMax * timeFactor), configMin);
+
             if (min >= max) {
                 currentTargetCount = max;
             } else {
@@ -1413,7 +1431,14 @@ prepareAndSpawnVirtualPlayer();
         }
 
         // 5. 核心移动逻辑：执行寻路、避障与到达检测
-        if (!isFleeing && personality.taskTarget != null && personality.currentTask != TaskType.IDLE) {
+        // V5.42 修复多动症:CRAFTING 状态下不再寻路。原行为是 bot 进入 CRAFTING 后 craftingTicks
+        //   倒计时仍然跑,但 doSmartMove 朝 taskTarget(远处的树/矿石)继续走 → 走出工作台 6 格范围
+        //   → executeCraft 里 findCraftingTable 失败 → craft_fail no_workbench → 永远拿不到木镐。
+        //   关键洞察:autoCraftStoneTools 进入 CRAFTING 时只设 craftingTarget,不清 taskTarget,
+        //   所以这里短路是最干净的 fix。tickCrafting 内部会处理挥手动画,不需要这里调度。
+        if (!isFleeing && personality.taskTarget != null
+            && personality.currentTask != TaskType.IDLE
+            && personality.currentTask != TaskType.CRAFTING) {
             // V5.5 角色弧线与节律对移动步长的影响
             int localHr = (int) (((System.currentTimeMillis() / 3600000) + personality.timezoneOffset) % 24);
             if (localHr < 0) localHr += 24;
@@ -1442,6 +1467,15 @@ prepareAndSpawnVirtualPlayer();
             if (blocked) {
                 handleMoveBlocked(p, personality);
             }
+        }
+
+        // V5.42 多动症补丁:CRAFTING 期间主动清 forward/sideways 速度。
+        //   vanilla ServerPlayerEntity.tick 每 tick 按上次 PlayerInputC2SPacket 的 forward/sideways 算 travel,
+        //   不发新包字段就保持。bot 进 CRAFTING 时若上一 tick 还在 sprint,
+        //   后续 50 tick 倒计时内会按 ~0.21 m/s 持续滑行 → 累积 0.5m+ 可能滑出工作台 6 格范围。
+        //   stop() 发一次 forward=0/sideways=0/jump=false/sprint=false 的 PlayerInput 把字段清零。
+        if (personality.currentTask == TaskType.CRAFTING) {
+            MovementInputHelper.stop(p);
         }
 
         // 任务具体执行：挖掘、猎杀等

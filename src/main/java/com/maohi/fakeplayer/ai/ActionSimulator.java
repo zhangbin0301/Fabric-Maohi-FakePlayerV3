@@ -94,12 +94,17 @@ public class ActionSimulator {
 
 		for (net.minecraft.entity.Entity entity : nearby) {
 			if (!entity.isAlive()) continue;
-			if (pickedCount >= 5) break; // 每次最多拾 5 件,避免单 tick 内财物过多
 
+			// 经验球永远拾取(不计配额):vanilla 自身有 onCollision 兜底,但显式处理避免遗漏。
+			//   放在 pickedCount break 之前是关键 — 否则 5 件 log 满后,同 tick 出现的 XP orb
+			//   要等下一 tick 才被本函数处理。
 			if (entity instanceof ExperienceOrbEntity xpEntity) {
 				xpEntity.onPlayerCollision(player);
 				continue;
 			}
+
+			if (pickedCount >= 5) break; // 每次最多拾 5 件 ItemEntity,避免单 tick 财物突变指纹
+
 			if (entity instanceof ItemEntity itemEntity
 				&& !itemEntity.cannotPickup()
 				&& player.squaredDistanceTo(entity) <= sqDist12

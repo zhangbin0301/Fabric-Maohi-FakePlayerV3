@@ -106,8 +106,11 @@ public final class CraftingBehavior {
 			target = Items.CRAFTING_TABLE;
 			ticks = 30;
 		}
-		// 3. plank 充足但 stick 不够 → 合 stick (要工作台)
-		else if (plankCount >= 2 && stickCount < 2 && workbenchNearby) {
+		// 3. plank 充足但 stick 不够 → 合 stick (背包 2×2,不要工作台)
+		// V5.42 修复:原条件 `&& workbenchNearby` 让 bot 走开工作台后永远合不出 stick →
+		//   没 stick → 没木镐 → 永远卡 STONE_AGE WOOD_START → 0 成就。
+		//   vanilla stick recipe 是"P/P"(2 plank 上下叠),完全可在背包 2×2 grid 合,真人日常操作。
+		else if (plankCount >= 2 && stickCount < 2) {
 			target = Items.STICK;
 			ticks = 20;
 		}
@@ -225,7 +228,10 @@ public final class CraftingBehavior {
 		// V5.40 修复:OAK_PLANKS 也是 1×1 shapeless 配方,vanilla 真人在背包 2×2 grid 直接合,
 		// 不需要工作台。原代码漏掉这条分支,导致 bot 拿到 log 后永远 craft_fail no_workbench,
 		// 整条早期生存链卡死(永远拿不到 plank → 永远拿不到 crafting_table → 0 成就)。
-		if (target == Items.CRAFTING_TABLE || target == Items.OAK_PLANKS) {
+		// V5.42 修复:STICK 也是 2 plank 上下叠的 1×2 shaped 配方,2×2 grid 完全装得下。
+		// 之前只走工作台 3×3,加上 autoCraftStoneTools 的 workbenchNearby gate,
+		// 一旦 bot 走开工作台就再也合不出 stick → 木器时代死锁。
+		if (target == Items.CRAFTING_TABLE || target == Items.OAK_PLANKS || target == Items.STICK) {
 			executeInInventoryCraft(player, target, recipe);
 			return;
 		}
@@ -375,8 +381,12 @@ public final class CraftingBehavior {
 		// V5.30 W2S — 木→石过渡链
 		if (target == Items.OAK_PLANKS) return List.of(
 			new Placement(Items.OAK_LOG, 1));
+		// V5.42 STICK 改 2×2 背包配方:左列上下叠(slot 1=top-left, slot 3=bottom-left)。
+		//   vanilla stick recipe 是 shaped "P/P"(任意一列上下叠 4 sticks),
+		//   2×2 grid 与 3×3 grid vanilla 都接受;之前 slot 5/8 是 3×3 工作台坐标,
+		//   在 PlayerScreenHandler 里 slot 5-8 是头盔/靴子槽,直接合不出来。
 		if (target == Items.STICK) return List.of(
-			new Placement(Items.OAK_PLANKS, 5), new Placement(Items.OAK_PLANKS, 8));
+			new Placement(Items.OAK_PLANKS, 1), new Placement(Items.OAK_PLANKS, 3));
 		if (target == Items.CRAFTING_TABLE) return List.of(
 			new Placement(Items.OAK_PLANKS, 1), new Placement(Items.OAK_PLANKS, 2),
 			new Placement(Items.OAK_PLANKS, 3), new Placement(Items.OAK_PLANKS, 4));
@@ -461,7 +471,11 @@ public final class CraftingBehavior {
 	 * V5.28 P1-A.1: 同心壳扫工作台 — 切比雪夫距离 d 由近到远,Y 范围 ±3 覆盖楼上楼下基地。
 	 * 与 EnchantItemTrigger.findEnchantingTable / HotStuffTrigger 同思路,贴脸 O(1) 命中。
 	 */
-	private static BlockPos findCraftingTable(ServerPlayerEntity player, int radius) {
+	/**
+	 * V5.42:从 private 提升 public,让 PhaseStoneAge.STONE_TOOL 分支检查
+	 *   "cobble 够了但远离工作台" 死锁场景。语义不变:同心壳扫指定半径内的 CRAFTING_TABLE。
+	 */
+	public static BlockPos findCraftingTable(ServerPlayerEntity player, int radius) {
 		return findBlockNearby(player, radius, Blocks.CRAFTING_TABLE);
 	}
 
