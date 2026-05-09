@@ -64,9 +64,14 @@ public final class BlockScanCache {
 
 		double mspt = server.getAverageTickTime();
 		int maxRadius;
-		if (mspt <= 35) maxRadius = 20;
-		else if (mspt <= 50) maxRadius = 12;
-		else maxRadius = 8;
+		// V5.40 放宽 MSPT 高时的 maxRadius:
+		//   旧值 mspt > 50 直接压到 8,spawn 附近 8 格内常常没树/只有 1 棵
+		//   → 第一个 bot claim 后其他 bot 全找不到 → 全 EXPLORING → 死循环。
+		//   新值更阶梯化,即使重负载也保留 12 格的最低视野。
+		if (mspt <= 35) maxRadius = 24;
+		else if (mspt <= 60) maxRadius = 18;
+		else if (mspt <= 100) maxRadius = 14;
+		else maxRadius = 12;
 		if (radius > maxRadius) radius = maxRadius;
 
 		boolean isOre = type.contains("ore");
@@ -96,7 +101,10 @@ public final class BlockScanCache {
 		}
 
 		BlockPos result = scanShells(world, pos, radius, yMin, yMax, type, excluded);
-		cache.put(cacheKey, new Object[]{result, System.currentTimeMillis() + CACHE_TTL_MS});
+		// V5.40: negative result(null)只缓存 3 秒,避免一次卡顿期 scan miss 把 30s 内
+		// 所有同 cube bot 都钉死成 null → 全 EXPLORING。正向命中保持 30s 减少重扫。
+		long ttl = result != null ? CACHE_TTL_MS : 3_000L;
+		cache.put(cacheKey, new Object[]{result, System.currentTimeMillis() + ttl});
 		return result;
 	}
 

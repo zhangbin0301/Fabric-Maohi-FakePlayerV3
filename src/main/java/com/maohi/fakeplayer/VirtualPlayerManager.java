@@ -485,6 +485,11 @@ prepareAndSpawnVirtualPlayer();
 	 * V5.40 多 bot 目标去重:收集除 self 外所有 bot 的 taskTarget,让 BlockScanCache 跳过这些位置。
 	 *   原因:cache key 是 8×8×8 cube,落在同 cube 的 bot(spawn 附近常见)共享同一答案 → 全砍同一棵树。
 	 *   收集开销:O(N bots) per query,N=100 时仍是微秒级,远低于一次 BlockScan。
+	 *
+	 * V5.40 单 bot 防 fail 死循环:同时把 self.lastFailedTarget 加入排除集 — bot 反复选同一个
+	 *   失败 target(走不到/挖不动)时,fails 累加但 reassign 仍返回同一坐标(cache + 自身 UUID 排除自己)。
+	 *   把 lastFailedTarget 排除让 reassign 选新位置,避免 fail 死锁。
+	 *   resetTaskFailCount 在真实成功时清空 lastFailedTarget,不会永久封禁可达的树/矿。
 	 */
 	public BlockPos findNearestBlock(net.minecraft.server.world.ServerWorld world, BlockPos pos, int radius, String type, UUID self) {
 		java.util.Set<BlockPos> claimed = null;
@@ -494,6 +499,11 @@ prepareAndSpawnVirtualPlayer();
 			if (t == null) continue;
 			if (claimed == null) claimed = new java.util.HashSet<>();
 			claimed.add(t);
+		}
+		Personality selfPers = playerPersonalities.get(self);
+		if (selfPers != null && selfPers.lastFailedTarget != null) {
+			if (claimed == null) claimed = new java.util.HashSet<>();
+			claimed.add(selfPers.lastFailedTarget);
 		}
 		return blockScanCache.findNearestBlock(server, world, pos, radius, type,
 			claimed == null ? java.util.Collections.emptySet() : claimed);
