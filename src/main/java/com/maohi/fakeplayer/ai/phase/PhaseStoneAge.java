@@ -370,7 +370,17 @@ public final class PhaseStoneAge implements Phase {
             tz = player.getBlockZ() + dz;
             int rx = Personality.blockToRegion(tx);
             int rz = Personality.blockToRegion(tz);
-            if (!Personality.isRegionScanEmpty(p, rx, rz)) break;
+            if (Personality.isRegionScanEmpty(p, rx, rz)) continue;
+            // V5.43.3 P-3.E: 朝 target 第一格如果是真 danger (落差/岩浆/火),换方向。
+            //   深水已不算 danger (P-3.D),所以不会过度排除水方向,bot 仍可选水方向游过去。
+            //   节省 60s task timeout 等待: 旧行为 bot 朝悬崖走 → stopMovement → 站着等过期。
+            //   新行为 setExplore 在采样阶段就排除明显走不通的方向,失败时 retry 找其它方向。
+            int sdx = Integer.signum(dx);
+            int sdz = Integer.signum(dz);
+            BlockPos firstStep = player.getBlockPos().add(sdx, 0, sdz);
+            if (com.maohi.fakeplayer.ai.PathfindingNavigation.isDangerAhead(
+                    player.getEntityWorld(), firstStep)) continue;
+            break;
         }
         int ty = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(
             player.getEntityWorld(), tx, tz, player.getBlockY());

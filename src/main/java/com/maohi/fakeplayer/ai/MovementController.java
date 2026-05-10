@@ -254,6 +254,8 @@ public class MovementController {
 		double nz = pos.z + ndz / ndist;
 		BlockPos nextPos = BlockPos.ofFloored(nx, pos.y, nz);
 
+		// V5.43.3 P-3.D: isDangerAhead 已删除"深水=danger"判断(深水靠 wantJump swim-up 兜底,不会淹),
+		//   保留落差/岩浆/火等真 danger。这里直接调用即可,不再需要 isTouchingWater 二次豁免。
 		if (PathfindingNavigation.isDangerAhead(world, nextPos)) {
 			stopMovement(p);
 			if (pers != null) pers.currentPath.clear();

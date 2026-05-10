@@ -124,18 +124,15 @@ public class PathfindingNavigation {
 			|| world.getBlockState(pos.down()).isOf(net.minecraft.block.Blocks.MAGMA_BLOCK)) {
 			return true;
 		}
-		// 3. V5.25 P4-1: deep water (>=2 block column) - bot has no swim escape, will drown.
-		//    pos is water AND pos.up() is also water => head submerged => danger.
-		//    1-block-deep water (head in air) is allowed by isWalkable separately.
-		net.minecraft.fluid.Fluid posFluid = state.getFluidState().getFluid();
-		if (posFluid.matchesType(net.minecraft.fluid.Fluids.WATER)
-			|| posFluid.matchesType(net.minecraft.fluid.Fluids.FLOWING_WATER)) {
-			net.minecraft.fluid.Fluid upFluid = world.getBlockState(pos.up()).getFluidState().getFluid();
-			if (upFluid.matchesType(net.minecraft.fluid.Fluids.WATER)
-				|| upFluid.matchesType(net.minecraft.fluid.Fluids.FLOWING_WATER)) {
-				return true;
-			}
-		}
+		// V5.43.3 P-3.D: 删除原 V5.25 P4-1 的"深水=danger"判断。
+		//   原假设:bot 没法游泳逃生会淹死。
+		//   实际:doSmartMove 已 wantJump=true if isTouchingWater (line 134-136),vanilla
+		//     swim-up impulse 持续把 bot 浮到水面,任何深度水都不会淹死。
+		//   旧行为副作用:spawn 在水岛/沙滩/河边的 bot,4 邻全是 2+ 格深水 → 永远 stopMovement
+		//     → 21 分钟 0 移动 → setExplore/force_explore 200 块路一步走不到 → 0 树 0 成就。
+		//   日志证据(V5.43.2 5af03a5 第二次跑测): 9 bot 21 分钟全 logs=0,bot chat
+		//     "swimming back"/"ooh cliff" 透露 spawn 在水/悬崖边。
+		//   保留:lava / 火 / magma_block / 跌落≥3 格 — 这些都不是 swim-up 能救的真 danger。
 		return false;
 	}
 
