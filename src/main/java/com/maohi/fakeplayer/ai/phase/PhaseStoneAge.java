@@ -47,9 +47,9 @@ public final class PhaseStoneAge implements Phase {
 
     /** WOOD_START → WOOD_CRAFT 的 log 当量阈值。
      *  vanilla 推链需要:1 log → 4 planks(table) + ≥1 log → 4 planks(stick+wood pickaxe),
-     *  保险起见取 3 log 当量(plankCount/4 也算"已转化的 log")。
+     *  保险起见取 1 log 当量(plankCount/4 也算"已转化的 log")。只要兜里有木头就去推链, 不要赖在树林里。
      */
-    private static final int WOOD_LOGS_TARGET = 3;
+    private static final int WOOD_LOGS_TARGET = 1;
 
     /** STONE_START → STONE_TOOL 的 cobble 阈值(vanilla 石镐 = 3 cobble + 2 stick) */
     private static final int COBBLE_FOR_STONE_PICK = 3;
@@ -78,6 +78,7 @@ public final class PhaseStoneAge implements Phase {
         int cobbleCount = 0;
         boolean hasAnyPickaxe = false;
         boolean hasStonePickaxe = false; // 石镐及以上(石/铁/钻/合金)
+        boolean hasTable = false;
         boolean hasSword = false;
 
         /** "log 当量":每 4 plank 折算 1 log,粗略表达"还能合多少东西" */
@@ -97,6 +98,7 @@ public final class PhaseStoneAge implements Phase {
             else if (s.isIn(ItemTags.PLANKS)) d.plankCount += n;
             else if (it == Items.STICK) d.stickCount += n;
             else if (it == Items.COBBLESTONE || it == Items.COBBLED_DEEPSLATE) d.cobbleCount += n;
+            else if (it == Items.CRAFTING_TABLE) d.hasTable = true;
 
             if (it == Items.WOODEN_PICKAXE || it == Items.STONE_PICKAXE
                 || it == Items.IRON_PICKAXE || it == Items.DIAMOND_PICKAXE
@@ -116,8 +118,11 @@ public final class PhaseStoneAge implements Phase {
         if (d.hasAnyPickaxe) {
             return d.cobbleCount < COBBLE_FOR_STONE_PICK ? SubPhase.STONE_START : SubPhase.STONE_TOOL;
         }
-        // 没任何镐:看是否有原料推 craft 链
-        return d.logEquivalent() < WOOD_LOGS_TARGET ? SubPhase.WOOD_START : SubPhase.WOOD_CRAFT;
+        // 没任何镐:看是否有原料推 craft 链。
+        // V5.42.5 严重修复: 如果已经有工作台了(d.hasTable), 哪怕木头用光了也要留在 WOOD_CRAFT 寻找木头做镐子, 
+        // 不要退回 WOOD_START 导致重新去砍树/找树, 这样才能保住工作台不丢。
+        if (d.hasTable || d.logEquivalent() >= WOOD_LOGS_TARGET) return SubPhase.WOOD_CRAFT;
+        return SubPhase.WOOD_START;
     }
 
     @Override
