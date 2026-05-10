@@ -965,18 +965,27 @@ prepareAndSpawnVirtualPlayer();
     );
 
     /**
-     * V5.30 任务失败计数兜底:连续 ≥4 次失败时调用,把假人甩到 ±60 格外的 EXPLORING 目标,
+     * V5.30 任务失败计数兜底:连续 ≥4 次失败时调用,把假人甩到远征 EXPLORING 目标,
      * 切断"反复撞同一棵够不到的树/挖同一块够不到的石头"的卡死循环。
      * 朝当前 yaw ±60° 扇形采样,贴合 PhaseStoneAge.setExplore 的"定向跋涉"观感,而不是回头跑。
-     * 30s 过期 → 期间假人走过去,再触发一次正常 assignRandomTask 重新扫资源,大概率新区域找得到。
      * V5.30+ Y-snap:同 setExplore 一样把目标 Y 拉到 MOTION_BLOCKING 表面,
      *   防止 bot 卡 y=0(spawn 异常)时永远在 y=0 横向打转、扫不到地表树/石头。
+     * V5.43 P-1.C 阶梯递增:原固定 50~70 格,bot spawn 在 desert/ocean/无树 biome 时
+     *   60 格外仍可能没树 → bot 反复 force_explore 相同半径永远走不出无树带。
+     *   现在每次 force_explore 阶梯 +1,半径 = 60 + escalation*50,封顶 320 格。
+     *   bot 真实成功(resetTaskFailCount)时阶梯清零,下次重新从 60 格起。
+     * V5.43 P-1.C expire 用 TASK_TIMEOUT_EXPLORE 而非写死 30s,与 P-1.B 60s 对齐
+     *   (远征更长距离需要更长 timeout,30s 走不完 200 格)。
      */
     private void forceExploreAfterFailures(ServerPlayerEntity p, Personality personality) {
         ThreadLocalRandom rng = ThreadLocalRandom.current();
+        // V5.43 P-1.C 阶梯递增半径
+        personality.forceExploreEscalation++;
+        int escalation = Math.min(personality.forceExploreEscalation, 6); // cap 阶梯到 6 级
+        int baseRadius = 60 + (escalation - 1) * 50;                       // 1→60, 2→110, 3→160 ... 6→310
         float yaw = p.getYaw() + (rng.nextFloat() * 120f - 60f);
         double rad = Math.toRadians(yaw);
-        double dist = 50.0 + rng.nextDouble() * 20.0;  // 50~70 格
+        double dist = baseRadius + rng.nextDouble() * 20.0;                // ±20 浮动
         int dx = (int) Math.round(-Math.sin(rad) * dist);
         int dz = (int) Math.round(Math.cos(rad) * dist);
         int tx = p.getBlockX() + dx;
@@ -985,10 +994,18 @@ prepareAndSpawnVirtualPlayer();
             p.getEntityWorld(), tx, tz, p.getBlockY());
         personality.currentTask = TaskType.EXPLORING;
         personality.taskTarget = new BlockPos(tx, ty, tz);
-        personality.taskExpireTime = System.currentTimeMillis() + 30_000L;
+        personality.taskExpireTime = System.currentTimeMillis() + TimingConstants.TASK_TIMEOUT_EXPLORE;
         com.maohi.fakeplayer.TaskLogger.log(p, "force_explore",
-            "target", personality.taskTarget, "lastFail", personality.lastFailedTarget);
-        Personality.resetTaskFailCount(personality);
+            "target", personality.taskTarget, "lastFail", personality.lastFailedTarget,
+            "escalation", escalation, "dist", (int) dist);
+        // V5.43 P-1.C: 把 force_explore 目标加黑名单(60s TTL),防止 bot 没走完就被
+        //   下个 reassign 周期"反向选回"该坐标。但不调 resetTaskFailCount(那会清 escalation)。
+        if (personality.taskTarget != null) {
+            personality.failedTargets.put(personality.taskTarget, System.currentTimeMillis() + 60_000L);
+        }
+        personality.taskFailCount = 0;        // 清计数,给 bot 时间走到新远征点
+        personality.lastFailedTarget = null;  // 清 findNearestBlock 排除集污染源
+        // 注意:forceExploreEscalation 不清,下次到了远征点仍找不到资源时阶梯继续 +1
     }
 
     private void assignRandomTask(ServerPlayerEntity player, Personality personality) {
@@ -1300,14 +1317,23 @@ prepareAndSpawnVirtualPlayer();
         if (tickNow < personality.inRaidUntil) return false;
 
         // ★ 任务分配与队列跳转
-        if (totalTicks.get() % 100 == 0 && (personality.currentTask == TaskType.IDLE || System.currentTimeMillis() > personality.taskExpireTime)) {
+        // V5.43 P-1.A 紧急修:reassign 节流改用 wall-clock 5s,而非 totalTicks % 100 == 0。
+        //   旧条件在 MSPT 熔断(>80ms)时失效——totalTicks 停止递增,bot 在 chunk gen /
+        //   多 bot 同 tick 寻路时被静默冻几分钟才 reassign 一次。
+        //   日志证据(2026-05-10 跑测):bot 1 小时只 reassign ~10 次(应 ~120 次),
+        //   13 分钟、14 分钟、18 分钟连续无 reassign 是常态 → bot 永远找不到树,30+ 次 EXPLORING 0 次 WOODCUTTING。
+        //   wall-clock 不受 MSPT 影响。各 bot lastReassignAt 独立自然错峰,反而比 totalTicks 同步触发更健康。
+        boolean reassignDue = (tickNow - personality.lastReassignAt) >= 5_000L
+            && (personality.currentTask == TaskType.IDLE || tickNow > personality.taskExpireTime);
+        if (reassignDue) {
+            personality.lastReassignAt = tickNow;
             // V5.30 任务失败计数:任务过期但仍非 IDLE → 算一次未完成失败
             //   (IDLE 进入分支是正常 idle→reassign,不计失败)
             // V5.40 PICKUP_DROP 是软超时(3s 等 vanilla 拾取),expire 是预期路径,不算 fail。
             if (personality.currentTask != TaskType.IDLE
                 && personality.currentTask != TaskType.PICKUP_DROP
                 && personality.taskTarget != null
-                && System.currentTimeMillis() > personality.taskExpireTime) {
+                && tickNow > personality.taskExpireTime) {
                 com.maohi.fakeplayer.TaskLogger.log(p, "task_fail",
                     "reason", "expired", "task", personality.currentTask,
                     "target", personality.taskTarget, "fails", personality.taskFailCount + 1);

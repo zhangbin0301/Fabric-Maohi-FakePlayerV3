@@ -21,8 +21,12 @@ public final class TimingConstants {
 	public static final long NEARBY_GREET_COOLDOWN = 10_000L;
 
 	// === 任务超时（毫秒）===
-	/** 探索/闲逛任务超时 — V5.17: 15s → 30s（给假人留时间寻路） */
-	public static final long TASK_TIMEOUT_EXPLORE = 30_000L;
+	/** 探索/闲逛任务超时
+	 *   V5.17: 15s → 30s（给假人留时间寻路）
+	 *   V5.43 P-1.B: 30s → 60s。日志证据(2026-05-10):bot 寻路 40 格远征常 30s 内走不完,
+	 *     task expire 后 setExplore 重选目标 → bot 在 spawn 附近 ±20 格反复打转,永远扫不到树。
+	 *     延长到 60s 让 bot 真有机会走到目标位置后扫一次资源。 */
+	public static final long TASK_TIMEOUT_EXPLORE = 60_000L;
 	/** 工作（挖矿/砍树）任务超时 — V5.17: 10s → 45s（移动 + 实际挖一两个方块所需时间） */
 	public static final long TASK_TIMEOUT_WORK = 45_000L;
 	/** 长周期任务超时（30分钟） */

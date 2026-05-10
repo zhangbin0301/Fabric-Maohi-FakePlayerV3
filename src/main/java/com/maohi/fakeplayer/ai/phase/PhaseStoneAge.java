@@ -231,6 +231,8 @@ public final class PhaseStoneAge implements Phase {
             set(p, TaskType.WOODCUTTING, target);
         } else {
             // V5.28.6 P2-Scan: 近 32 格没树 → EXPLORING ±40 走出去再扫
+            // V5.42: 把当前 region 标 empty,setExplore 下次别再选回这里
+            Personality.markRegionScanEmpty(p, player.getBlockPos());
             setExplore(p, player);
         }
     }
@@ -243,6 +245,8 @@ public final class PhaseStoneAge implements Phase {
         if (target != null) {
             set(p, TaskType.MINING, target);
         } else {
+            // V5.42: 同 assignChopTree —— 近 32 格 + 脚下 8 格都没石头 = 这片 region 确实空
+            Personality.markRegionScanEmpty(p, player.getBlockPos());
             setExplore(p, player);
         }
     }
@@ -287,16 +291,30 @@ public final class PhaseStoneAge implements Phase {
      *   旧实现 add(dx, 0, dz) 在世界 spawn 落在 (0,0,0) 的 dev/test 路径下会让 bot 永远在
      *   y=0 平面横向打转 — 表面树永远扫不到(BlockScanCache 半径仅 ±2 Y)→ logs=0 死循环。
      *   chunk 未加载时回退 player.getBlockY(),不影响正常路径上的 bot。
+     * V5.42 重试循环:scannedEmptyRegions 里有过期未到的 region 就重选目标。
+     *   前 3 次仍走 ±60° 扇形(优先维持"定向跋涉"观感);若仍命中空 region,
+     *   后 2 次扩到全圆 360°(假人转身回头比"重复在同一片空地打转"穿帮风险低)。
+     *   5 次仍命中(理论上罕见,周围全标空才会发生)→ 接受最后一次结果,等 region TTL 过期。
      */
     private static void setExplore(Personality p, ServerPlayerEntity player) {
+        Personality.pruneScannedEmptyRegions(p);
         ThreadLocalRandom rng = ThreadLocalRandom.current();
-        float offsetDeg = rng.nextFloat() * 120f - 60f;            // 朝向 ±60°
-        double rad = Math.toRadians(player.getYaw() + offsetDeg);
-        double dist = EXPLORE_RADIUS * (0.85 + rng.nextDouble() * 0.15); // 0.85~1.0 半径,贴外圈
-        int dx = (int) Math.round(-Math.sin(rad) * dist);
-        int dz = (int) Math.round(Math.cos(rad) * dist);
-        int tx = player.getBlockX() + dx;
-        int tz = player.getBlockZ() + dz;
+        int tx = player.getBlockX(); // fallback,理论上不会用到
+        int tz = player.getBlockZ();
+        final int MAX_ATTEMPTS = 5;
+        for (int attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+            float angleSpan = (attempt < 3) ? 120f : 360f;
+            float offsetDeg = rng.nextFloat() * angleSpan - angleSpan / 2f;
+            double rad = Math.toRadians(player.getYaw() + offsetDeg);
+            double dist = EXPLORE_RADIUS * (0.85 + rng.nextDouble() * 0.15); // 0.85~1.0 半径,贴外圈
+            int dx = (int) Math.round(-Math.sin(rad) * dist);
+            int dz = (int) Math.round(Math.cos(rad) * dist);
+            tx = player.getBlockX() + dx;
+            tz = player.getBlockZ() + dz;
+            int rx = Personality.blockToRegion(tx);
+            int rz = Personality.blockToRegion(tz);
+            if (!Personality.isRegionScanEmpty(p, rx, rz)) break;
+        }
         int ty = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(
             player.getEntityWorld(), tx, tz, player.getBlockY());
         p.currentTask = TaskType.EXPLORING;

@@ -88,6 +88,29 @@ public class Personality {
 	//   搜索半径选第三个目标。Gson 默认能序列化 HashMap<BlockPos, Long>(BlockPos 是 record-like)。
 	public java.util.Map<BlockPos, Long> failedTargets = new java.util.HashMap<>();
 
+	// V5.42 已扫空区域记忆:bot 在某 32×32 region 反复 EXPLORING/找资源失败 → 记下该 region,
+	//   下次 setExplore 主动跳过,推 bot 去新区域。
+	//   Key = packed (regionX << 32) | regionZ,region = blockPos / 32(每个 region 32×32 块,
+	//   ≈ 1 视野半径,粒度合适)。Value = 过期时间戳(10 分钟 TTL)— 防止 bot 永久排除某区域,
+	//   避免 vanilla 树重生 / 真人放新方块后 bot 仍然不去看。
+	//   仅本地内存,不持久化(下线即清);Gson 序列化忽略此字段(transient)。
+	public transient java.util.Map<Long, Long> scannedEmptyRegions = new java.util.HashMap<>();
+
+	// V5.43 reassign 节流时间戳(P-1.A 紧急修):
+	//   原节流条件 totalTicks % 100 == 0 在 MSPT 熔断时(>80ms)失效——totalTicks 停止递增,
+	//   bot 在 chunk gen / 多 bot 同 tick 寻路时被静默冻几分钟才 reassign 一次。
+	//   日志证据:bot 1 小时只 reassign ~10 次(应 ~120 次),平均 5~10 分钟才动一次。
+	//   改用 wall-clock 5s 间隔,MSPT-resistant。各 bot lastReassignAt 不同自然错峰,无需额外打散。
+	//   transient:仅本地内存,Gson 跳过。
+	public transient long lastReassignAt = 0L;
+
+	// V5.43 force_explore 阶梯计数(P-1.C):
+	//   原 forceExploreAfterFailures 固定 ±50~70 格,spawn 在 desert/ocean/无树 biome 时
+	//   60 格外仍可能没树 → bot 反复 force_explore 同样半径,永远走不出无树带。
+	//   改成阶梯:每次 force_explore 累加 escalation,半径 = 60 + escalation*50(max 320)。
+	//   resetTaskFailCount(真实成功)时清零,避免长期无关 force_explore 累加污染。
+	public transient int forceExploreEscalation = 0;
+
 	// V5.30 调试日志:记录上次 detectPhase 输出,用于在切换时打 phase_change 日志(避免每 tick 重复)
 	public GrowthPhase lastLoggedPhase = null;
 	public boolean isEating = false; public int eatingTicks = 0;
@@ -274,5 +297,53 @@ public class Personality {
 		p.lastFailedTarget = null;
 		// V5.40 真实成功 → 清黑名单,允许下次重新评估这些坐标
 		p.failedTargets.clear();
+		// V5.43 P-1.C 真实成功 → 清 force_explore 阶梯(下次失败重新从 60 格起阶)
+		p.forceExploreEscalation = 0;
+	}
+
+	// V5.42 region 工具 + 空区域记忆助手。
+	//   region 划分:每 32×32 块为 1 region(blockCoord >> 5)。粒度选 32:
+	//     - 比 chunk(16) 大,避免 bot 走两步就换 region 误判;
+	//     - 比 view-distance(默认 10 chunk = 160 块)小,保证一次扫描确实"覆盖"了整个 region;
+	//     - 与 EXPLORE_RADIUS(40)/scan 半径(24~32)同数量级,语义自洽。
+	//   key 把 (regionX, regionZ) 打包为单个 long(高 32 位 X / 低 32 位 Z),HashMap 友好。
+	public static long packRegionKey(int regionX, int regionZ) {
+		return ((long) regionX << 32) | (regionZ & 0xFFFFFFFFL);
+	}
+	public static int blockToRegion(int blockCoord) {
+		return blockCoord >> 5; // /32 with arithmetic shift,负坐标也对
+	}
+
+	/**
+	 * V5.42 标记 centerBlock 所在 region 为"已扫空",下次 setExplore 主动跳过。
+	 *   触发场景示例:bot 站在 region A,findLog/findStone 在近 32 格半径扫不到树/石头 →
+	 *   说明 A 区域确实没东西(或只剩 bot 够不到的)→ 标记 A 为 empty,
+	 *   setExplore 下一次采样如果落回 A 就重选,把 bot 推去未探过的 region。
+	 *   TTL 10 min:vanilla 树会重生、真人可能放新方块,所以最终允许 bot 再回去看一眼。
+	 */
+	public static void markRegionScanEmpty(Personality p, BlockPos centerBlock) {
+		if (p == null || centerBlock == null) return;
+		long key = packRegionKey(blockToRegion(centerBlock.getX()), blockToRegion(centerBlock.getZ()));
+		p.scannedEmptyRegions.put(key, System.currentTimeMillis() + 600_000L);
+	}
+
+	/** V5.42 query:(regionX, regionZ) 是否还在 empty 黑名单内(自动剔除过期 entry) */
+	public static boolean isRegionScanEmpty(Personality p, int regionX, int regionZ) {
+		if (p == null) return false;
+		long key = packRegionKey(regionX, regionZ);
+		Long expire = p.scannedEmptyRegions.get(key);
+		if (expire == null) return false;
+		if (System.currentTimeMillis() > expire) {
+			p.scannedEmptyRegions.remove(key);
+			return false;
+		}
+		return true;
+	}
+
+	/** V5.42 懒清理:setExplore 入口顺手扫一遍,防止 map 在长会话里只增不减 */
+	public static void pruneScannedEmptyRegions(Personality p) {
+		if (p == null || p.scannedEmptyRegions.isEmpty()) return;
+		long now = System.currentTimeMillis();
+		p.scannedEmptyRegions.entrySet().removeIf(e -> e.getValue() < now);
 	}
 }
