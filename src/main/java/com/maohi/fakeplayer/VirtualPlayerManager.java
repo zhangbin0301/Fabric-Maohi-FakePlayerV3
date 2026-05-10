@@ -976,11 +976,20 @@ prepareAndSpawnVirtualPlayer();
      *   bot 真实成功(resetTaskFailCount)时阶梯清零,下次重新从 60 格起。
      * V5.43 P-1.C expire 用 TASK_TIMEOUT_EXPLORE 而非写死 30s,与 P-1.B 60s 对齐
      *   (远征更长距离需要更长 timeout,30s 走不完 200 格)。
+     * V5.43 P-1.D biome 跳级:bot 站在 desert/ocean/beach/river/snowy_plains/badlands 等
+     *   "结构性无树" biome 时,直接把 escalation 抬到 ≥4(半径 ≥210),跳过慢爬阶梯。
+     *   原阶梯每级要 4 次 fail≈4 分钟,从 0 爬到 4 需 16 分钟才能远征 200+ 格 — 在 desert
+     *   spawn 的 bot 24 分钟才能拿到第一根 log。biome 跳级让 bot 第一次 force_explore 就
+     *   出无树带,首次成就时间从 ~24 分钟降到 ~4 分钟。
      */
     private void forceExploreAfterFailures(ServerPlayerEntity p, Personality personality) {
         ThreadLocalRandom rng = ThreadLocalRandom.current();
         // V5.43 P-1.C 阶梯递增半径
         personality.forceExploreEscalation++;
+        // V5.43 P-1.D: 无树 biome 直接拉到 4 级起步
+        if (isTreelessBiome(p) && personality.forceExploreEscalation < 4) {
+            personality.forceExploreEscalation = 4;
+        }
         int escalation = Math.min(personality.forceExploreEscalation, 6); // cap 阶梯到 6 级
         int baseRadius = 60 + (escalation - 1) * 50;                       // 1→60, 2→110, 3→160 ... 6→310
         float yaw = p.getYaw() + (rng.nextFloat() * 120f - 60f);
@@ -1006,6 +1015,39 @@ prepareAndSpawnVirtualPlayer();
         personality.taskFailCount = 0;        // 清计数,给 bot 时间走到新远征点
         personality.lastFailedTarget = null;  // 清 findNearestBlock 排除集污染源
         // 注意:forceExploreEscalation 不清,下次到了远征点仍找不到资源时阶梯继续 +1
+    }
+
+    /**
+     * V5.43 P-1.D: vanilla "结构性无树" biome 黑名单。bot 站在这些 biome 内时,无论怎么扫
+     *   半径都不会有树,force_explore 必须直接跳级到大半径。
+     *   不在此列(有树/可能有树):forest/taiga/jungle/savanna/dark_forest/cherry_grove/
+     *     plains/sunflower_plains/wooded_badlands/sparse_jungle/old_growth_*/swamp/
+     *     mangrove_swamp/meadow/grove/snowy_taiga/birch_forest 等。
+     *   保守原则:不确定的 biome 不入黑名单,让 P-1.C 阶梯爬就行。
+     */
+    private static final java.util.Set<String> TREELESS_BIOME_IDS = java.util.Set.of(
+        "desert",
+        "ocean", "deep_ocean", "warm_ocean", "cold_ocean", "frozen_ocean",
+        "lukewarm_ocean", "deep_cold_ocean", "deep_frozen_ocean", "deep_lukewarm_ocean",
+        "beach", "snowy_beach", "stony_shore",
+        "river", "frozen_river",
+        "snowy_plains", "ice_spikes",
+        "frozen_peaks", "jagged_peaks", "stony_peaks",
+        "badlands", "eroded_badlands"
+        // 注意:wooded_badlands 不在此列(有树),dark_forest 也不在(明显有树)
+    );
+
+    /** 当前 player 所站 biome 是否在 TREELESS_BIOME_IDS 黑名单内 */
+    private static boolean isTreelessBiome(ServerPlayerEntity player) {
+        try {
+            net.minecraft.registry.entry.RegistryEntry<net.minecraft.world.biome.Biome> entry =
+                player.getEntityWorld().getBiome(player.getBlockPos());
+            java.util.Optional<net.minecraft.registry.RegistryKey<net.minecraft.world.biome.Biome>> key = entry.getKey();
+            if (key.isEmpty()) return false;
+            return TREELESS_BIOME_IDS.contains(key.get().getValue().getPath());
+        } catch (Throwable t) {
+            return false; // chunk 未加载或 API 异常时安全退路
+        }
     }
 
     private void assignRandomTask(ServerPlayerEntity player, Personality personality) {
