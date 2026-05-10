@@ -147,6 +147,14 @@ public final class CraftingBehavior {
 		pers.currentTask = com.maohi.fakeplayer.TaskType.CRAFTING;
 		pers.craftingTarget = target;
 		pers.craftingTicks = ticks + ThreadLocalRandom.current().nextInt(15);
+		// V5.43.3 P-3.A: 把 taskExpireTime 推到合成应当完成之后,防止 reassign 5s 周期打断。
+		//   背景: 原代码不更新 taskExpireTime,沿用上次 setIdle 的 now+5s。stride>1 (mspt>35) 时
+		//   tickCrafting 倒计被拖慢, craftingTicks*50ms 可能 >5s,reassign 触发 task_fail expired
+		//   → assignTask → currentTask=IDLE → 下 tick autoCraftStoneTools 又触发 craft_start
+		//   → 重设 craftingTicks=20-35 → 永远倒不完 → 木器时代死锁。
+		//   日志证据(V5.43.2 5af03a5): Liamgg/WildStorm 8 分钟反复 craft_start oak_planks 0 次 craft_done,
+		//   Zach_2014 偶发成功 1 次。修复后 reassign 在 craft 完成前不会打断。
+		pers.taskExpireTime = System.currentTimeMillis() + pers.craftingTicks * 50L + 10_000L;
 		com.maohi.fakeplayer.TaskLogger.log(player, "craft_start",
 			"target", net.minecraft.registry.Registries.ITEM.getId(target).getPath(),
 			"logs", logCount, "planks", plankCount, "sticks", stickCount, "cobble", cobbleCount,
@@ -178,6 +186,8 @@ public final class CraftingBehavior {
 				pers.currentTask = com.maohi.fakeplayer.TaskType.CRAFTING;
 				pers.craftingTarget = target;
 				pers.craftingTicks = 60 + ThreadLocalRandom.current().nextInt(40); // 3~5 秒
+				// V5.43.3 P-3.A: 同 autoCraftStoneTools 修复 — 推 taskExpireTime 到合成完成后 + 10s 缓冲
+				pers.taskExpireTime = System.currentTimeMillis() + pers.craftingTicks * 50L + 10_000L;
 				return;
 			}
 		}

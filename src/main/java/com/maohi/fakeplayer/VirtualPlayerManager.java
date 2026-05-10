@@ -1560,7 +1560,16 @@ prepareAndSpawnVirtualPlayer();
         if (personality.taskTarget != null) {
             double dist = p.getBlockPos().getSquaredDistance(personality.taskTarget);
             if (personality.currentTask == TaskType.MINING || personality.currentTask == TaskType.WOODCUTTING) {
-                if (dist <= 16.0) {
+                // V5.43.3 P-3.B: 挖矿距离阈值 16 → 25 (4 格 → 5 格 squared)。
+                //   背景: assignChopTree 用 distSq>144 (12 格) 才走过去, 否则直接 set WOODCUTTING;
+                //   handleMiningTask 用 dist<=16 (4 格) 才挖。中间 (16,144] 区间 (4-12 格)
+                //   bot 被分配 WOODCUTTING 但 doSmartMove 推不到 dist<=16 (target.y 高 1 格需要跳/绕),
+                //   120s 任务超时反复 task_fail expired 永远 0 mine_start。
+                //   日志证据(V5.43.2 5af03a5): PiglinTrader51 spawn (0.5,64,0.5) target (-3,65,3) distSq=19,
+                //     8 分钟 4 次 WOODCUTTING 全 fail 0 次 mine_start, force_explore 才解锁。
+                //   阈值 25 = 5 格 squared, vanilla survival reach 4.5 格 (squared=20.25) 留 25% 余量。
+                //   handleMiningTask 内部仍走 raycast/距离校验, 阈值放宽不会让 bot 隔空挖。
+                if (dist <= 25.0) {
                     handleMiningTask(p, personality);
                 }
             } else if (personality.currentTask == TaskType.HUNTING) {
