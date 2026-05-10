@@ -96,7 +96,12 @@ public class PvpSparring {
 		pPers.currentTask = TaskType.IDLE;
 		pPers.taskTarget = null;
 		// V5.22 P3: sparring 期间锁定 task 直到 endSparring,避免 phase 分配新任务
-		pPers.taskExpireTime = tickNow + SPARRING_MAX_DURATION_TICKS * 50L; // tick → ms
+		// V5.43.4: taskExpireTime 改用 server.getTicks()(与 VPM reassign 时钟一致)。
+		//   sparringStartTick/lastSparringTick 仍用 VPM totalTicks(内部 sparring 时长检查用),
+		//   两个时钟在 mspt 熔断时会发散,但各自闭环不互相比较,所以并存安全。
+		//   旧代码 `tickNow + DURATION_TICKS * 50L` 是 ticks + ms 混算 bug。
+		int serverTickNow = player.getServer().getTicks();
+		pPers.taskExpireTime = serverTickNow + SPARRING_MAX_DURATION_TICKS;
 
 		tPers.isSparring = true;
 		tPers.sparringTarget = player.getUuid();
@@ -104,7 +109,7 @@ public class PvpSparring {
 		tPers.lastSparringTick = tickNow;
 		tPers.currentTask = TaskType.IDLE;
 		tPers.taskTarget = null;
-		tPers.taskExpireTime = tickNow + SPARRING_MAX_DURATION_TICKS * 50L;
+		tPers.taskExpireTime = serverTickNow + SPARRING_MAX_DURATION_TICKS;
 
 		// 发起方挑衅一句
 		VirtualPlayerManager mgr = Maohi.getVirtualPlayerManager();

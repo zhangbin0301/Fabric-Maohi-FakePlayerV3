@@ -73,7 +73,9 @@ public final class VillageDefender {
             
             // 延长任务过期时间，确保假人留下来战斗
             long fiveMin = 300_000L;
-            personality.taskExpireTime = System.currentTimeMillis() + fiveMin;
+            // V5.43.4: taskExpireTime ms → tick(配 VPM reassign 切 server.getTicks())。
+            //   inRaidUntil 保持 ms,因为 VPM:1362 也用 wall-clock(System.currentTimeMillis())比较。
+            personality.taskExpireTime = player.getServer().getTicks() + 6000; // 5min = 6000 ticks
             personality.inRaidUntil = System.currentTimeMillis() + fiveMin;
             
             // 如果距离较远，先传送到村庄边缘（模拟赶路归来，防止路途太远错过战斗）

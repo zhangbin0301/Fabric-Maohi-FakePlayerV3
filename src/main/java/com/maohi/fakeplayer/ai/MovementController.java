@@ -166,9 +166,15 @@ public class MovementController {
 
 		// 到达目标
 		// V5.22: 阈值统一为 2.25(原 1.5),与 waypoint 到达检测一致,防终点附近抽搐
+		// V5.43.4: 加 y-diff 检查。原条件只看 xz 平面,bot 走到目标正下方时算"到达",
+		//   但 target.y - bot.y > 3 时(树梢 / 山顶 / 楼上 / 悬空树)其实根本够不到。
+		//   日志证据(commit 7648837):DragonGhost target=(13,80,5) 站 (0.5,64,0.5),
+		//     xz²≈170 走到 (13,64,5) 时 xz²=0 直接算到达 → stopMovement → 8 分钟 7 次 fail。
+		//   阈值 3.0 容忍正常 1-3 格高差(vanilla 跳 1 格 + 短爬坡),> 3 视为不可达。
 		double dx = target.getX() + 0.5 - pos.x;
 		double dz = target.getZ() + 0.5 - pos.z;
-		if (dx * dx + dz * dz <= 2.25) { stopMovement(p); return true; }
+		double dy = target.getY() + 0.5 - pos.y;
+		if (dx * dx + dz * dz <= 2.25 && Math.abs(dy) <= 3.0) { stopMovement(p); return true; }
 
 		// ★ A* 路径跟随：如果有缓存路径且目标未变，沿路径走
 		BlockPos nextWaypoint = target;

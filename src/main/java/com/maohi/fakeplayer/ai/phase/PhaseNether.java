@@ -113,7 +113,7 @@ public final class PhaseNether implements Phase {
             // 古代残骸挖掘
             BlockPos target = lookupAncientDebris(player, world);
             if (target == null) target = nearbyDebrisLayerTarget(player);
-            set(personality, TaskType.MINING, target, TimingConstants.TASK_TIMEOUT_WORK);
+            set(personality, player, TaskType.MINING, target, TimingConstants.TICK_TIMEOUT_WORK);
 
         } else if (roll < 70) {
             // 击杀下界生物(烈焰人优先 → 烈焰棒 → 末影之眼)
@@ -122,25 +122,25 @@ public final class PhaseNether implements Phase {
                 personality.currentTask = TaskType.HUNTING;
                 personality.taskTarget = huntTarget.getBlockPos();
                 personality.huntTargetUuid = huntTarget.getUuid();
-                personality.taskExpireTime = System.currentTimeMillis() + 45_000L;
+                personality.taskExpireTime = player.getServer().getTicks() + 900; // 45s = 900 ticks
                 return;
             }
             // 找不到下界生物 — 大概率玩家在远离要塞的下界荒地,主动远征找要塞
-            set(personality, TaskType.EXPLORING,
+            set(personality, player, TaskType.EXPLORING,
                 netherSurfacePoint(world, player, 100),
-                TimingConstants.TASK_TIMEOUT_EXPLORE);
+                TimingConstants.TICK_TIMEOUT_EXPLORE);
 
         } else if (roll < 90) {
             // 探索收集石英/灵魂沙等
-            set(personality, TaskType.EXPLORING,
+            set(personality, player, TaskType.EXPLORING,
                 netherSurfacePoint(world, player, 60),
-                TimingConstants.TASK_TIMEOUT_EXPLORE);
+                TimingConstants.TICK_TIMEOUT_EXPLORE);
 
         } else {
             // 远征找下界要塞(更大半径)
-            set(personality, TaskType.EXPLORING,
+            set(personality, player, TaskType.EXPLORING,
                 netherSurfacePoint(world, player, 120),
-                TimingConstants.TASK_TIMEOUT_EXPLORE);
+                TimingConstants.TICK_TIMEOUT_EXPLORE);
         }
     }
 
@@ -167,7 +167,7 @@ public final class PhaseNether implements Phase {
                 ThreadLocalRandom.current().nextInt(11) - 5,
                 -1 - ThreadLocalRandom.current().nextInt(4),
                 ThreadLocalRandom.current().nextInt(11) - 5);
-            set(personality, TaskType.MINING, target, TimingConstants.TASK_TIMEOUT_WORK);
+            set(personality, player, TaskType.MINING, target, TimingConstants.TICK_TIMEOUT_WORK);
             return;
         }
 
@@ -178,23 +178,23 @@ public final class PhaseNether implements Phase {
                     ThreadLocalRandom.current().nextInt(11) - 5,
                     -1 - ThreadLocalRandom.current().nextInt(4),
                     ThreadLocalRandom.current().nextInt(11) - 5);
-                set(personality, TaskType.MINING, target, TimingConstants.TASK_TIMEOUT_WORK);
+                set(personality, player, TaskType.MINING, target, TimingConstants.TICK_TIMEOUT_WORK);
                 return;
             }
             // 有铁但缺燧石 — 沙砾通常在地表或河边,走探索
             if (!hasFlint) {
-                set(personality, TaskType.EXPLORING,
+                set(personality, player, TaskType.EXPLORING,
                     overworldSurfacePoint(world, player, 60),
-                    TimingConstants.TASK_TIMEOUT_EXPLORE);
+                    TimingConstants.TICK_TIMEOUT_EXPLORE);
                 return;
             }
             // 铁+燧石都有,但没合成 — 兜底走 IDLE 等待 CraftingBehavior 介入
         }
 
         // 材料齐全但 tryFindOrBuildPortal 没命中(罕见,可能找不到合适地皮)— 探索找开阔地
-        set(personality, TaskType.EXPLORING,
+        set(personality, player, TaskType.EXPLORING,
             overworldSurfacePoint(world, player, 80),
-            TimingConstants.TASK_TIMEOUT_EXPLORE);
+            TimingConstants.TICK_TIMEOUT_EXPLORE);
     }
 
     /**
@@ -214,7 +214,7 @@ public final class PhaseNether implements Phase {
             if (distSq > 4.0) {
                 personality.currentTask = TaskType.EXPLORING;
                 personality.taskTarget = portalPos;
-                personality.taskExpireTime = System.currentTimeMillis() + TimingConstants.TASK_TIMEOUT_EXPLORE;
+                personality.taskExpireTime = player.getServer().getTicks() + TimingConstants.TICK_TIMEOUT_EXPLORE;
                 return true;
             }
             interactPortal(player, portalPos);
@@ -230,7 +230,7 @@ public final class PhaseNether implements Phase {
                 if (distSq > 4.0) {
                     personality.currentTask = TaskType.EXPLORING;
                     personality.taskTarget = buildPos;
-                    personality.taskExpireTime = System.currentTimeMillis() + TimingConstants.TASK_TIMEOUT_EXPLORE;
+                    personality.taskExpireTime = player.getServer().getTicks() + TimingConstants.TICK_TIMEOUT_EXPLORE;
                     return true;
                 }
                 buildPortal(player, buildPos);
@@ -560,7 +560,7 @@ public final class PhaseNether implements Phase {
 
         if (!isNether) {
             // already in overworld - park briefly, PhaseEnderDragon takes over
-            set(personality, TaskType.IDLE, player.getBlockPos(), 5_000L);
+            set(personality, player, TaskType.IDLE, player.getBlockPos(), 100); // 5s = 100 ticks
             return true;
         }
 
@@ -570,7 +570,7 @@ public final class PhaseNether implements Phase {
             double distSq = player.squaredDistanceTo(
                 portal.getX() + 0.5, portal.getY(), portal.getZ() + 0.5);
             if (distSq > 4.0) {
-                set(personality, TaskType.EXPLORING, portal, TimingConstants.TASK_TIMEOUT_EXPLORE);
+                set(personality, player, TaskType.EXPLORING, portal, TimingConstants.TICK_TIMEOUT_EXPLORE);
             } else {
                 interactPortal(player, portal);
             }
@@ -578,9 +578,9 @@ public final class PhaseNether implements Phase {
         }
 
         // no portal cached/found - fall back to wandering, expecting to drift near original crossing
-        set(personality, TaskType.EXPLORING,
+        set(personality, player, TaskType.EXPLORING,
             netherSurfacePoint(world, player, 80),
-            TimingConstants.TASK_TIMEOUT_EXPLORE);
+            TimingConstants.TICK_TIMEOUT_EXPLORE);
         return true;
     }
 
@@ -594,9 +594,10 @@ public final class PhaseNether implements Phase {
         return count;
     }
 
-    private static void set(Personality p, TaskType type, BlockPos target, long timeout) {
+    private static void set(Personality p, net.minecraft.server.network.ServerPlayerEntity player, TaskType type, BlockPos target, int timeoutTicks) {
         p.currentTask = type;
         p.taskTarget = target;
-        p.taskExpireTime = System.currentTimeMillis() + timeout;
+        // V5.43.4: ms → tick(配 VPM reassign 切 server.getTicks())
+        p.taskExpireTime = player.getServer().getTicks() + timeoutTicks;
     }
 }

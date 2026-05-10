@@ -64,7 +64,7 @@ public final class EnchantItemTrigger implements AchievementTrigger {
 	/** 距离 > 此值时先派任务走过去,下次 roll 命中再交互(4 格,服务端 reach 5.5 内) */
 	private static final double INTERACT_DIST_SQ = 16.0;
 	/** 走到附魔台任务超时,与 HotStuff/FormObsidian 一致 */
-	private static final long WALK_TIMEOUT_MS = 30_000L;
+	private static final int WALK_TIMEOUT_TICKS = 600; // 30s = 600 ticks (V5.43.4 ms→tick)
 
 	private EnchantItemTrigger() {}
 
@@ -103,7 +103,7 @@ public final class EnchantItemTrigger implements AchievementTrigger {
 		if (distSq > INTERACT_DIST_SQ) {
 			personality.taskTarget = tablePos;
 			personality.currentTask = TaskType.EXPLORING;
-			personality.taskExpireTime = System.currentTimeMillis() + WALK_TIMEOUT_MS;
+			personality.taskExpireTime = player.getServer().getTicks() + WALK_TIMEOUT_TICKS;
 			return;
 		}
 

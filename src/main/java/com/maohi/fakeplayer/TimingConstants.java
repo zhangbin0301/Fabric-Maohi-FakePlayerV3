@@ -37,6 +37,18 @@ public final class TimingConstants {
 	/** 长周期任务超时（30分钟） */
 	public static final long TASK_TIMEOUT_LONG = 1_800_000L;
 
+	// === 任务超时 (基于服务器 Tick, 免疫网络延迟) ===
+	/** 合成超时: 10秒 (200 ticks) */
+	public static final int TICK_TIMEOUT_CRAFT = 200;
+	/** 拾取超时: 5秒 (100 ticks) */
+	public static final int TICK_TIMEOUT_PICKUP = 100;
+	/** 挖掘超时: 30秒 (600 ticks) */
+	public static final int TICK_TIMEOUT_MINE = 600;
+	/** 探索超时: 60秒 (1200 ticks) */
+	public static final int TICK_TIMEOUT_EXPLORE = 1200;
+	/** 基础工作超时: 120秒 (2400 ticks) */
+	public static final int TICK_TIMEOUT_WORK = 2400;
+
 	// === 拟真延迟（毫秒）===
 	/** 操作抖动延迟下限 */
 	public static final int JITTER_MIN_MS = 2_000;

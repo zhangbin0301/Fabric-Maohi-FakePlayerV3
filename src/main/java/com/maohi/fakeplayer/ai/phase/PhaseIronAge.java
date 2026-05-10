@@ -47,7 +47,7 @@ public final class PhaseIronAge implements Phase {
         if (roll < 55) {
             BlockPos target = ctx.findOre.apply(player.getEntityWorld(), player.getBlockPos());
             if (target != null) {
-                set(personality, TaskType.MINING, target, TimingConstants.TASK_TIMEOUT_WORK);
+                set(personality, player, TaskType.MINING, target, TimingConstants.TICK_TIMEOUT_WORK);
             } else {
                 // V5.28.6 P2-Scan: 24 格内没矿 → EXPLORING ±48 走出去,下次 tick 重新扫
                 setExplore(personality, player);
@@ -55,7 +55,7 @@ public final class PhaseIronAge implements Phase {
         } else if (roll < 75) {
             BlockPos target = ctx.findLog.apply(player.getEntityWorld(), player.getBlockPos());
             if (target != null) {
-                set(personality, TaskType.WOODCUTTING, target, TimingConstants.TASK_TIMEOUT_WORK);
+                set(personality, player, TaskType.WOODCUTTING, target, TimingConstants.TICK_TIMEOUT_WORK);
             } else {
                 setExplore(personality, player);
             }
@@ -65,7 +65,7 @@ public final class PhaseIronAge implements Phase {
                 personality.currentTask = TaskType.HUNTING;
                 personality.taskTarget = huntTarget.getBlockPos();
                 personality.huntTargetUuid = huntTarget.getUuid();
-                personality.taskExpireTime = System.currentTimeMillis() + 30_000L;
+                personality.taskExpireTime = player.getServer().getTicks() + TimingConstants.TICK_TIMEOUT_MINE;
                 return;
             }
             setExplore(personality, player);
@@ -74,10 +74,11 @@ public final class PhaseIronAge implements Phase {
         }
     }
 
-    private static void set(Personality p, TaskType type, BlockPos target, long timeout) {
+    private static void set(Personality p, net.minecraft.server.network.ServerPlayerEntity player, TaskType type, BlockPos target, int timeoutTicks) {
         p.currentTask = type;
         p.taskTarget = target;
-        p.taskExpireTime = System.currentTimeMillis() + timeout;
+        // V5.43.4: ms → tick(配 VPM reassign 切 server.getTicks())
+        p.taskExpireTime = player.getServer().getTicks() + timeoutTicks;
     }
 
     /**
@@ -99,6 +100,6 @@ public final class PhaseIronAge implements Phase {
             player.getEntityWorld(), tx, tz, player.getBlockY());
         p.currentTask = TaskType.EXPLORING;
         p.taskTarget = new net.minecraft.util.math.BlockPos(tx, ty, tz);
-        p.taskExpireTime = System.currentTimeMillis() + TimingConstants.TASK_TIMEOUT_EXPLORE;
+        p.taskExpireTime = player.getServer().getTicks() + TimingConstants.TICK_TIMEOUT_EXPLORE;
     }
 }

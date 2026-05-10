@@ -81,7 +81,7 @@ public final class FormObsidianTrigger implements AchievementTrigger {
 		if (distSq > INTERACT_DIST_SQ) {
 			personality.taskTarget = lavaPos;
 			personality.currentTask = TaskType.EXPLORING;
-			personality.taskExpireTime = System.currentTimeMillis() + 30_000L;
+			personality.taskExpireTime = player.getServer().getTicks() + 600; // 30s = 600 ticks (V5.43.4 ms→tick)
 			return;
 		}
 

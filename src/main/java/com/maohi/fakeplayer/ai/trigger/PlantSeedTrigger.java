@@ -72,7 +72,7 @@ public final class PlantSeedTrigger implements AchievementTrigger {
 		if (player.squaredDistanceTo(Vec3d.ofCenter(grass)) > 16.0) {
 			personality.taskTarget = grass;
 			personality.currentTask = TaskType.EXPLORING;
-			personality.taskExpireTime = System.currentTimeMillis() + 30_000L;
+			personality.taskExpireTime = player.getServer().getTicks() + 600; // 30s = 600 ticks (V5.43.4 ms→tick)
 			return;
 		}
 

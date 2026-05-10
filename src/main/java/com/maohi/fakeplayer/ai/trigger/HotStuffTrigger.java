@@ -58,7 +58,7 @@ public final class HotStuffTrigger implements AchievementTrigger {
 		if (distSq > 16.0) {
 			personality.taskTarget = lavaPos;
 			personality.currentTask = TaskType.EXPLORING;
-			personality.taskExpireTime = System.currentTimeMillis() + 30_000L;
+			personality.taskExpireTime = player.getServer().getTicks() + 600; // 30s = 600 ticks (V5.43.4 ms→tick)
 			return;
 		}
 

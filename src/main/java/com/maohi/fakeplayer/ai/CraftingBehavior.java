@@ -147,14 +147,10 @@ public final class CraftingBehavior {
 		pers.currentTask = com.maohi.fakeplayer.TaskType.CRAFTING;
 		pers.craftingTarget = target;
 		pers.craftingTicks = ticks + ThreadLocalRandom.current().nextInt(15);
-		// V5.43.3 P-3.A: 把 taskExpireTime 推到合成应当完成之后,防止 reassign 5s 周期打断。
-		//   背景: 原代码不更新 taskExpireTime,沿用上次 setIdle 的 now+5s。stride>1 (mspt>35) 时
-		//   tickCrafting 倒计被拖慢, craftingTicks*50ms 可能 >5s,reassign 触发 task_fail expired
-		//   → assignTask → currentTask=IDLE → 下 tick autoCraftStoneTools 又触发 craft_start
-		//   → 重设 craftingTicks=20-35 → 永远倒不完 → 木器时代死锁。
-		//   日志证据(V5.43.2 5af03a5): Liamgg/WildStorm 8 分钟反复 craft_start oak_planks 0 次 craft_done,
-		//   Zach_2014 偶发成功 1 次。修复后 reassign 在 craft 完成前不会打断。
-		pers.taskExpireTime = System.currentTimeMillis() + pers.craftingTicks * 50L + 10_000L;
+		// V5.43.3 P-3.H + V5.43.4: taskExpireTime 切 server.getTicks()。buffer = 60s (1200 ticks),
+		//   总 = TICK_TIMEOUT_CRAFT(200=10s) + 1200(60s) = 1400 ticks = 70s。
+		//   原 P-3.H 修复 10s buffer 不够 → 60s buffer,这里改 tick 后仍保持 60s 语义。
+		pers.taskExpireTime = player.getServer().getTicks() + TimingConstants.TICK_TIMEOUT_CRAFT + 1200;
 		com.maohi.fakeplayer.TaskLogger.log(player, "craft_start",
 			"target", net.minecraft.registry.Registries.ITEM.getId(target).getPath(),
 			"logs", logCount, "planks", plankCount, "sticks", stickCount, "cobble", cobbleCount,
@@ -186,8 +182,8 @@ public final class CraftingBehavior {
 				pers.currentTask = com.maohi.fakeplayer.TaskType.CRAFTING;
 				pers.craftingTarget = target;
 				pers.craftingTicks = 60 + ThreadLocalRandom.current().nextInt(40); // 3~5 秒
-				// V5.43.3 P-3.A: 同 autoCraftStoneTools 修复 — 推 taskExpireTime 到合成完成后 + 10s 缓冲
-				pers.taskExpireTime = System.currentTimeMillis() + pers.craftingTicks * 50L + 10_000L;
+				// V5.43.3 P-3.A/H + V5.43.4: 同 autoCraftStoneTools — TICK_TIMEOUT_CRAFT(10s) + 60s buffer (1200 ticks) = 70s
+				pers.taskExpireTime = player.getServer().getTicks() + TimingConstants.TICK_TIMEOUT_CRAFT + 1200;
 				return;
 			}
 		}

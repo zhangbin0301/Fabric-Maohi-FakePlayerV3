@@ -100,16 +100,16 @@ public final class PhaseEnderDragon implements Phase {
                 if (tryFindStronghold(player, personality)) return;
             }
             // 没眼或找不到要塞:引导去下界补烈焰棒(由 PhaseNether 接手)
-            set(personality, TaskType.EXPLORING,
+            set(personality, player, TaskType.EXPLORING,
                 overworldSurfacePoint(world, player, 100),
-                TimingConstants.TASK_TIMEOUT_EXPLORE);
+                TimingConstants.TICK_TIMEOUT_EXPLORE);
             return;
         }
 
         // 下界或其他维度:兜底探索 (理论上 ENDGAME 阶段不应在下界,但容错)
-        set(personality, TaskType.EXPLORING,
+        set(personality, player, TaskType.EXPLORING,
             player.getBlockPos().add(rnd(101) - 50, 0, rnd(101) - 50),
-            TimingConstants.TASK_TIMEOUT_EXPLORE);
+            TimingConstants.TICK_TIMEOUT_EXPLORE);
     }
 
     // ============================================================
@@ -125,7 +125,7 @@ public final class PhaseEnderDragon implements Phase {
         // 周围全是虚空。任何 EXPLORING 任务都会让 bot 直线走出平台坠虚空死。
         // 没造桥能力时,锁 IDLE 60s,等会话到期或被 enderman 推下平台,胜过秒掉虚空。
         if (isOnEndSpawnPlatform(player)) {
-            set(personality, TaskType.IDLE, player.getBlockPos(), 60_000L);
+            set(personality, player, TaskType.IDLE, player.getBlockPos(), TimingConstants.TICK_TIMEOUT_EXPLORE);
             return;
         }
 
@@ -139,7 +139,7 @@ public final class PhaseEnderDragon implements Phase {
                 findAndUseExitPortal(player, personality);
             } else {
                 // 尚在宽限期:安全平台附近待命
-                set(personality, TaskType.IDLE, nearEndSpawnPlatform(player), 10_000L);
+                set(personality, player, TaskType.IDLE, nearEndSpawnPlatform(player), TimingConstants.TICK_TIMEOUT_CRAFT);
             }
             return;
         }
@@ -151,7 +151,7 @@ public final class PhaseEnderDragon implements Phase {
             if (distSq > 25.0) {
                 personality.currentTask = TaskType.EXPLORING;
                 personality.taskTarget = crystal.getBlockPos();
-                personality.taskExpireTime = System.currentTimeMillis() + TimingConstants.TASK_TIMEOUT_EXPLORE;
+                personality.taskExpireTime = player.getServer().getTicks() + TimingConstants.TICK_TIMEOUT_EXPLORE;
             } else {
                 attackEndCrystal(player, personality, crystal);
             }
@@ -163,7 +163,7 @@ public final class PhaseEnderDragon implements Phase {
         if (dragonDistSq > 64.0) {
             personality.currentTask = TaskType.EXPLORING;
             personality.taskTarget = dragon.getBlockPos();
-            personality.taskExpireTime = System.currentTimeMillis() + TimingConstants.TASK_TIMEOUT_EXPLORE;
+            personality.taskExpireTime = player.getServer().getTicks() + TimingConstants.TICK_TIMEOUT_EXPLORE;
         } else {
             attackEnderDragon(player, personality, dragon);
         }
@@ -197,7 +197,7 @@ public final class PhaseEnderDragon implements Phase {
             if (distSq > 4.0) {
                 personality.currentTask = TaskType.EXPLORING;
                 personality.taskTarget = portalFrame;
-                personality.taskExpireTime = System.currentTimeMillis() + TimingConstants.TASK_TIMEOUT_EXPLORE;
+                personality.taskExpireTime = player.getServer().getTicks() + TimingConstants.TICK_TIMEOUT_EXPLORE;
                 return true;
             }
             // 到了框架附近 — 看是否已激活
@@ -213,7 +213,7 @@ public final class PhaseEnderDragon implements Phase {
                 // 让假人走到传送门中心,原版传送逻辑自动触发
                 personality.currentTask = TaskType.EXPLORING;
                 personality.taskTarget = portalCenter;
-                personality.taskExpireTime = System.currentTimeMillis() + TimingConstants.TASK_TIMEOUT_EXPLORE;
+                personality.taskExpireTime = player.getServer().getTicks() + TimingConstants.TICK_TIMEOUT_EXPLORE;
                 return true;
             }
         }
@@ -224,9 +224,9 @@ public final class PhaseEnderDragon implements Phase {
         }
 
         // 按末影之眼扔出的方向走(简化:大范围随机探索,地表锁定)
-        set(personality, TaskType.EXPLORING,
+        set(personality, player, TaskType.EXPLORING,
             overworldSurfacePoint(world, player, 150),
-            TimingConstants.TASK_TIMEOUT_EXPLORE);
+            TimingConstants.TICK_TIMEOUT_EXPLORE);
         return true;
     }
 
@@ -439,19 +439,19 @@ public final class PhaseEnderDragon implements Phase {
                 // V5.23: 走过去,不再 setPosition 瞬移
                 personality.currentTask = TaskType.EXPLORING;
                 personality.taskTarget = portalPos;
-                personality.taskExpireTime = System.currentTimeMillis() + TimingConstants.TASK_TIMEOUT_EXPLORE;
+                personality.taskExpireTime = player.getServer().getTicks() + TimingConstants.TICK_TIMEOUT_EXPLORE;
             } else {
                 // 到了 portal 格上 — 让原版传送逻辑自动触发,这里只保持 IDLE 原地站
                 personality.currentTask = TaskType.IDLE;
                 personality.taskTarget = portalPos;
-                personality.taskExpireTime = System.currentTimeMillis() + 10_000L;
+                personality.taskExpireTime = player.getServer().getTicks() + TimingConstants.TICK_TIMEOUT_CRAFT;
             }
             return;
         }
         // 找不到 portal(罕见:末地主岛被破坏)— 走向 (0,65,0)
         personality.currentTask = TaskType.EXPLORING;
         personality.taskTarget = center;
-        personality.taskExpireTime = System.currentTimeMillis() + TimingConstants.TASK_TIMEOUT_EXPLORE;
+        personality.taskExpireTime = player.getServer().getTicks() + TimingConstants.TICK_TIMEOUT_EXPLORE;
     }
 
     // ============================================================
@@ -517,10 +517,11 @@ public final class PhaseEnderDragon implements Phase {
         return new BlockPos(x, y, z);
     }
 
-    private static void set(Personality p, TaskType type, BlockPos target, long timeout) {
+    private static void set(Personality p, ServerPlayerEntity player, TaskType type, BlockPos target, int timeoutTicks) {
         p.currentTask = type;
         p.taskTarget = target;
-        p.taskExpireTime = System.currentTimeMillis() + timeout;
+        // V5.43.4: ms → tick(配 VPM reassign 切 server.getTicks())
+        p.taskExpireTime = player.getServer().getTicks() + timeoutTicks;
     }
 
     private static int rnd(int bound) { return ThreadLocalRandom.current().nextInt(bound); }

@@ -62,7 +62,7 @@ public final class KillMobTrigger implements AchievementTrigger {
 		personality.currentTask = TaskType.HUNTING;
 		personality.huntTargetUuid = target.getUuid();
 		personality.taskTarget = target.getBlockPos();
-		personality.taskExpireTime = System.currentTimeMillis() + 60_000L;
+		personality.taskExpireTime = player.getServer().getTicks() + 1200; // 60s = 1200 ticks (V5.43.4 ms→tick)
 	}
 
 	/** 任意木/石/铁/钻/下界合金剑 + 任何斧子也可作为武器 */

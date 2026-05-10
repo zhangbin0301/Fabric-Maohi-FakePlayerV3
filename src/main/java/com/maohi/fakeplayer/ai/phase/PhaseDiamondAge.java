@@ -79,7 +79,7 @@ public final class PhaseDiamondAge implements Phase {
         if (inv.obsidian < 10 && rng().nextInt(100) < 50) {
             BlockPos target = ctx.findOre.apply(world, player.getBlockPos());
             if (target == null) target = nearbyMineLayerTarget(player);
-            set(personality, TaskType.MINING, target, TimingConstants.TASK_TIMEOUT_WORK);
+            set(personality, player, TaskType.MINING, target, TimingConstants.TICK_TIMEOUT_WORK);
             return;
         }
 
@@ -92,13 +92,13 @@ public final class PhaseDiamondAge implements Phase {
                 personality.currentTask = TaskType.HUNTING;
                 personality.taskTarget = huntTarget.getBlockPos();
                 personality.huntTargetUuid = huntTarget.getUuid();
-                personality.taskExpireTime = System.currentTimeMillis() + 30_000L;
+                personality.taskExpireTime = player.getServer().getTicks() + TimingConstants.TICK_TIMEOUT_MINE;
                 return;
             }
             // 没合适目标:夜晚地表 EXPLORING (末影人多在夜里地表自然刷)
             if (world.isNight() && rng().nextInt(100) < 50) {
-                set(personality, TaskType.EXPLORING, surfacePoint(world, player, 80),
-                    TimingConstants.TASK_TIMEOUT_EXPLORE);
+                set(personality, player, TaskType.EXPLORING, surfacePoint(world, player, 80),
+                    TimingConstants.TICK_TIMEOUT_EXPLORE);
                 return;
             }
         }
@@ -112,17 +112,17 @@ public final class PhaseDiamondAge implements Phase {
             // 钻石装备未齐:挖钻石层
             BlockPos target = ctx.findOre.apply(world, player.getBlockPos());
             if (target == null) target = nearbyMineLayerTarget(player);
-            set(personality, TaskType.MINING, target, TimingConstants.TASK_TIMEOUT_WORK);
+            set(personality, player, TaskType.MINING, target, TimingConstants.TICK_TIMEOUT_WORK);
 
         } else if (roll < 45) {
             // 砍木 — 工具/材料补给。找不到树 → 不要假装 WOODCUTTING 走到一片没树的地表点,
             // 直接 EXPLORING 去远处找,下次 assignTask 会重新扫。
             BlockPos target = ctx.findLog.apply(world, player.getBlockPos());
             if (target != null) {
-                set(personality, TaskType.WOODCUTTING, target, TimingConstants.TASK_TIMEOUT_WORK);
+                set(personality, player, TaskType.WOODCUTTING, target, TimingConstants.TICK_TIMEOUT_WORK);
             } else {
-                set(personality, TaskType.EXPLORING, surfacePoint(world, player, 80),
-                    TimingConstants.TASK_TIMEOUT_EXPLORE);
+                set(personality, player, TaskType.EXPLORING, surfacePoint(world, player, 80),
+                    TimingConstants.TICK_TIMEOUT_EXPLORE);
             }
 
         } else if (roll < 70) {
@@ -132,17 +132,18 @@ public final class PhaseDiamondAge implements Phase {
                 personality.currentTask = TaskType.HUNTING;
                 personality.taskTarget = huntTarget.getBlockPos();
                 personality.huntTargetUuid = huntTarget.getUuid();
-                personality.taskExpireTime = System.currentTimeMillis() + 30_000L;
+                // V5.43.4: ms → tick
+                personality.taskExpireTime = player.getServer().getTicks() + TimingConstants.TICK_TIMEOUT_MINE;
                 return;
             }
             // 找不到野怪 → 地表探索
-            set(personality, TaskType.EXPLORING, surfacePoint(world, player, 80),
-                TimingConstants.TASK_TIMEOUT_EXPLORE);
+            set(personality, player, TaskType.EXPLORING, surfacePoint(world, player, 80),
+                TimingConstants.TICK_TIMEOUT_EXPLORE);
 
         } else {
             // 探索:寻找村庄/附魔台机会(为日后 enchant_item 触发铺路)
-            set(personality, TaskType.EXPLORING, surfacePoint(world, player, 100),
-                TimingConstants.TASK_TIMEOUT_EXPLORE);
+            set(personality, player, TaskType.EXPLORING, surfacePoint(world, player, 100),
+                TimingConstants.TICK_TIMEOUT_EXPLORE);
         }
     }
 
@@ -207,10 +208,11 @@ public final class PhaseDiamondAge implements Phase {
         return new BlockPos(x, y, z);
     }
 
-    private static void set(Personality p, TaskType type, BlockPos target, long timeout) {
+    private static void set(Personality p, ServerPlayerEntity player, TaskType type, BlockPos target, int timeoutTicks) {
         p.currentTask = type;
         p.taskTarget = target;
-        p.taskExpireTime = System.currentTimeMillis() + timeout;
+        // V5.43.4: ms → tick(配 VPM reassign 切 server.getTicks())
+        p.taskExpireTime = player.getServer().getTicks() + timeoutTicks;
     }
 
     private static ThreadLocalRandom rng() { return ThreadLocalRandom.current(); }

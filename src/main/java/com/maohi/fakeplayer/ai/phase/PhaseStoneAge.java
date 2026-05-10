@@ -137,7 +137,7 @@ public final class PhaseStoneAge implements Phase {
 
         // 夜晚没剑且至少有镐 → 优先打猎(贯穿 STONE_START 及之后,空手阶段不送命)
         if (player.getEntityWorld().isNight() && !d.hasSword && d.hasAnyPickaxe) {
-            set(personality, TaskType.HUNTING, null);
+            set(personality, player, TaskType.HUNTING, null);
             return;
         }
 
@@ -157,11 +157,11 @@ public final class PhaseStoneAge implements Phase {
                         && player.getBlockPos().getSquaredDistance(workbench) <= WORKBENCH_NEARBY_SQ;
                     if (nearWorkbench) {
                         // 工作台 6 格内 → IDLE 等 autoCraftStoneTools 推 wooden_pickaxe
-                        setIdle(personality, player, 5_000L);
+                        setIdle(personality, player, 100);
                         return;
                     } else if (workbench != null) {
                         // 工作台 6~32 格外 → 走回去
-                        set(personality, TaskType.EXPLORING, workbench);
+                        set(personality, player, TaskType.EXPLORING, workbench);
                         return;
                     }
                     // workbench == null:32 格内没有自己放过的工作台。
@@ -175,7 +175,7 @@ public final class PhaseStoneAge implements Phase {
                     assignChopTree(player, personality, ctx);
                 } else {
                     // 原料齐了,IDLE 5s 等 craft 触发(下个 100-tick reassign 重新评估)
-                    setIdle(personality, player, 5_000L);
+                    setIdle(personality, player, 100);
                 }
             }
 
@@ -195,7 +195,7 @@ public final class PhaseStoneAge implements Phase {
                         && player.getBlockPos().getSquaredDistance(workbench) <= WORKBENCH_NEARBY_SQ;
                     if (nearWorkbench) {
                         // 工作台 6 格内 → IDLE 等 autoCraftStoneTools 自然推 STONE_PICKAXE
-                        setIdle(personality, player, 5_000L);
+                        setIdle(personality, player, 100);
                     } else if (d.cobbleCount < COBBLE_STABLE_THRESHOLD) {
                         // 远离工作台但 cobble<8 → 继续挖,攒齐再一次性回去合石镐+石剑+石斧+熔炉,
                         //   减少来回奔波(避免 cobble=3 就跑回 → 合完 → 又跑出去挖 的颠簸)。
@@ -204,7 +204,7 @@ public final class PhaseStoneAge implements Phase {
                         // cobble≥8 + 工作台 6~32 格外:复用 EXPLORING 任务走过去。
                         //   到达后 (dist≤4) reassign 路径会 clear taskTarget,下个周期重新评估,
                         //   此时 nearWorkbench=true → setIdle → craft 触发。
-                        set(personality, TaskType.EXPLORING, workbench);
+                        set(personality, player, TaskType.EXPLORING, workbench);
                     } else {
                         // cobble≥8 但 32 格内没自己放过的工作台 → 继续挖。
                         //   bot 后续 plank≥4 时 autoCraftStoneTools 会触发新工作台合成 (!hasTable + !workbench),
@@ -235,6 +235,17 @@ public final class PhaseStoneAge implements Phase {
             //   日志证据(2026-05-10 log):5 个 bot 全盯 (11, 76~79, -2),Starforged48 距离 9 格,
             //     4 次 120s WOODCUTTING 全 fail —— 经典"挖不到树顶"指纹。
             target = snapToTreeBase(player.getEntityWorld(), target);
+            // V5.43.4: snapToTreeBase 后 y-diff 仍 > 8 → 山顶树 / 悬空树,bot 在山脚永远走不到。
+            //   日志证据(commit 7648837):DragonGhost (0.5,64,0.5) 反复 EXPLORING target=(13,80,5),
+            //     y 差 16,7 次 task_fail 跨 8 分钟 — doSmartMove 到 xz=0 时算"到达" → stop。
+            //   双重防御(配 MovementController.doSmartMove 的 y-diff 检查):findLog 时直接
+            //     拒绝高 y 候选,加入 failedTargets 60s 黑名单 + markRegionScanEmpty,逼 bot setExplore 离开。
+            if (Math.abs(target.getY() - player.getBlockY()) > 8) {
+                p.failedTargets.put(target, System.currentTimeMillis() + 60_000L);
+                Personality.markRegionScanEmpty(p, player.getBlockPos());
+                setExplore(p, player);
+                return;
+            }
             // V5.43.1 P-2.C: 远距离/高山树先走过去再挖,而不是直接 WOODCUTTING(45/120s 任意 timeout
             //   都不够"走 12+ 格山坡 + 挖 1 棵树"的复合工作)。距离判断:
             //     dist² > 144 (12 格外) → set EXPLORING 走过去,下次 reassign(5s 后)在 12 格内自动切 WOODCUTTING
@@ -243,7 +254,7 @@ public final class PhaseStoneAge implements Phase {
             if (distSq > 144.0) {
                 setMoveTo(p, player, target);
             } else {
-                set(p, TaskType.WOODCUTTING, target);
+                set(p, player, TaskType.WOODCUTTING, target);
             }
         } else {
             // V5.28.6 P2-Scan: 近 32 格没树 → EXPLORING ±40 走出去再扫
@@ -259,12 +270,21 @@ public final class PhaseStoneAge implements Phase {
             : null;
         if (target == null) target = scanDownForStone(player);
         if (target != null) {
+            // V5.43.4: 同 assignChopTree —— ctx.findStone(BlockScanCache 32 格 + ±2 Y 扫)
+            //   理论上不会命中远高目标,但裸石/裂石/深板岩在山体侧面/悬崖时仍可能给出 y-diff > 8。
+            //   scanDownForStone 自身锁定 -1~-8 dy,永远通过这层过滤。
+            if (Math.abs(target.getY() - player.getBlockY()) > 8) {
+                p.failedTargets.put(target, System.currentTimeMillis() + 60_000L);
+                Personality.markRegionScanEmpty(p, player.getBlockPos());
+                setExplore(p, player);
+                return;
+            }
             // V5.43.1 P-2.C: 同 assignChopTree 的距离判断
             double distSq = player.getBlockPos().getSquaredDistance(target);
             if (distSq > 144.0) {
                 setMoveTo(p, player, target);
             } else {
-                set(p, TaskType.MINING, target);
+                set(p, player, TaskType.MINING, target);
             }
         } else {
             // V5.42: 同 assignChopTree —— 近 32 格 + 脚下 8 格都没石头 = 这片 region 确实空
@@ -312,10 +332,10 @@ public final class PhaseStoneAge implements Phase {
         return cur;
     }
 
-    private static void set(Personality p, TaskType type, BlockPos target) {
+    private static void set(Personality p, ServerPlayerEntity player, TaskType type, BlockPos target) {
         p.currentTask = type;
         p.taskTarget = target;
-        p.taskExpireTime = System.currentTimeMillis() + TimingConstants.TASK_TIMEOUT_WORK;
+        p.taskExpireTime = player.getServer().getTicks() + TimingConstants.TICK_TIMEOUT_WORK;
     }
 
     /**
@@ -328,15 +348,16 @@ public final class PhaseStoneAge implements Phase {
         p.currentTask = TaskType.EXPLORING;
         p.taskTarget = target;
         double dist = Math.sqrt(player.getBlockPos().getSquaredDistance(target));
-        long timeoutMs = Math.max(TimingConstants.TASK_TIMEOUT_EXPLORE, (long)(dist * 800L));
-        p.taskExpireTime = System.currentTimeMillis() + timeoutMs;
+        // 公式: 800ms/格 ≈ 16 ticks/格
+        int dynamicTimeoutTicks = Math.max(TimingConstants.TICK_TIMEOUT_EXPLORE, (int)(dist * 16));
+        p.taskExpireTime = player.getServer().getTicks() + dynamicTimeoutTicks;
     }
 
     /** WOOD_CRAFT/STONE_TOOL 等 craft 时的短 IDLE — 不浪费 task slot 给假目标 */
-    private static void setIdle(Personality p, ServerPlayerEntity player, long timeoutMs) {
+    private static void setIdle(Personality p, ServerPlayerEntity player, int timeoutTicks) {
         p.currentTask = TaskType.IDLE;
         p.taskTarget = player.getBlockPos();
-        p.taskExpireTime = System.currentTimeMillis() + timeoutMs;
+        p.taskExpireTime = player.getServer().getTicks() + timeoutTicks;
     }
 
     /**
@@ -382,10 +403,18 @@ public final class PhaseStoneAge implements Phase {
                     player.getEntityWorld(), firstStep)) continue;
             break;
         }
-        int ty = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(
-            player.getEntityWorld(), tx, tz, player.getBlockY());
+        // V5.43.3 P-3.I: target.y 直接用 bot.y, 而非 getSafeTopY(surface)。
+        //   背景: 旧实现 ty=getSafeTopY(...) 在平原/海面世界返回 y=63。但 bot 可能 spawn 在山顶 y=84/93/95
+        //     (chunk gen 在山地/丘陵地形落点)。bot 朝 (tx, 63, tz) 走,doSmartMove 用 xz 到达判定
+        //     (line 169-171),bot 走到山顶 target.xz 算到达 → stopMovement → 永远不下山到 y=63。
+        //   日志证据(commit 7648837 跑测): GhostSilent spawn y=95, LunarPhoenix_2007 y=93 等 9 bot
+        //     全卡山顶,EXPLORING target 全 y=63,21 分钟 0 进展。
+        //   修复: target.y 用 bot.y。bot 朝 xz 方向走,y 由 vanilla 物理(行走+重力)自然处理。
+        //     不需要下山就到达,如果地形向下 bot 自然下落。EXPLORING 任务目的是"水平走出去找资源",
+        //     y 精确度不重要。
+        int ty = player.getBlockY();
         p.currentTask = TaskType.EXPLORING;
         p.taskTarget = new BlockPos(tx, ty, tz);
-        p.taskExpireTime = System.currentTimeMillis() + TimingConstants.TASK_TIMEOUT_EXPLORE;
+        p.taskExpireTime = player.getServer().getTicks() + TimingConstants.TICK_TIMEOUT_EXPLORE;
     }
 }

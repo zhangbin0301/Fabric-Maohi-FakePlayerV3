@@ -20,6 +20,16 @@ public final class EquipmentBehavior {
 	/**
 	 * V3.1: 根据当前任务自动切换工具
 	 * V3.3: 走真实发包切换槽位
+	 *
+	 * V5.43.3 P-3.F: WOODCUTTING/MINING 找不到对应工具时,主动切到 hotbar 第一个空槽(空手)。
+	 *   背景: 旧实现没工具时直接 break,bot 保持当前手持(可能是上轮 craft/拾取的 plank/dirt/seed)。
+	 *   1.21.11 vanilla 协议层按手持物校准 BlockBreakingSpeed:
+	 *     - 空手砍 oak_log: 1.5s/块 (硬度 2.0 / breakSpeed 1.0 + slow_mining_no_correct_tool penalty)
+	 *     - 持任意非工具(plank/dirt): 同空手 (vanilla isCorrectToolForDrops 返回 false 时一致)
+	 *     - 但若手持 plank 这种"也是 BlockMaterial 木质"的物品,某些版本协议层可能误判 → 进度异常
+	 *   保险起见强制切空手槽,与 vanilla 真人"砍树前会先把斧头/手切出来"画像一致。
+	 *   日志证据(V5.43.2): bot WOODCUTTING 任务 mine_start ticks=42(2.1s)挖一块 birch_log,但
+	 *     17:43:22 mine_start → 17:46:32 mine_done,实际 3 分钟才挖断 — MSPT 抖动叠加手持物校准异常。
 	 */
 	public static void autoSwitchTool(ServerPlayerEntity player, TaskType currentTask) {
 		if (ThreadLocalRandom.current().nextInt(20) != 0) return;
@@ -30,25 +40,54 @@ public final class EquipmentBehavior {
 				for (int i = 0; i < 9; i++) {
 					if (inv.getStack(i).isOf(Items.WOODEN_AXE) || inv.getStack(i).isOf(Items.STONE_AXE)
 						|| inv.getStack(i).isOf(Items.IRON_AXE) || inv.getStack(i).isOf(Items.DIAMOND_AXE)) {
-						// ★ V3.3: 发真实切槽包
 						PacketHelper.setSelectedSlot(player, i);
 						return;
 					}
 				}
+				// V5.43.3 P-3.F: 没斧头 → 切到空手槽(hotbar 第一个空 slot)
+				switchToEmptySlotIfBetter(player, inv);
 				break;
 			case MINING:
 				for (int i = 0; i < 9; i++) {
 					if (inv.getStack(i).isOf(Items.WOODEN_PICKAXE) || inv.getStack(i).isOf(Items.STONE_PICKAXE)
 						|| inv.getStack(i).isOf(Items.IRON_PICKAXE) || inv.getStack(i).isOf(Items.DIAMOND_PICKAXE)) {
-						// ★ V3.3: 发真实切槽包
 						PacketHelper.setSelectedSlot(player, i);
 						return;
 					}
 				}
+				// V5.43.3 P-3.F: 没镐 → 切到空手槽(空手挖石头出不了 cobble,但至少能挖 stone_age 起始的泥土)
+				switchToEmptySlotIfBetter(player, inv);
 				break;
 			default:
 				break;
 		}
+	}
+
+	/**
+	 * V5.43.3 P-3.F: 当前手持物若不是 axe/pickaxe,则切到 hotbar 第一个空槽(空手)。
+	 *   只在"当前手持不是工具"且"找到空槽"时切槽,避免无意义的 SetSlot 包。
+	 */
+	private static void switchToEmptySlotIfBetter(ServerPlayerEntity player, PlayerInventory inv) {
+		int currentSlot = inv.getSelectedSlot();
+		ItemStack held = inv.getStack(currentSlot);
+		// 已经空手:不切
+		if (held.isEmpty()) return;
+		// 当前手持是工具/武器:留着(可能 axe/sword 用作砍树兜底,虽然 axe 上面分支已处理)
+		net.minecraft.item.Item heldItem = held.getItem();
+		if (heldItem == Items.WOODEN_AXE || heldItem == Items.STONE_AXE
+			|| heldItem == Items.IRON_AXE || heldItem == Items.DIAMOND_AXE
+			|| heldItem == Items.WOODEN_PICKAXE || heldItem == Items.STONE_PICKAXE
+			|| heldItem == Items.IRON_PICKAXE || heldItem == Items.DIAMOND_PICKAXE
+			|| heldItem == Items.WOODEN_SWORD || heldItem == Items.STONE_SWORD
+			|| heldItem == Items.IRON_SWORD || heldItem == Items.DIAMOND_SWORD) return;
+		// 当前手持是杂物(plank/dirt/seed/stick) → 切到空槽
+		for (int i = 0; i < 9; i++) {
+			if (inv.getStack(i).isEmpty()) {
+				PacketHelper.setSelectedSlot(player, i);
+				return;
+			}
+		}
+		// 没空槽,保持原状(vanilla 真人也只能凑合)
 	}
 
 	/** 自动装备背包中防御值更高的护甲 */

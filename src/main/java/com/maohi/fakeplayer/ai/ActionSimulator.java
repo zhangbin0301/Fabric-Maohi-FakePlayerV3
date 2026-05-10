@@ -77,11 +77,15 @@ public class ActionSimulator {
 	 *   - 每次最多拾 5 件(不止一件) — 树木 4~6 块 log 全捕
 	 *   - 同样拾完后进行自动穿戴流程
 	 *
+	 * V5.43.3 P-3.G: 返回值改为本 tick 拾取的 ItemEntity 数量(经验球不计入)。
+	 *   调用方(VPM PICKUP_DROP 处理)用此判断是否应早退到 IDLE,避免 bot 在 mine_done 后
+	 *   还要硬等 10s timeout 才进下一任务,让"挖→拾→挖"链路紧凑。
+	 *
 	 * 调用时机: VPM.tickWorldInteraction 在 PICKUP_DROP 状态下每 tick 直接调用(不对齐 20 tick)。
 	 */
-	public static void pickupAllNearbyDrops(ServerPlayerEntity player) {
+	public static int pickupAllNearbyDrops(ServerPlayerEntity player) {
 		boolean inventoryFull = player.getInventory().getEmptySlot() == -1;
-		if (inventoryFull) return;
+		if (inventoryFull) return 0;
 
 		// NOTE: 12 格半径 — mine_done 后 drop 可能被物理东西弹走,视野更大才能全部捕获
 		double sqDist12 = 12.0 * 12.0;
@@ -117,6 +121,7 @@ public class ActionSimulator {
 		if (pickedCount > 0) {
 			com.maohi.fakeplayer.ai.LootTracker.tryAutoEquipFromInventory(player);
 		}
+		return pickedCount;
 	}
 
 	/**

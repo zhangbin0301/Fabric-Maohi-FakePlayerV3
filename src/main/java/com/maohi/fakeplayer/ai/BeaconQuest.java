@@ -91,7 +91,8 @@ public final class BeaconQuest {
             if (personality.currentTask == TaskType.IDLE) {
                 personality.taskTarget = current.add(rnd(60)-30, 0, rnd(60)-30);
                 personality.currentTask = TaskType.EXPLORING;
-                personality.taskExpireTime = System.currentTimeMillis() + 30000L;
+                // V5.43.4: ms → tick 统一(配 VPM reassign 切 server.getTicks())
+                personality.taskExpireTime = player.getServer().getTicks() + com.maohi.fakeplayer.TimingConstants.TICK_TIMEOUT_MINE;
             }
         }
     }
@@ -111,7 +112,8 @@ public final class BeaconQuest {
                 personality.taskTarget = targets.get(0).getBlockPos();
                 personality.currentTask = TaskType.HUNTING;
                 personality.huntTargetUuid = targets.get(0).getUuid();
-                personality.taskExpireTime = System.currentTimeMillis() + 30000L;
+                // V5.43.4: ms → tick 统一
+                personality.taskExpireTime = player.getServer().getTicks() + com.maohi.fakeplayer.TimingConstants.TICK_TIMEOUT_MINE;
             }
         }
     }
@@ -129,7 +131,8 @@ public final class BeaconQuest {
             if (target != null) {
                 personality.taskTarget = target;
                 personality.currentTask = TaskType.MINING;
-                personality.taskExpireTime = System.currentTimeMillis() + 30000L;
+                // V5.43.4: ms → tick 统一
+                personality.taskExpireTime = player.getServer().getTicks() + com.maohi.fakeplayer.TimingConstants.TICK_TIMEOUT_MINE;
             }
         }
     }
@@ -329,7 +332,8 @@ public final class BeaconQuest {
             personality.taskTarget = withers.get(0).getBlockPos();
             personality.currentTask = TaskType.HUNTING;
             personality.huntTargetUuid = withers.get(0).getUuid();
-            personality.taskExpireTime = System.currentTimeMillis() + 60000L;
+            // V5.43.4: ms → tick 统一
+            personality.taskExpireTime = player.getServer().getTicks() + com.maohi.fakeplayer.TimingConstants.TICK_TIMEOUT_EXPLORE;
         } else {
             // V5.20 修复：回滚前先确认确实没有下界之星，避免战果丢失
             if (now() - personality.beaconStageEnteredAt > 600000L
@@ -370,7 +374,8 @@ public final class BeaconQuest {
             if (obsTarget != null) {
                 personality.taskTarget = obsTarget;
                 personality.currentTask = TaskType.MINING;
-                personality.taskExpireTime = System.currentTimeMillis() + 60000L;
+                // V5.43.4: ms → tick 统一
+                personality.taskExpireTime = player.getServer().getTicks() + com.maohi.fakeplayer.TimingConstants.TICK_TIMEOUT_EXPLORE;
                 return;
             }
         }
@@ -381,7 +386,8 @@ public final class BeaconQuest {
             if (sandTarget != null) {
                 personality.taskTarget = sandTarget;
                 personality.currentTask = TaskType.MINING;
-                personality.taskExpireTime = System.currentTimeMillis() + 60000L;
+                // V5.43.4: ms → tick 统一
+                personality.taskExpireTime = player.getServer().getTicks() + com.maohi.fakeplayer.TimingConstants.TICK_TIMEOUT_EXPLORE;
             }
         }
     }

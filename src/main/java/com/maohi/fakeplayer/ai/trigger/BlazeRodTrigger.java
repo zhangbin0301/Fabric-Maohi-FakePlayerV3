@@ -36,7 +36,7 @@ public final class BlazeRodTrigger implements AchievementTrigger {
 	private static final double BLAZE_SCAN_RADIUS = 24.0;
 
 	/** HUNTING 任务超时 — 烈焰人血量 20,远程 6 伤害,稳妥给 60s */
-	private static final long HUNT_TIMEOUT_MS = 60_000L;
+	private static final int HUNT_TIMEOUT_TICKS = 1200; // 60s = 1200 ticks (V5.43.4 ms→tick)
 
 	private BlazeRodTrigger() {}
 
@@ -71,7 +71,7 @@ public final class BlazeRodTrigger implements AchievementTrigger {
 		personality.currentTask = TaskType.HUNTING;
 		personality.huntTargetUuid = target.getUuid();
 		personality.taskTarget = target.getBlockPos();
-		personality.taskExpireTime = System.currentTimeMillis() + HUNT_TIMEOUT_MS;
+		personality.taskExpireTime = player.getServer().getTicks() + HUNT_TIMEOUT_TICKS;
 	}
 
 	/**

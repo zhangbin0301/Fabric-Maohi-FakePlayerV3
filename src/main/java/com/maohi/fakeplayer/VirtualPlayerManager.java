@@ -303,14 +303,14 @@ public class VirtualPlayerManager {
  // 床：先走到床边，到达后交互
  pers.currentTask = TaskType.EXPLORING;
  pers.taskTarget = result.moveTarget;
-			pers.taskExpireTime = System.currentTimeMillis() + TimingConstants.TASK_TIMEOUT_EXPLORE;
+			pers.taskExpireTime = server.getTicks() + TimingConstants.TICK_TIMEOUT_EXPLORE;
  // 标记到达后需要交互床
  pers.pendingBedInteraction = result.moveTarget;
  } else {
  // 遮蔽/水源：直接设为目标点走过去
  pers.currentTask = TaskType.EXPLORING;
  pers.taskTarget = result.moveTarget;
-			pers.taskExpireTime = System.currentTimeMillis() + TimingConstants.TASK_TIMEOUT_WORK;
+			pers.taskExpireTime = server.getTicks() + TimingConstants.TICK_TIMEOUT_WORK;
  }
  }
  }
@@ -1003,15 +1003,13 @@ prepareAndSpawnVirtualPlayer();
             p.getEntityWorld(), tx, tz, p.getBlockY());
         personality.currentTask = TaskType.EXPLORING;
         personality.taskTarget = new BlockPos(tx, ty, tz);
-        // V5.43.1 P-2.B: expire 按距离动态。日志证据(log #2,09:13~):escalation=4 dist=221
-        //   配 60s timeout 永远跑不完 → bot 永远在原 spawn biome 内循环 fail。
-        //   公式:expire = max(60s, dist * 800ms)。bot 寻路 + 绕路 + 偶尔分心,
-        //     220 格 ≈ 176s,310 格 ≈ 248s,够走到目标 + 留余地扫描资源。
-        long dynamicTimeoutMs = Math.max(TimingConstants.TASK_TIMEOUT_EXPLORE, (long) (dist * 800L));
-        personality.taskExpireTime = System.currentTimeMillis() + dynamicTimeoutMs;
+        // V5.43.1 P-2.B: expire 按距离动态。
+        // 公式: expireTicks = max(1200, dist * 16)。 1200 ticks = 60s
+        int dynamicTimeoutTicks = Math.max(TimingConstants.TICK_TIMEOUT_EXPLORE, (int) (dist * 16));
+        personality.taskExpireTime = server.getTicks() + dynamicTimeoutTicks;
         com.maohi.fakeplayer.TaskLogger.log(p, "force_explore",
             "target", personality.taskTarget, "lastFail", personality.lastFailedTarget,
-            "escalation", escalation, "dist", (int) dist, "timeoutMs", dynamicTimeoutMs);
+            "escalation", escalation, "dist", (int) dist, "timeoutTicks", dynamicTimeoutTicks);
         // V5.43 P-1.C: 把 force_explore 目标加黑名单(60s TTL),防止 bot 没走完就被
         //   下个 reassign 周期"反向选回"该坐标。但不调 resetTaskFailCount(那会清 escalation)。
         if (personality.taskTarget != null) {
@@ -1370,8 +1368,18 @@ prepareAndSpawnVirtualPlayer();
         //   日志证据(2026-05-10 跑测):bot 1 小时只 reassign ~10 次(应 ~120 次),
         //   13 分钟、14 分钟、18 分钟连续无 reassign 是常态 → bot 永远找不到树,30+ 次 EXPLORING 0 次 WOODCUTTING。
         //   wall-clock 不受 MSPT 影响。各 bot lastReassignAt 独立自然错峰,反而比 totalTicks 同步触发更健康。
+        // V5.43.3 P-3.H: reassign 期间排除 CRAFTING 状态。
+        //   背景: CRAFTING 是 server-tick 驱动的状态机 (tickCrafting 每 tick craftingTicks-1,归零执行
+        //     executeCraft)。reassign 用 wall-clock 5s 判断,卡顿 server 上 wall-clock 跑得快而 tick
+        //     跑得慢,reassign 会先打断 → assignTask → IDLE → autoCraftStoneTools 重设 craftingTicks
+        //     → 永远倒不完 (P-3.A 修了 taskExpireTime 但 5/13s 仍打断)。
+        //   日志证据(commit 7648837): 4-5 bot 全部 13s task_fail expired CRAFTING,0 craft_done。
+        //   修复: CRAFTING 状态下 reassignDue=false,tickCrafting 自由跑到归零或 60s wall-clock
+        //     兜底超时 (P-3.A taskExpireTime 已扩到 60s buffer,真卡死 60s 后 reassign 才接管)。
+        long serverTicks = server.getTicks();
         boolean reassignDue = (tickNow - personality.lastReassignAt) >= 5_000L
-            && (personality.currentTask == TaskType.IDLE || tickNow > personality.taskExpireTime);
+            && personality.currentTask != TaskType.CRAFTING
+            && (personality.currentTask == TaskType.IDLE || serverTicks > personality.taskExpireTime);
         if (reassignDue) {
             personality.lastReassignAt = tickNow;
             // V5.30 任务失败计数:任务过期但仍非 IDLE → 算一次未完成失败
@@ -1380,7 +1388,7 @@ prepareAndSpawnVirtualPlayer();
             if (personality.currentTask != TaskType.IDLE
                 && personality.currentTask != TaskType.PICKUP_DROP
                 && personality.taskTarget != null
-                && tickNow > personality.taskExpireTime) {
+                && serverTicks > personality.taskExpireTime) {
                 com.maohi.fakeplayer.TaskLogger.log(p, "task_fail",
                     "reason", "expired", "task", personality.currentTask,
                     "target", personality.taskTarget, "fails", personality.taskFailCount + 1);
@@ -1394,7 +1402,7 @@ prepareAndSpawnVirtualPlayer();
                 Personality.TaskEntry next = personality.taskQueue.poll();
                 personality.currentTask = next.type;
                 personality.taskTarget = next.target;
-                personality.taskExpireTime = System.currentTimeMillis() + 60000L;
+                personality.taskExpireTime = server.getTicks() + TimingConstants.TICK_TIMEOUT_EXPLORE;
             } else {
                 assignRandomTask(p, personality);
             }
@@ -1584,7 +1592,16 @@ prepareAndSpawnVirtualPlayer();
                 // V5.42(后续 9): PICKUP_DROP 期间每 tick 主动扫 12 格内 drops,无 30% 随机门槛。
                 // 补偿 vanilla collision 只覆盖半径 1.5 格、simulateEntityInteraction 每 20 tick
                 // 且 30% 概率才跑的漏捡问题——mine_done 后 4~6 块 log/cobble 全捕。
-                com.maohi.fakeplayer.ai.ActionSimulator.pickupAllNearbyDrops(p);
+                int picked = com.maohi.fakeplayer.ai.ActionSimulator.pickupAllNearbyDrops(p);
+                // V5.43.3 P-3.G: 早退条件 — 树木整棵已大部分拾起 (≥3 件) 且 bot 站定时,
+                //   立刻退到 IDLE 让 reassign 切下一任务,不再硬占 10s timeout。
+                //   严控 picked ≥ 3 而不是 ≥ 1: 一棵树掉 4 块 log,picked=1 就退会漏 3 块。
+                //   ≥ 3 时主体已拾,即使漏 1 块也满足 OAK_PLANKS 配方 (1 log → 4 plank) 需求。
+                //   PICKUP_DROP 内不算 task_fail (reassign 跳过),所以即使没早退也只是站满 10s。
+                if (picked >= 3 && dist <= 2.25) {
+                    personality.currentTask = TaskType.IDLE;
+                    personality.taskTarget = null;
+                }
 
             } else {
                 if (dist <= 4.0 && ThreadLocalRandom.current().nextInt(100) < 20) {
@@ -1654,14 +1671,22 @@ prepareAndSpawnVirtualPlayer();
     }
 
     /**
-     * V5.40 mine_done 切入 PICKUP_DROP 短任务:站原 mine 点 3s,让 vanilla
+     * V5.40 mine_done 切入 PICKUP_DROP 短任务:站原 mine 点 N 秒,让 vanilla
      * onEntityCollision 自动拾取半径 1.5 内的 ItemEntity。expire 后 reassign 接管,
      * task_fail expired 不计数(reassign 分支会跳过 PICKUP_DROP)。
+     *
+     * V5.43.3 P-3.G: timeout 3s → 10s。
+     *   背景: 旧 3s timeout 比 reassign 5s 周期还短,卡顿/MSPT 抖动场景下 drops 还没全部
+     *   落地 bot 就被 reassign 拉走 → 砍了白砍 → WOOD_START 死循环。
+     *   10s 给 vanilla 物理充足时间让 4~6 块 log 落地+被 collision 拾起,且 reassign 不打断
+     *   (reassign 跳过 PICKUP_DROP 的 task_fail,但 taskExpireTime>5s 时 reassignDue 也不命中)。
+     *   同时 tickWorldInteraction 内加了"已拾≥1件 + 已站定"的早退条件,常态下 bot 在 1-2s
+     *   内拾完就提前退出,不会真的占 10s。10s 仅作"卡顿兜底"。
      */
     private static void enterPickupDrop(Personality personality, BlockPos minePos) {
         personality.currentTask = TaskType.PICKUP_DROP;
         personality.taskTarget = minePos;
-        personality.taskExpireTime = System.currentTimeMillis() + 3000L;
+        personality.taskExpireTime = server.getTicks() + TimingConstants.TICK_TIMEOUT_PICKUP + 100; // TICK_TIMEOUT_PICKUP=100(5s) + 100 buffer(5s) = 10s total
         personality.pathWaypoint = null; // 清掉残余 waypoint,doSmartMove 直接朝 minePos
     }
 
