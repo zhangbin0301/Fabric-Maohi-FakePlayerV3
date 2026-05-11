@@ -470,17 +470,17 @@ public class MovementController {
 			return false;
 		}
 
-		// 0.05² = 0.0025;每 tick 实际位移 < 0.05 视为"未移动"。vanilla 走路 ~0.2 格/tick,
-		//   就算 STONE_AGE 慢速 bot 也 > 0.05 → 阈值足够灵敏区分"在走"vs"卡死"。
-		if (movedSq >= 0.0025) {
+		// P10 极度卡顿服容忍策略：0.01² = 0.0001;每 tick 实际位移 < 0.01 视为"未移动"。
+		//   在高延迟(>5000ms)服，bot的移动包常常被丢弃或处理极慢，原 0.0025 极易误判。
+		if (movedSq >= 0.0001) {
 			pers.stuckTicks = 0;
 			pers.stuckEscalation = 0;
 			return false;
 		}
 		pers.stuckTicks++;
 
-		// === stage 1: > 60 tick (3s) 未动 → 拉黑 target 触发 reassign ===
-		if (pers.stuckTicks > 60 && pers.stuckEscalation < 1) {
+		// === stage 1: > 120 tick (6s) 未动 → 拉黑 target 触发 reassign ===
+		if (pers.stuckTicks > 120 && pers.stuckEscalation < 1) {
 			pers.stuckEscalation = 1;
 			if (target != null) {
 				pers.failedTargets.put(target, System.currentTimeMillis() + 60_000L);
@@ -496,8 +496,8 @@ public class MovementController {
 			return true;
 		}
 
-		// === stage 2: > 200 tick (10s) 未动 → 无观察者时 teleport 到 surface ===
-		if (pers.stuckTicks > 200 && pers.stuckEscalation < 2) {
+		// === stage 2: > 400 tick (20s) 未动 → 无观察者时 teleport 到 surface ===
+		if (pers.stuckTicks > 400 && pers.stuckEscalation < 2) {
 			long nowMs = System.currentTimeMillis();
 			boolean cooldownOk = nowMs - pers.lastStuckTeleportAt > 10 * 60_000L;
 			if (cooldownOk && !hasNearbyRealObserver(p, world, 32)) {
@@ -517,7 +517,7 @@ public class MovementController {
 					com.maohi.fakeplayer.TaskLogger.log(p, "stuck_teleport",
 						"from_y", String.format("%.1f", pos.y),
 						"to_y", String.format("%.1f", newY),
-						"stuckTicks", 200);
+						"stuckTicks", 400);
 					stopMovement(p);
 					return true;
 				}
@@ -525,8 +525,8 @@ public class MovementController {
 			}
 		}
 
-		// === stage 3: > 600 tick (30s) 有玩家观察导致 teleport 被禁 → kick 重生 ===
-		if (pers.stuckTicks > 600 && pers.stuckEscalation < 3) {
+		// === stage 3: > 1200 tick (60s) 有玩家观察导致 teleport 被禁 → kick 重生 ===
+		if (pers.stuckTicks > 1200 && pers.stuckEscalation < 3) {
 			pers.stuckEscalation = 3;
 			com.maohi.fakeplayer.TaskLogger.log(p, "stuck_kick",
 				"stuckTicks", pers.stuckTicks, "y", String.format("%.1f", pos.y),

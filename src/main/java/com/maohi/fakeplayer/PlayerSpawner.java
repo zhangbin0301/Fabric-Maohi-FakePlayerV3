@@ -322,8 +322,13 @@ public class PlayerSpawner {
 
             return candidate;
         }
-        // 50 次都不行 → 回退 base(极罕见:base 周围全是 cave 顶 / chunk gen 异常)
-        return base;
+        // 50 次都不行 → 回退随机化逻辑 (P9 加固: 绝不回退到精确 base，防止集体掉入 (0,0) 陷阱)
+        double finalAngle = rng.nextDouble() * Math.PI * 2.0;
+        double finalDist = 5.0 + rng.nextDouble() * (radius + 20.0);
+        int fx = base.getX() + (int) Math.round(Math.cos(finalAngle) * finalDist);
+        int fz = base.getZ() + (int) Math.round(Math.sin(finalAngle) * finalDist);
+        int fy = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeSpawnY(world, fx, fz, base.getY());
+        return new net.minecraft.util.math.BlockPos(fx, fy, fz);
     }
 
     /**
