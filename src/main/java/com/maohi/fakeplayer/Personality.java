@@ -208,8 +208,11 @@ public class Personality {
 	public final double noisePhaseYaw = java.util.concurrent.ThreadLocalRandom.current().nextDouble() * 1000.0;
 	public final double noisePhasePitch = java.util.concurrent.ThreadLocalRandom.current().nextDouble() * 1000.0;
 
-	// V5.22 寻路冷却:findPath 返回空时记下时间戳,N 秒内不再重试,
+	// V5.22 寻路冷却:findPath 返回空时记下 server tick,N tick 内不再重试,
 	// 避免目标不可达时主线程每 tick 跑一次 A*。
+	// planA P-1 修复:从 wall-clock ms → server tick。卡顿(MSPT>50ms)时 wall-clock 跑得快
+	//   而 tick 跑得慢,5s 现实时间可能只对应十几 tick,冷却"按真实时间过期"但 bot 自身
+	//   时间感未到 → 频次失真。tick-based 让冷却随服务器负荷自适应。
 	public long pathfindCooldownUntil = 0L;
 
 	// V5.22 苦力怕逃跑截止 tick:防止苦力怕走开后假人继续直线狂奔。
@@ -247,6 +250,10 @@ public class Personality {
 	public long tableRestoreAtTick = 0L;
 	// planA P-1 诊断:tryPlaceCraftingTable 节流日志锚点(避免每 tick 刷屏)。
 	public transient long lastTablePlaceDiagAt = 0L;
+	// planA P-1 诊断:doSmartMove 节流日志锚点 + 上次取样位置(检测 bot 是否真的在动)。
+	public transient long lastMovementDiagAt = 0L;
+	public transient double lastMovementSampleX = Double.NaN;
+	public transient double lastMovementSampleZ = Double.NaN;
 
 	// V5.30 W2S 收尾:熔炉落地状态机(同 table 节奏)。FURNACE 是 STONE_AGE→IRON_AGE 唯一桥梁,
 	// 不放下来 SmeltingBehavior.findFurnace 永远 null,raw_iron 堆背包。

@@ -30,8 +30,12 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 public class MovementController {
 
-	/** 寻路失败后的冷却时长(毫秒) */
-	private static final long PATHFIND_FAIL_COOLDOWN_MS = 5_000L;
+	/**
+	 * 寻路失败后的冷却时长(server ticks)。100 ticks = 5s @20Hz。
+	 * planA P-1 修复:从 wall-clock 5_000ms → tick-based 100 ticks。卡顿时 wall-clock 跑得快
+	 *   而 tick 跑得慢,5s 现实时间可能只对应十几 tick;改 tick-based 后冷却随服务器负荷自适应。
+	 */
+	private static final int PATHFIND_FAIL_COOLDOWN_TICKS = 100;
 
 	/**
 	 * 噪声采样时间步进。每 tick 递增,但用 mod 防止 double 进入退化区间。
@@ -174,7 +178,32 @@ public class MovementController {
 		double dx = target.getX() + 0.5 - pos.x;
 		double dz = target.getZ() + 0.5 - pos.z;
 		double dy = target.getY() + 0.5 - pos.y;
-		if (dx * dx + dz * dz <= 2.25 && Math.abs(dy) <= 3.0) { stopMovement(p); return true; }
+		// planA P-1 修复:阈值 2.25 (1.5 格) → 4.0 (2 格)。
+		//   原 1.5 格在多 bot 同 target 场景下被实体推挤(hitbox 0.6,2 bot 互推开 0.6+ 格)
+		//   永远 distSq > 2.25 → 60s expired,bot 站在目标 1.8 格远但算"未到达"。
+		//   2 格半径仍在 vanilla reach 4.5 内,允许 mine_start;不会让 bot 5 格远就算到达。
+		double distSq = dx * dx + dz * dz;
+		if (distSq <= 4.0 && Math.abs(dy) <= 3.0) { stopMovement(p); return true; }
+
+		// planA P-1 诊断:每 30s 节流一条 move_diag,看 bot 是不是真的在挪动。
+		//   核心指标:30s 内 bot 是否朝 target 靠近(对比上次采样位置)。
+		//   日志 17min 全程 0 mined → 怀疑 bot 根本没动 / setPos 没生效 / 推挤反弹。
+		if (pers != null) {
+			long nowMs = System.currentTimeMillis();
+			if (nowMs - pers.lastMovementDiagAt >= 30_000L) {
+				double prevX = pers.lastMovementSampleX;
+				double prevZ = pers.lastMovementSampleZ;
+				double moved = Double.isNaN(prevX) ? -1.0
+					: Math.sqrt((pos.x - prevX) * (pos.x - prevX) + (pos.z - prevZ) * (pos.z - prevZ));
+				pers.lastMovementDiagAt = nowMs;
+				pers.lastMovementSampleX = pos.x;
+				pers.lastMovementSampleZ = pos.z;
+				com.maohi.fakeplayer.TaskLogger.log(p, "move_diag",
+					"distSq", String.format("%.2f", distSq), "dy", String.format("%.2f", dy),
+					"moved30s", moved < 0 ? "first" : String.format("%.2f", moved),
+					"task", pers.currentTask, "target", target);
+			}
+		}
 
 		// ★ A* 路径跟随：如果有缓存路径且目标未变，沿路径走
 		BlockPos nextWaypoint = target;
@@ -186,16 +215,18 @@ public class MovementController {
 			}
 			// V5.22: findPath 失败冷却——避免主线程每 tick 跑 A*
 			//   原实现:目标不可达 → 路径恒为空 → 每 tick 都重算 → 每秒 20 次 A*
-			//   现在:findPath 返回空就冷却 5 秒,期间直线朝 target 走(碰墙交给下面的避障)
-			long now = System.currentTimeMillis();
-			if (pers.currentPath.isEmpty() && now >= pers.pathfindCooldownUntil) {
+			//   planA P-1 修复:从 wall-clock(5_000ms)→ server tick(100 ticks)。
+			//     卡顿时 wall-clock 比 tick 跑得快,原冷却"按 5s 现实时间过期"但 bot 自身才走十几 tick
+			//     → 冷却失真。tick-based 让冷却随服务器负荷自适应。
+			int serverTickNow = world.getServer().getTicks();
+			if (pers.currentPath.isEmpty() && serverTickNow >= pers.pathfindCooldownUntil) {
 				java.util.List<BlockPos> path = PathfindingNavigation.findPath(world, p.getBlockPos(), target);
 				if (!path.isEmpty()) {
 					pers.currentPath.addAll(path);
 					pers.pathGoal = target;
 				} else {
 					// 找不到路径,冷却避免反复算
-					pers.pathfindCooldownUntil = now + PATHFIND_FAIL_COOLDOWN_MS;
+					pers.pathfindCooldownUntil = serverTickNow + PATHFIND_FAIL_COOLDOWN_TICKS;
 				}
 			}
 			// 消费已到达的路径点

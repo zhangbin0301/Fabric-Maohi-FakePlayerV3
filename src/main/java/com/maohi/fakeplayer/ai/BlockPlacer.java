@@ -268,7 +268,12 @@ public class BlockPlacer {
 		BlockPos supportPos = null;
 		Direction faceDir = null;
 		for (BlockPos cand : candidates) {
-			if (!player.getEntityWorld().getBlockState(cand).isAir()) continue;
+			// planA P-1 修复:isAir() → isAir() || isReplaceable()。
+			//   原 isAir() 排除草、藤蔓、雪层、mangrove_propagule、花等"vanilla 右键能放进去的"方块。
+			//   密林/红树林环境周围 1 格全是 mangrove_roots / 草 / 树叶 → 12 候选全 reject → no_place_pos。
+			//   isReplaceable() 与 vanilla 玩家右键放置语义一致(vanilla 玩家右键花的位置,工作台直接顶替花)。
+			net.minecraft.block.BlockState candState = player.getEntityWorld().getBlockState(cand);
+			if (!candState.isAir() && !candState.isReplaceable()) continue;
 			BlockPos under = cand.down();
 			if (player.getEntityWorld().getBlockState(under).isAir()) continue;
 			placeAt = cand;
@@ -308,8 +313,9 @@ public class BlockPlacer {
 				resetTablePlaceState(personality);
 				return;
 			}
-			// 目标格仍要是空气
-			if (!player.getEntityWorld().getBlockState(placeAt).isAir()) {
+			// 目标格仍要是空气或可替换(草/花/藤蔓)。与 stage 0 接受 isReplaceable() 保持一致。
+			net.minecraft.block.BlockState placeAtState = player.getEntityWorld().getBlockState(placeAt);
+			if (!placeAtState.isAir() && !placeAtState.isReplaceable()) {
 				com.maohi.fakeplayer.TaskLogger.log(player, "table_place_abort",
 					"reason", "place_pos_occupied", "pos", placeAt);
 				resetTablePlaceState(personality);

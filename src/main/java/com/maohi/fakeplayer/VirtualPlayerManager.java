@@ -595,6 +595,10 @@ prepareAndSpawnVirtualPlayer();
 	 *   resetTaskFailCount 在真实成功时清空 lastFailedTarget,不会永久封禁可达的树/矿。
 	 */
 	public BlockPos findNearestBlock(net.minecraft.server.world.ServerWorld world, BlockPos pos, int radius, String type, UUID self) {
+		// planA P-1 修复:log 类型时把已 claim 的树根坐标 ±8 Y 同 X/Z 列全部加入 claimed。
+		//   原 bug:bot A 锁 (11,63,-8) 树根,bot B scan 同棵树 (11,70,-8) 树梢命中 → snapToTreeBase
+		//   又落回 (11,63,-8) → 抢同一目标。把整列扩散到 excluded,B 直接拿不到这棵树任何高度。
+		boolean isLog = "log".equals(type) || "wood".equals(type) || "logs".equals(type);
 		java.util.Set<BlockPos> claimed = null;
 		for (java.util.Map.Entry<UUID, Personality> e : playerPersonalities.entrySet()) {
 			if (e.getKey().equals(self)) continue;
@@ -602,11 +606,23 @@ prepareAndSpawnVirtualPlayer();
 			if (t == null) continue;
 			if (claimed == null) claimed = new java.util.HashSet<>();
 			claimed.add(t);
+			if (isLog) {
+				for (int dy = -8; dy <= 8; dy++) {
+					if (dy == 0) continue;
+					claimed.add(t.add(0, dy, 0));
+				}
+			}
 		}
 		Personality selfPers = playerPersonalities.get(self);
 		if (selfPers != null && selfPers.lastFailedTarget != null) {
 			if (claimed == null) claimed = new java.util.HashSet<>();
 			claimed.add(selfPers.lastFailedTarget);
+			if (isLog) {
+				for (int dy = -8; dy <= 8; dy++) {
+					if (dy == 0) continue;
+					claimed.add(selfPers.lastFailedTarget.add(0, dy, 0));
+				}
+			}
 		}
 		// V5.40 失败黑名单:60s 内所有失败位置全部排除,避免 A↔B 环型 fail。
 		//   每次查询时顺手 GC 过期 entry(O(N) 但 N 通常 < 10),不开新线程。
@@ -615,7 +631,15 @@ prepareAndSpawnVirtualPlayer();
 			selfPers.failedTargets.entrySet().removeIf(e -> e.getValue() < now);
 			if (!selfPers.failedTargets.isEmpty()) {
 				if (claimed == null) claimed = new java.util.HashSet<>();
-				claimed.addAll(selfPers.failedTargets.keySet());
+				for (BlockPos failed : selfPers.failedTargets.keySet()) {
+					claimed.add(failed);
+					if (isLog) {
+						for (int dy = -8; dy <= 8; dy++) {
+							if (dy == 0) continue;
+							claimed.add(failed.add(0, dy, 0));
+						}
+					}
+				}
 			}
 		}
 		BlockPos result = blockScanCache.findNearestBlock(server, world, pos, radius, type,
@@ -623,24 +647,33 @@ prepareAndSpawnVirtualPlayer();
 		// planA P-1 防御:BlockScanCache 已尽力跳过 excluded,但若 cache 路径 / 边角 case 漏掉,
 		//   这里基于 long-pack 做二次过滤:命中 lastFailedTarget / failedTargets / 其他 bot
 		//   taskTarget 都返回 null,让上游(assignChopTree)走 setExplore 而不是抢同一目标。
-		//   日志证据:4 个 bot 同时盯 (-5,70,4) → 全 expired → SkyRusty 反复 fails 高位。
+		//   log 类型按 X/Z 同列 + Y 差 ≤8 判同棵树(snapToTreeBase 会把树梢落到树根)。
 		if (result != null) {
 			long resultPacked = result.asLong();
+			int rx = result.getX(), ry = result.getY(), rz = result.getZ();
 			if (selfPers != null) {
-				if (selfPers.lastFailedTarget != null && selfPers.lastFailedTarget.asLong() == resultPacked) return null;
+				if (sameTargetOrColumn(selfPers.lastFailedTarget, rx, ry, rz, resultPacked, isLog)) return null;
 				if (!selfPers.failedTargets.isEmpty()) {
 					for (BlockPos failed : selfPers.failedTargets.keySet()) {
-						if (failed.asLong() == resultPacked) return null;
+						if (sameTargetOrColumn(failed, rx, ry, rz, resultPacked, isLog)) return null;
 					}
 				}
 			}
 			for (java.util.Map.Entry<UUID, Personality> e : playerPersonalities.entrySet()) {
 				if (e.getKey().equals(self)) continue;
 				BlockPos t = e.getValue().taskTarget;
-				if (t != null && t.asLong() == resultPacked) return null;
+				if (sameTargetOrColumn(t, rx, ry, rz, resultPacked, isLog)) return null;
 			}
 		}
 		return result;
+	}
+
+	/** planA P-1: log 类型时同 X/Z + |dy|≤8 视为同棵树,否则严格 long 比较。 */
+	private static boolean sameTargetOrColumn(BlockPos target, int rx, int ry, int rz, long resultPacked, boolean isLog) {
+		if (target == null) return false;
+		if (target.asLong() == resultPacked) return true;
+		if (!isLog) return false;
+		return target.getX() == rx && target.getZ() == rz && Math.abs(target.getY() - ry) <= 8;
 	}
 
     private void prepareAndSpawnVirtualPlayer() {
