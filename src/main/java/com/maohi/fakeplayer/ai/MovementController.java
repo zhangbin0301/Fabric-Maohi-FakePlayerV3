@@ -349,14 +349,24 @@ public class MovementController {
 				speedFactor = 0.7f;
 			}
 
-			setMovement(p,
-				(0.8f + ThreadLocalRandom.current().nextFloat() * 0.2f) * speedFactor,
-				lateralDrift * speedFactor,
-				wantJump, sprintHere);
-			// V5.28.4 P1-C.1: 删除 p.travel(...) 强制额外物理 tick——
-			//   vanilla ServerPlayerEntity.tick() 每 tick 自己按 forwardSpeed/sidewaysSpeed 算 travel,
-			//   手动推一帧会让假人位移翻倍,PCAP 易识别。
-			// V5.28 P1-B.1: forward/sideways 改 PlayerInputC2SPacket,vanilla setPlayerInput 落字段。
+			float fwd = (0.8f + ThreadLocalRandom.current().nextFloat() * 0.2f) * speedFactor;
+			float side = lateralDrift * speedFactor;
+			setMovement(p, fwd, side, wantJump, sprintHere);
+
+			// planA P-1 D1 根因修复:恢复主动 p.travel() 推一帧物理。
+			//   V5.28.4 P1-C.1 删它时的假设——"vanilla ServerPlayerEntity.tick() 会自己按
+			//   forwardSpeed/sidewaysSpeed 算 travel,手动推一帧会位移翻倍"——是错的:
+			//   1) server-side ServerPlayerEntity.tick() 不自跑 LivingEntity.travel()。
+			//      vanilla 假设 client 通过 PlayerMoveC2SPacket 上报位置,server 只验证不计算。
+			//   2) fake player 没 client → 没人发 PlayerMoveC2SPacket → 没人推 travel
+			//      → setMovement 写了 PlayerInput 字段也只是个标志,entity 实际位移依然为 0。
+			//   3) 因此这里就是 bot 唯一的位移驱动,不存在"翻倍"的第二条路径。
+			//   日志证据(commit 1daf53f 之后多场跑测):8 bot 30 分钟全程 moved30s=0.00,
+			//     EXPLORING 任务每 30s 全部超时,假设 →fail →force_explore 200 块路依旧
+			//     moved30s=0.00,17 分钟内 logs/sticks/cobble 全 0,完全无成就。
+			//   参数顺序:Vec3d(sideways=x, vertical=y, forward=z) 与 V5.28.6 之前一致,
+			//     vanilla LivingEntity.travel 的入参语义就是 (sideways, vertical, forward)。
+			p.travel(new Vec3d(side, 0, fwd));
 		}
 
 		return false;
