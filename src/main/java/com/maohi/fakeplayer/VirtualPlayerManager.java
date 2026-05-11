@@ -186,6 +186,8 @@ public class VirtualPlayerManager {
 		//   reassign 周期(totalTicks % 100 == 0)永远不满足 → bot 卡 IDLE 17min 才 phase_change。
 		//   fastpath 让 bot 上线后 ~5s 必有 phase_change,期间不进 mining/movement 重活。
 		runStartupFastpath(now);
+		// planA P-1 诊断:熔断期间也要 flush metrics — 卡顿才是诊断高发期,跳过 flush 等于看不到问题
+		com.maohi.fakeplayer.TaskMetrics.flushIfDue(server);
 		Thread.sleep(currentSleepMs);
 		continue;
 	}
@@ -259,6 +261,7 @@ public class VirtualPlayerManager {
                                         com.maohi.fakeplayer.TaskLogger.log(p, "task_fail",
                                             "reason", "blocked_no_path", "task", personality.currentTask,
                                             "target", snapshotTarget);
+                                        com.maohi.fakeplayer.TaskMetrics.countTaskFail(p.getUuid(), "blocked_no_path");
                                         Personality.recordTaskFailure(personality, snapshotTarget);
                                         personality.currentTask = TaskType.IDLE;
                                         personality.taskTarget = null;
@@ -389,6 +392,8 @@ prepareAndSpawnVirtualPlayer();
                     });
                     processHeavyAILogic(nowMs, logicTickCounter);
                 }
+		// planA P-1 诊断:每 60s flush 一次 per-bot metrics 摘要(debug 关时早返)
+		com.maohi.fakeplayer.TaskMetrics.flushIfDue(server);
 	Thread.sleep(currentSleepMs); // V3.2 Lag Guard：动态休眠替代固定50ms
             } catch (Throwable t) {
                 try { Thread.sleep(1000); } catch (InterruptedException ignored) {}
@@ -613,8 +618,29 @@ prepareAndSpawnVirtualPlayer();
 				claimed.addAll(selfPers.failedTargets.keySet());
 			}
 		}
-		return blockScanCache.findNearestBlock(server, world, pos, radius, type,
+		BlockPos result = blockScanCache.findNearestBlock(server, world, pos, radius, type,
 			claimed == null ? java.util.Collections.emptySet() : claimed);
+		// planA P-1 防御:BlockScanCache 已尽力跳过 excluded,但若 cache 路径 / 边角 case 漏掉,
+		//   这里基于 long-pack 做二次过滤:命中 lastFailedTarget / failedTargets / 其他 bot
+		//   taskTarget 都返回 null,让上游(assignChopTree)走 setExplore 而不是抢同一目标。
+		//   日志证据:4 个 bot 同时盯 (-5,70,4) → 全 expired → SkyRusty 反复 fails 高位。
+		if (result != null) {
+			long resultPacked = result.asLong();
+			if (selfPers != null) {
+				if (selfPers.lastFailedTarget != null && selfPers.lastFailedTarget.asLong() == resultPacked) return null;
+				if (!selfPers.failedTargets.isEmpty()) {
+					for (BlockPos failed : selfPers.failedTargets.keySet()) {
+						if (failed.asLong() == resultPacked) return null;
+					}
+				}
+			}
+			for (java.util.Map.Entry<UUID, Personality> e : playerPersonalities.entrySet()) {
+				if (e.getKey().equals(self)) continue;
+				BlockPos t = e.getValue().taskTarget;
+				if (t != null && t.asLong() == resultPacked) return null;
+			}
+		}
+		return result;
 	}
 
     private void prepareAndSpawnVirtualPlayer() {
@@ -834,6 +860,8 @@ prepareAndSpawnVirtualPlayer();
             fakeConnections.remove(uuid);
             loginTimes.remove(uuid);
             sessionDurations.remove(uuid);
+            // planA P-1 诊断:bot 下线同步清掉 metrics 桶,长会话不积累
+            com.maohi.fakeplayer.TaskMetrics.removeBot(uuid);
             logoutScheduledTime.remove(uuid);
             // V5.23: 清理 PhaseNether 的 portal/ancient_debris 扫描缓存,避免长会话泄漏
             com.maohi.fakeplayer.ai.phase.PhaseNether.onPlayerLogout(uuid);
@@ -880,6 +908,8 @@ prepareAndSpawnVirtualPlayer();
 		// V5.23: 清理 PhaseNether 扫描缓存
 		com.maohi.fakeplayer.ai.phase.PhaseNether.onPlayerLogout(uuid);
 		com.maohi.fakeplayer.ai.phase.PhaseEnderDragon.onPlayerLogout(uuid);
+		// planA P-1 诊断:bot 退出同步清掉 metrics 桶
+		com.maohi.fakeplayer.TaskMetrics.removeBot(uuid);
 		// V3.5 fix: 关服时也要清理死亡状态
 		pendingRespawn.remove(uuid);
 		deathTimestamps.remove(uuid);
@@ -1079,6 +1109,8 @@ prepareAndSpawnVirtualPlayer();
         com.maohi.fakeplayer.TaskLogger.log(player, "assign",
             "phase", phase, "task", personality.currentTask, "target", personality.taskTarget,
             "fails", personality.taskFailCount);
+        // planA P-1 诊断:per-bot 60s 计数 assign 频次 + task type 分布
+        com.maohi.fakeplayer.TaskMetrics.countAssign(player.getUuid(), personality.currentTask);
     }
 
 
@@ -1392,6 +1424,7 @@ prepareAndSpawnVirtualPlayer();
                 com.maohi.fakeplayer.TaskLogger.log(p, "task_fail",
                     "reason", "expired", "task", personality.currentTask,
                     "target", personality.taskTarget, "fails", personality.taskFailCount + 1);
+                com.maohi.fakeplayer.TaskMetrics.countTaskFail(p.getUuid(), "expired");
                 Personality.recordTaskFailure(personality, personality.taskTarget);
             }
             // V5.30 阈值兜底:连续 ≥4 次失败 → 强制远征到 ±60 格,清零计数,跳过正常 queue/random
@@ -1662,6 +1695,7 @@ prepareAndSpawnVirtualPlayer();
                 com.maohi.fakeplayer.TaskLogger.log(p, "task_fail",
                     "reason", "blocked_no_path", "task", personality.currentTask,
                     "target", personality.taskTarget);
+                com.maohi.fakeplayer.TaskMetrics.countTaskFail(p.getUuid(), "blocked_no_path");
                 Personality.recordTaskFailure(personality, personality.taskTarget);
                 personality.currentTask = TaskType.IDLE;
                 personality.taskTarget = null;
@@ -1702,6 +1736,7 @@ prepareAndSpawnVirtualPlayer();
             if (targetState.isAir()) {
                 com.maohi.fakeplayer.TaskLogger.log(p, "task_fail",
                     "reason", "target_is_air", "task", personality.currentTask, "target", mineTarget);
+                com.maohi.fakeplayer.TaskMetrics.countTaskFail(p.getUuid(), "target_is_air");
                 Personality.recordTaskFailure(personality, mineTarget);
                 personality.currentTask = TaskType.IDLE;
                 personality.taskTarget = null;
@@ -1738,6 +1773,7 @@ prepareAndSpawnVirtualPlayer();
                 com.maohi.fakeplayer.TaskLogger.log(p, "task_fail",
                     "reason", "tool_mismatch", "task", personality.currentTask,
                     "target", mineTarget, "hardness", hardness, "ticks", personality.miningTotalTicks);
+                com.maohi.fakeplayer.TaskMetrics.countTaskFail(p.getUuid(), "tool_mismatch");
                 Personality.recordTaskFailure(personality, mineTarget);
                 personality.currentTask = TaskType.IDLE;
                 personality.taskTarget = null;
@@ -1772,6 +1808,8 @@ prepareAndSpawnVirtualPlayer();
                 com.maohi.fakeplayer.TaskLogger.log(p, "mine_done",
                     "target", finalMinePos, "remainingBlock", minedType,
                     "totalMined", personality.blocksMinedTotal + 1);
+                // planA P-1 诊断:per-bot mined 计数,对比 ach 看 D3 链路
+                com.maohi.fakeplayer.TaskMetrics.countMineDone(p.getUuid());
 
                 personality.isMining = false;
                 personality.miningPos = null;

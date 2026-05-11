@@ -193,22 +193,35 @@ public class BlockPlacer {
 			return;
 		}
 
+		// planA P-1 诊断:节流 30s(600 tick)一条 table_place_skip,看 bot 卡在哪个 gate
+		String diagReason = null;
+
 		// 当前任务白名单
 		if (personality.currentTask != TaskType.IDLE
 			&& personality.currentTask != TaskType.MINING
 			&& personality.currentTask != TaskType.WOODCUTTING
 			&& personality.currentTask != TaskType.EXPLORING) {
+			diagReason = "task_state=" + personality.currentTask;
+		}
+		// GUI 阻断:任何容器/合成界面打开时都跳过(避免和 CraftingBehavior 抢 ClickSlot 节拍)
+		else if (player.currentScreenHandler != player.playerScreenHandler) {
+			diagReason = "gui_blocked";
+		}
+		// 战斗/吃饭/切磋中不放
+		else if (personality.isEating || personality.isSparring) {
+			diagReason = personality.isEating ? "eating" : "sparring";
+		}
+
+		if (diagReason != null) {
+			logTablePlaceDiag(player, personality, now, diagReason);
 			return;
 		}
 
-		// GUI 阻断:任何容器/合成界面打开时都跳过(避免和 CraftingBehavior 抢 ClickSlot 节拍)
-		if (player.currentScreenHandler != player.playerScreenHandler) return;
-
-		// 战斗/吃饭/切磋中不放
-		if (personality.isEating || personality.isSparring) return;
-
 		// 频率控制:每 tick 5% 概率检查,避免每 tick 全量扫描
-		if (ThreadLocalRandom.current().nextInt(20) != 0) return;
+		// planA P-1 修复:删除 5% 概率 gate。
+		//   原 gate 让 bot 每秒最多尝试 1 次(20Hz × 5%),配合"脚边砍空 4 面无支撑"高失败率
+		//   → 5 分钟仍未放下工作台 → STONE_AGE 死循环。后续 critical gate (no_inv_table /
+		//   findCraftingTableNearby) 自身已是 O(N) 内存比较,删 5% 不会显著拉高 CPU。
 
 		// 周围 6 格已经有工作台 → 不需要再放
 		if (findCraftingTableNearby(player, 6)) return;
@@ -223,24 +236,38 @@ public class BlockPlacer {
 				break;
 			}
 		}
-		if (tableSlot == -1) return;
+		if (tableSlot == -1) {
+			logTablePlaceDiag(player, personality, now, "no_inv_table");
+			return;
+		}
 
 		// 工作台在背包(slot > 8)时，拟真操作：Shift+点击把它移到快捷栏，下一个 tick 再放置。
 		// 真人在放工作台前也会先把它从背包拖到快捷栏，这里完全模拟该动作序列。
 		if (tableSlot > 8) {
 			int screenSlot = InventoryActionHelper.playerInvSlotToScreenSlot(player.playerScreenHandler, tableSlot);
 			if (screenSlot >= 0) InventoryActionHelper.quickMove(player, screenSlot);
+			logTablePlaceDiag(player, personality, now, "slot_in_main_inv=" + tableSlot);
 			return; // 本 tick 只做移动，下一次 tick 检测到 hotbar 有工作台后再放置
 		}
 
-		// 找一个脚边的可放位置:北/南/东/西四面相邻一格,要求 (空气 + 下方非空气)
+		// 找一个可放位置:先扫脚边 4 直 + 4 角 (8 格),都没再扫头顶 4 直 (4 格)。
+		// planA P-1 修复:原只扫脚边 4 直。bot 砍完一棵 mangrove 树会留下空气列(自身在树底
+		//   被重力拉下来后,周围 4 直可能 2~3 个是被砍空的树位 → 全是 air → no_place_pos)。
+		//   8 角 + 头顶 4 直额外候选让"周围地形被破坏"场景仍能找到放置点。
 		BlockPos foot = player.getBlockPos();
-		Direction[] dirs = {Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST};
+		BlockPos[] candidates = new BlockPos[] {
+			// 脚边 4 直
+			foot.north(), foot.south(), foot.east(), foot.west(),
+			// 脚边 4 角(对角)
+			foot.north().east(), foot.north().west(),
+			foot.south().east(), foot.south().west(),
+			// 头顶 4 直 (foot.up().offset(d))
+			foot.up().north(), foot.up().south(), foot.up().east(), foot.up().west(),
+		};
 		BlockPos placeAt = null;
 		BlockPos supportPos = null;
 		Direction faceDir = null;
-		for (Direction d : dirs) {
-			BlockPos cand = foot.offset(d);
+		for (BlockPos cand : candidates) {
 			if (!player.getEntityWorld().getBlockState(cand).isAir()) continue;
 			BlockPos under = cand.down();
 			if (player.getEntityWorld().getBlockState(under).isAir()) continue;
@@ -249,7 +276,10 @@ public class BlockPlacer {
 			faceDir = Direction.UP;
 			break;
 		}
-		if (placeAt == null) return;
+		if (placeAt == null) {
+			logTablePlaceDiag(player, personality, now, "no_place_pos");
+			return;
+		}
 
 		// === stage 0 → 1: 切到工作台槽 ===
 		int currentSlot = ((PlayerInventoryAccessor) inv).getSelectedSlot();
@@ -274,17 +304,22 @@ public class BlockPlacer {
 			BlockPos support = personality.tablePlaceSupportPos;
 			Direction face = personality.tablePlaceFaceDir;
 			if (placeAt == null || support == null || face == null) {
+				com.maohi.fakeplayer.TaskLogger.log(player, "table_place_abort", "reason", "null_state");
 				resetTablePlaceState(personality);
 				return;
 			}
 			// 目标格仍要是空气
 			if (!player.getEntityWorld().getBlockState(placeAt).isAir()) {
+				com.maohi.fakeplayer.TaskLogger.log(player, "table_place_abort",
+					"reason", "place_pos_occupied", "pos", placeAt);
 				resetTablePlaceState(personality);
 				return;
 			}
 			// 槽位仍要有 CRAFTING_TABLE
 			ItemStack target = player.getInventory().getStack(personality.tableTargetSlot);
 			if (target.isEmpty() || !target.isOf(Items.CRAFTING_TABLE)) {
+				com.maohi.fakeplayer.TaskLogger.log(player, "table_place_abort",
+					"reason", "slot_lost_table", "slot", personality.tableTargetSlot);
 				resetTablePlaceState(personality);
 				return;
 			}
@@ -305,6 +340,9 @@ public class BlockPlacer {
 			BlockHitResult hit = new BlockHitResult(hitCenter, face, support, false);
 			PacketHelper.interactBlock(player, Hand.MAIN_HAND, hit);
 			PacketHelper.swingHand(player, Hand.MAIN_HAND);
+			// planA P-1 诊断:interactBlock 已发,server 后续落地。这里只确认"已发包"。
+			com.maohi.fakeplayer.TaskLogger.log(player, "table_place_sent",
+				"pos", placeAt, "support", support);
 
 			personality.tableRestoreAtTick = now + RESTORE_DELAY_MIN
 				+ ThreadLocalRandom.current().nextInt(RESTORE_DELAY_MAX - RESTORE_DELAY_MIN + 1);
@@ -332,6 +370,19 @@ public class BlockPlacer {
 		p.tablePlaceFaceDir = null;
 		p.tablePlaceAtTick = 0L;
 		p.tableRestoreAtTick = 0L;
+	}
+
+	/**
+	 * planA P-1 诊断:tryPlaceCraftingTable 卡点节流日志(每 30s/600 tick 一条同原因)。
+	 * 关注:bot 已合出 crafting_table item 后却 5+ 分钟不放下,wooden_pickaxe 永远造不出 →
+	 * STONE_AGE 永卡。日志能直接看出卡在哪个 gate。
+	 */
+	private static void logTablePlaceDiag(ServerPlayerEntity player, Personality personality, long now, String reason) {
+		if (now - personality.lastTablePlaceDiagAt < 600L) return;
+		personality.lastTablePlaceDiagAt = now;
+		com.maohi.fakeplayer.TaskLogger.log(player, "table_place_skip",
+			"reason", reason, "stage", personality.tablePlaceStage,
+			"pos", player.getBlockPos());
 	}
 
 	/** 切比雪夫距离 d 由近到远扫,Y±3,与 CraftingBehavior.findCraftingTable 一致。 */

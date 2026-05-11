@@ -112,8 +112,22 @@ public final class BlockScanCache {
 	 * 从中心向外扩散的壳层扫描——切比雪夫距离 d 的外壳扫完再扩到 d+1,
 	 * 返回真正"最近"的匹配方块,贴脸命中时 O(1)。
 	 * V5.40:`excluded` 里的 BlockPos 在扫到时直接跳过,留给下游 bot。
+	 *
+	 * planA P-1 修复:excluded 比较改 long pack(BlockPos.asLong)。
+	 *   原 `excluded.contains(mutable)` 依赖 Vec3i.hashCode/equals 在 Mutable 和 immutable
+	 *   之间一致 — 1.21.11 yarn 下未必100% 守约。直接用 long 比较跳过 hash 路径,
+	 *   N 通常 < 10,O(N) 线性扫成本与 hash 桶常数级相当。
 	 */
 	private static BlockPos scanShells(ServerWorld world, BlockPos pos, int radius, int yMin, int yMax, String type, Set<BlockPos> excluded) {
+		long[] excludedPacked;
+		if (excluded.isEmpty()) {
+			excludedPacked = null;
+		} else {
+			excludedPacked = new long[excluded.size()];
+			int i = 0;
+			for (BlockPos ex : excluded) excludedPacked[i++] = ex.asLong();
+		}
+
 		int maxD = Math.max(radius, Math.max(Math.abs(yMin), Math.abs(yMax)));
 		BlockPos.Mutable m = new BlockPos.Mutable();
 		for (int d = 0; d <= maxD; d++) {
@@ -128,9 +142,19 @@ public final class BlockScanCache {
 					for (int dz = dzMin; dz <= dzMax; dz++) {
 						// 只扫当前壳层的外皮——内部在上次迭代已扫过
 						if (Math.max(Math.abs(dx), Math.max(Math.abs(dy), Math.abs(dz))) != d) continue;
-						m.set(pos.getX() + dx, pos.getY() + dy, pos.getZ() + dz);
-						// Vec3i.hashCode/equals 基于 x/y/z,Mutable 与 immutable 在 Set 里等价
-						if (!excluded.isEmpty() && excluded.contains(m)) continue;
+						int x = pos.getX() + dx;
+						int y = pos.getY() + dy;
+						int z = pos.getZ() + dz;
+						// long-pack 比较,绕开 BlockPos.Mutable equals/hashCode 风险
+						if (excludedPacked != null) {
+							long packed = BlockPos.asLong(x, y, z);
+							boolean skip = false;
+							for (long ep : excludedPacked) {
+								if (ep == packed) { skip = true; break; }
+							}
+							if (skip) continue;
+						}
+						m.set(x, y, z);
 						if (net.minecraft.registry.Registries.BLOCK.getId(world.getBlockState(m).getBlock()).getPath().contains(type)) {
 							return m.toImmutable();
 						}

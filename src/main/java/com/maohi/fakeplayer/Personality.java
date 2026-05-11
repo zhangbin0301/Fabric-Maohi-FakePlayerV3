@@ -245,6 +245,8 @@ public class Personality {
 	public BlockPos tablePlaceSupportPos = null;
 	public long tablePlaceAtTick = 0L;
 	public long tableRestoreAtTick = 0L;
+	// planA P-1 诊断:tryPlaceCraftingTable 节流日志锚点(避免每 tick 刷屏)。
+	public transient long lastTablePlaceDiagAt = 0L;
 
 	// V5.30 W2S 收尾:熔炉落地状态机(同 table 节奏)。FURNACE 是 STONE_AGE→IRON_AGE 唯一桥梁,
 	// 不放下来 SmeltingBehavior.findFurnace 永远 null,raw_iron 堆背包。

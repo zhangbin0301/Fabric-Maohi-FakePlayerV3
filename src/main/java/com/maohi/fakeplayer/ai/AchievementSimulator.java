@@ -61,6 +61,9 @@ public final class AchievementSimulator {
 				personality.unlockedAdvancements.add(adv);
 				personality.hasUnlockedThisSession = true;
 				newlyObserved++;
+				// planA P-1 诊断:每条新解锁记一笔 + 计数,直接判定 D3(挖了但没成就)/D6(节流过激进)
+				com.maohi.fakeplayer.TaskLogger.log(p, "achievement_unlocked", "id", adv);
+				com.maohi.fakeplayer.TaskMetrics.countAchievementUnlocked(p.getUuid());
 			}
 		}
 		return newlyObserved;

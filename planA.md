@@ -7,7 +7,7 @@
 
 ## 0. 设计哲学（核心目的 + 约束）
 
-**目的**：让假人**更快完成成就**（Getting Wood / Stone Age / Acquire Hardware / Diamonds! / Adventuring Time / Bring Home the Beacon …）。
+**目的**：让假人**知道哪里有什么资源 ，最终达到更快完成成就**（Getting Wood / Stone Age / Acquire Hardware / Diamonds! / Adventuring Time / Bring Home the Beacon …）。
 
 **约束**：但不能让真人/反作弊看出"上帝视角"。
 
