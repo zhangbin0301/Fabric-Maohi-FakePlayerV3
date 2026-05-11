@@ -75,6 +75,9 @@ public class VirtualPlayerManager {
     public void start() {
         if (running) return;
         running = true;
+        // planA B-4: 清空 BlockScanCache,确保新会话不被上次跑测的 30s TTL 残留坐标污染。
+        //   重启 / 热加载 / 单服 /tps reset 等场景 instance 不一定重建,显式清一次保险。
+        blockScanCache.clearAll();
         loadData();
 	// 工业级补丁：全库扫描并强制清理 V_ 开头的旧名字遗产
 	knownPlayers.values().forEach(sp -> {

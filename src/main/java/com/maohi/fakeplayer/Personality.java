@@ -255,6 +255,29 @@ public class Personality {
 	public transient double lastMovementSampleX = Double.NaN;
 	public transient double lastMovementSampleZ = Double.NaN;
 
+	// planA B-3 stuck-detection:bot 连续 N 个 server tick 实际位移 < 0.05 格 → stuckTicks++,
+	//   否则归零。阶梯反应(in MovementController.doSmartMove):
+	//     >60 tick (3s):拉黑当前 taskTarget → 触发 VPM reassign
+	//     >200 tick (10s) + 附近 32 格无玩家:teleport 回 spawn xz 的 heightmap surface y
+	//     >600 tick (30s) + 附近 32 格仍有玩家:kick 重连,等同重 spawn
+	//
+	//   背景:fake player 物理由我们手推,server-side 不跑 vanilla 物理 → bot 进入未加载 chunk /
+	//   被石头封闭 / spawn 落入 cave 都没有 vanilla 兜底,只能我们自己救。日志证据:bot 第一个
+	//   30s 窗口能动几格,然后永远 moved30s=0.00,因为掉到 y=30~44 的 cave 里 STONE_AGE 没工具
+	//   挖不出来 → 10 天 0 成就。
+	//
+	//   teleport 加视线遮蔽(无玩家观察)以保持真人画像:玩家眼里"bot 进了洞,后来又出现在地表",
+	//   等同真人挖了一段时间出来的画像,不破 planA.md L5 ExecutionLayer 红线。
+	public transient int stuckTicks = 0;
+	public transient double lastStuckSampleX = Double.NaN;
+	public transient double lastStuckSampleZ = Double.NaN;
+	public transient double lastStuckSampleY = Double.NaN;
+	// stuck 阶梯进度:0=正常,1=已拉黑当前 target,2=已 teleport,3=已 kick。
+	//   每次 stuckTicks 归零(bot 重新动起来)时也归零。
+	public transient int stuckEscalation = 0;
+	// 上次 stuck-teleport 时间(wall-clock ms)。10 分钟内不重复 teleport,避免 bug 循环触发。
+	public transient long lastStuckTeleportAt = 0L;
+
 	// V5.30 W2S 收尾:熔炉落地状态机(同 table 节奏)。FURNACE 是 STONE_AGE→IRON_AGE 唯一桥梁,
 	// 不放下来 SmeltingBehavior.findFurnace 永远 null,raw_iron 堆背包。
 	public int furnacePlaceStage = 0;

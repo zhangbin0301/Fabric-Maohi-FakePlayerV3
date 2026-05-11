@@ -81,20 +81,28 @@ public final class BlockScanCache {
 			yMin = -20;
 			yMax = 2;
 		} else if (isLog) {
-			// 树长在地表 — 计算相对玩家 Y 的地表偏移,把扫描盒拉到地表覆盖
-			int surfaceY = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(
-				world, pos.getX(), pos.getZ(), Integer.MIN_VALUE);
-			if (surfaceY == Integer.MIN_VALUE) {
-				// chunk 未加载 → 回退原 ±2 行为
-				yMin = -2;
-				yMax = 2;
-			} else {
-				int relSurface = surfaceY - pos.getY();
-				// bot 在地面上 → relSurface≈0,正常 ±2~6 范围;
-				// bot 卡 y=0 → relSurface≈64,扫盒拉到 y=58~70 命中地表树
-				yMin = Math.min(-2, relSurface - 4);
-				yMax = Math.max(6, relSurface + 6);
-			}
+			// planA P-2 修复:Y-range clamp 在 bot 实际可爬范围(±5)。
+			//
+			// 历史 V5.30+ Y-range fix 引入"bot 卡 y=0 也能扫到 y=64 树"的 surfaceY 拉伸,
+			//   但 STONE_AGE 早期 bot 没楼梯/没工具,爬不上 25 格垂直差距。日志现象:
+			//   1. bot 在 chunk 卡顿期 spawn 后掉入地下洞穴(y=63→y=38)
+			//   2. 扫树时 surfaceY=63, relSurface=25, yMax 拉到 +25
+			//   3. 命中地表 y=63 树 → PhaseStoneAge.assignChopTree y-diff>8 拉黑(V5.43.4)
+			//   4. fallback setExplore 给 bot.y=38 同 Y 的 EXPLORING target(V5.43.3 P-3.I)
+			//   5. bot 在地下 xz 方向被石头封死 → moved30s=0.00 →task_fail → 重复 1~5
+			//   → 10 天 0 成就。
+			//
+			// clamp 设计:
+			//   - +5: vanilla 跳跃 +1 格 + 2 格无伤坠落 + 短爬坡余量,bot 走得到的 y 范围
+			//   - -5: 浅洞穴 / 河岸下层树根的覆盖范围
+			//   - bot 在地下时找不到树 → findLog 返 null → setExplore 远征
+			//     → bot 沿 xz 走出洞穴(若地形允许) → 重新扫到地表树
+			//   - bot 在山顶时也找不到山脚树(>5 格落差) → 同样 fallback,直到走近为止
+			//
+			// 副作用:bot 永远只能找眼前 ±5 Y 的树。但这正符合 STONE_AGE 物理能力,
+			//   也消除了"看得到却拿不到"的循环。
+			yMin = -5;
+			yMax = 5;
 		} else {
 			yMin = -2;
 			yMax = 2;
@@ -170,6 +178,17 @@ public final class BlockScanCache {
 	 */
 	public void invalidate(BlockPos pos, String type) {
 		cache.remove(key(pos, type));
+	}
+
+	/**
+	 * planA B-4:服务器启动时清空全部 cache。
+	 *   背景:cache 是 instance 字段不是 static,正常 instance 生命周期跟 VPM 一致,
+	 *     重启服务器会 new VPM → new BlockScanCache → 自然空。但开发 hot-reload / 单服 /tps reset
+	 *     等场景 instance 不一定重建,30s TTL 内残留的旧坐标会污染新会话。
+	 *   显式 clearAll() 让 VPM.start() 主动调一次,确保新会话从空 cache 开始。
+	 */
+	public void clearAll() {
+		cache.clear();
 	}
 
 	private static String key(BlockPos pos, String type) {

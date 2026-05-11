@@ -271,6 +271,15 @@ public class PlayerSpawner {
      *   - 重试最多 10 次找安全 Y
      *   - getSafeTopY 已处理 chunk 未加载/空气柱
      *   - radius == 0 → 直接返 base(/gamerule respawnRadius 0 时 vanilla 不散)
+     *
+     * planA B-1 加固:
+     *   - 同步强制加载 candidate chunk(getChunk force=true),避免 chunk-未加载时 heightmap 返
+     *     stale/fallback 值 → bot spawn 在悬空位置 → 第一帧 p.travel 应用重力 → 自由落体进 cave。
+     *   - 加 isSpawnSupported 严格验证:脚下固体 + 下方 4 格内有支撑(不是 cave 顶)+ 当前格 air +
+     *     头顶 air。失败 retry,50 次都不行才回退 base(极罕见)。
+     *   - 重试 10 → 50:强加载后单次成本变高但成功率也变高,总开销可控。
+     *   - 日志证据:8 bot 全部 spawn 后第一个 30s 窗口 y 从 64 掉到 30~44,卡 cave 不出。
+     *     根因就是 spawn 时下方实际是 cave 顶,bot 重力穿透。
      */
     private static net.minecraft.util.math.BlockPos pickScatteredSpawn(
             net.minecraft.server.world.ServerWorld world,
@@ -278,7 +287,7 @@ public class PlayerSpawner {
             int radius) {
         if (radius <= 0) return base;
         java.util.concurrent.ThreadLocalRandom rng = java.util.concurrent.ThreadLocalRandom.current();
-        for (int attempt = 0; attempt < 10; attempt++) {
+        for (int attempt = 0; attempt < 50; attempt++) {
             double angle = rng.nextDouble() * Math.PI * 2.0;
             // V5.40: sqrt 让面积分布均匀,避免线性 distance 让 bot 大概率挤在原点附近;
             // 同时强制 minDistance=2 让第一个 bot 不会落在精确 (0,0) base 上。
@@ -287,15 +296,65 @@ public class PlayerSpawner {
                 : 2.0 + Math.sqrt(rng.nextDouble()) * (radius - 2);
             int candidateX = base.getX() + (int) Math.round(Math.cos(angle) * distance);
             int candidateZ = base.getZ() + (int) Math.round(Math.sin(angle) * distance);
+
+            // planA B-1: 强制同步加载 candidate chunk 到 FULL,确保 heightmap / getBlockState
+            //   返回真实数据。force=true 在主线程同步阻塞,spawn 路径本就在 server.execute,
+            //   阻塞几十毫秒可接受(比后续 bot 卡 cave 几分钟便宜)。
+            int chunkX = candidateX >> 4;
+            int chunkZ = candidateZ >> 4;
+            try {
+                world.getChunkManager().getChunk(chunkX, chunkZ,
+                    net.minecraft.world.chunk.ChunkStatus.FULL, true);
+            } catch (Throwable ignored) {
+                continue; // 加载失败 → 跳过这个 candidate
+            }
+
             // V5.40: getSafeSpawnY 用 NO_LEAVES heightmap,跳过树叶落到真实地表;
             // 否则森林环境 bot spawn 在 y=80+ 树冠层,被叶子包住走不出,task 全部 fail。
             int candidateY = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeSpawnY(
                 world, candidateX, candidateZ, Integer.MIN_VALUE);
-            if (candidateY != Integer.MIN_VALUE && candidateY > world.getBottomY()) {
-                return new net.minecraft.util.math.BlockPos(candidateX, candidateY, candidateZ);
+            if (candidateY == Integer.MIN_VALUE || candidateY <= world.getBottomY()) continue;
+
+            // planA B-1: 严格验证落点结构,不能在 cave 顶 / 浮空岛 / 1×1 落脚点。
+            net.minecraft.util.math.BlockPos candidate =
+                new net.minecraft.util.math.BlockPos(candidateX, candidateY, candidateZ);
+            if (!isSpawnSupported(world, candidate)) continue;
+
+            return candidate;
+        }
+        // 50 次都不行 → 回退 base(极罕见:base 周围全是 cave 顶 / chunk gen 异常)
+        return base;
+    }
+
+    /**
+     * planA B-1: 验证 spawn pos 是真正的"地表落点",不是 cave 顶或浮空结构。
+     *   通过条件全部满足:
+     *     - 当前格 air(站得进)
+     *     - 头顶 air(头部不撞)
+     *     - 脚下 (y-1) 是固体方块且非流体
+     *     - 脚下 -2/-3/-4 至少有 2 格固体支撑(防止站在 1 格薄壳上,壳塌就掉 cave)
+     *   注:不强制 -5 也固体,允许下方有矿道(真人地图常态),但要求"近表层有足够厚度"。
+     */
+    private static boolean isSpawnSupported(net.minecraft.server.world.ServerWorld world,
+                                             net.minecraft.util.math.BlockPos pos) {
+        net.minecraft.block.BlockState at = world.getBlockState(pos);
+        net.minecraft.block.BlockState above = world.getBlockState(pos.up());
+        net.minecraft.block.BlockState below = world.getBlockState(pos.down());
+        // 当前格 + 头顶必须空气
+        if (!at.isAir() || !above.isAir()) return false;
+        // 脚下必须固体且非流体
+        if (below.isAir() || below.isLiquid()) return false;
+        if (below.getCollisionShape(world, pos.down()).isEmpty()) return false;
+        // 下方 2~4 格至少 2 格固体,防止 1 格薄地表上 spawn 后塌进 cave。
+        int solidBelow = 0;
+        for (int dy = 2; dy <= 4; dy++) {
+            net.minecraft.util.math.BlockPos check = pos.down(dy);
+            net.minecraft.block.BlockState bs = world.getBlockState(check);
+            if (!bs.isAir() && !bs.isLiquid()
+                && !bs.getCollisionShape(world, check).isEmpty()) {
+                solidBelow++;
             }
         }
-        // 10 次都不行 → 回退 base(罕见:base 周围全 chunk 未加载)
-        return base;
+        return solidBelow >= 2;
     }
 }

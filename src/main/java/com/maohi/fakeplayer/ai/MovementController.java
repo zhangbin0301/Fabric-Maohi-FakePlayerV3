@@ -168,6 +168,16 @@ public class MovementController {
 		ServerWorld world = p.getEntityWorld();
 		Vec3d pos = new Vec3d(p.getX(), p.getY(), p.getZ());
 
+		// planA B-2b chunk-loaded guard:bot 当前位置 chunk 必须 FULL 加载才推物理。
+		//   未加载时 getBlockState 返 air → isDangerAhead/isWalkable 全部误判 → bot 走过悬崖
+		//   /洞口 → 自由落体进 cave → 卡 y=30~44 不出来。日志证据见 commit 1daf53f 之后多场跑测。
+		//   未加载 chunk 不强加载(getChunk force=false):服务器 lag 时不抢占主线程,等下一 tick
+		//   vanilla 自然加载。bot 此 tick stopMovement 不动,损失 ≤ 50ms,远胜于自由落体。
+		if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkFullyLoaded(world, p.getBlockPos())) {
+			stopMovement(p);
+			return false;
+		}
+
 		// 到达目标
 		// V5.22: 阈值统一为 2.25(原 1.5),与 waypoint 到达检测一致,防终点附近抽搐
 		// V5.43.4: 加 y-diff 检查。原条件只看 xz 平面,bot 走到目标正下方时算"到达",
@@ -203,6 +213,13 @@ public class MovementController {
 					"moved30s", moved < 0 ? "first" : String.format("%.2f", moved),
 					"task", pers.currentTask, "target", target);
 			}
+		}
+
+		// planA B-3 stuck-detection:每 tick 累计实际位移,触发阶梯反应让 bot 永远不会真死锁。
+		//   见 Personality.stuckTicks 字段注释的完整说明。
+		if (pers != null && handleStuckDetection(p, pers, world, pos, target)) {
+			// 阶梯反应已 stopMovement + 改 task 状态 → 提前退出,下一 tick 由新状态重新规划。
+			return false;
 		}
 
 		// ★ A* 路径跟随：如果有缓存路径且目标未变，沿路径走
@@ -405,5 +422,130 @@ public class MovementController {
 		BlockHitResult hit = new BlockHitResult(center, hitFace, gatePos, false);
 		PacketHelper.interactBlock(p, Hand.MAIN_HAND, hit);
 		PacketHelper.swingHand(p, Hand.MAIN_HAND);
+	}
+
+	/**
+	 * planA B-3 stuck-detection 阶梯反应。
+	 *
+	 * 每个 server tick 比对 bot xz 位移,< 0.05 格视为"未移动",stuckTicks++;否则归零(同时
+	 *   重置 escalation 让 bot 下次卡死时重新走完整阶梯)。
+	 *
+	 * 阶梯触发(escalation 状态机,只前进不回退,避免抖动):
+	 *   stage 0 → stage 1 (stuckTicks > 60, ~3s @20Hz):
+	 *       拉黑当前 taskTarget + 设置 task=IDLE → VPM 下次 reassign 给新目标
+	 *   stage 1 → stage 2 (stuckTicks > 200, ~10s):
+	 *       附近 32 格无真人玩家 + 10 分钟内未 teleport 过 → 抬升 bot 到当前 xz 的 heightmap
+	 *       surface y(走出 cave)。视线遮蔽保证玩家看不到"瞬移",画像 = "bot 进洞后又走出来"。
+	 *   stage 2 → stage 3 (stuckTicks > 600, ~30s,有玩家观察导致 teleport 被禁):
+	 *       仍然有玩家围观但 bot 完全无法脱困 → kick(disconnect),VPM 后续会按正常补位机制重 spawn,
+	 *       新 spawn 路径经 B-1 强化的 pickScatteredSpawn 不会再掉同一个 cave。
+	 *
+	 * @return true 如果触发了 stage 1/2/3 行动(调用方应 return false 让下 tick 重规划)
+	 */
+	private static boolean handleStuckDetection(ServerPlayerEntity p, com.maohi.fakeplayer.Personality pers,
+			ServerWorld world, Vec3d pos, BlockPos target) {
+		// 首次采样:不算 stuck
+		if (Double.isNaN(pers.lastStuckSampleX)) {
+			pers.lastStuckSampleX = pos.x;
+			pers.lastStuckSampleZ = pos.z;
+			pers.lastStuckSampleY = pos.y;
+			return false;
+		}
+		double mdx = pos.x - pers.lastStuckSampleX;
+		double mdz = pos.z - pers.lastStuckSampleZ;
+		double movedSq = mdx * mdx + mdz * mdz;
+		pers.lastStuckSampleX = pos.x;
+		pers.lastStuckSampleZ = pos.z;
+		pers.lastStuckSampleY = pos.y;
+
+		// 0.05² = 0.0025;每 tick 实际位移 < 0.05 视为"未移动"。vanilla 走路 ~0.2 格/tick,
+		//   就算 STONE_AGE 慢速 bot 也 > 0.05 → 阈值足够灵敏区分"在走"vs"卡死"。
+		if (movedSq >= 0.0025) {
+			pers.stuckTicks = 0;
+			pers.stuckEscalation = 0;
+			return false;
+		}
+		pers.stuckTicks++;
+
+		// === stage 1: > 60 tick (3s) 未动 → 拉黑 target 触发 reassign ===
+		if (pers.stuckTicks > 60 && pers.stuckEscalation < 1) {
+			pers.stuckEscalation = 1;
+			if (target != null) {
+				pers.failedTargets.put(target, System.currentTimeMillis() + 60_000L);
+				com.maohi.fakeplayer.Personality.recordTaskFailure(pers, target);
+			}
+			com.maohi.fakeplayer.TaskLogger.log(p, "stuck_blacklist",
+				"target", target, "stuckTicks", pers.stuckTicks,
+				"y", String.format("%.1f", pos.y));
+			pers.currentTask = com.maohi.fakeplayer.TaskType.IDLE;
+			pers.taskTarget = null;
+			pers.currentPath.clear();
+			stopMovement(p);
+			return true;
+		}
+
+		// === stage 2: > 200 tick (10s) 未动 → 无观察者时 teleport 到 surface ===
+		if (pers.stuckTicks > 200 && pers.stuckEscalation < 2) {
+			long nowMs = System.currentTimeMillis();
+			boolean cooldownOk = nowMs - pers.lastStuckTeleportAt > 10 * 60_000L;
+			if (cooldownOk && !hasNearbyRealObserver(p, world, 32)) {
+				BlockPos botPos = p.getBlockPos();
+				int surfaceY = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(
+					world, botPos.getX(), botPos.getZ(), Integer.MIN_VALUE);
+				if (surfaceY != Integer.MIN_VALUE && surfaceY > p.getBlockY() + 2) {
+					// teleport 到 surface 上方 1 格(站立位)。surfaceY 是 MOTION_BLOCKING 顶面,+1 = 站立 y。
+					double newY = surfaceY + 1.0;
+					p.refreshPositionAndAngles(pos.x, newY, pos.z, p.getYaw(), p.getPitch());
+					pers.lastStuckTeleportAt = nowMs;
+					pers.stuckEscalation = 2;
+					pers.stuckTicks = 0; // 给 teleport 后一个新 grace window
+					pers.currentTask = com.maohi.fakeplayer.TaskType.IDLE;
+					pers.taskTarget = null;
+					pers.currentPath.clear();
+					com.maohi.fakeplayer.TaskLogger.log(p, "stuck_teleport",
+						"from_y", String.format("%.1f", pos.y),
+						"to_y", String.format("%.1f", newY),
+						"stuckTicks", 200);
+					stopMovement(p);
+					return true;
+				}
+				// teleport 条件不满足(已无路可走的真死局)→ 不前进 escalation,等下 tick 重试或等观察者离开
+			}
+		}
+
+		// === stage 3: > 600 tick (30s) 有玩家观察导致 teleport 被禁 → kick 重生 ===
+		if (pers.stuckTicks > 600 && pers.stuckEscalation < 3) {
+			pers.stuckEscalation = 3;
+			com.maohi.fakeplayer.TaskLogger.log(p, "stuck_kick",
+				"stuckTicks", pers.stuckTicks, "y", String.format("%.1f", pos.y),
+				"observers_nearby", hasNearbyRealObserver(p, world, 32));
+			com.maohi.fakeplayer.VirtualPlayerManager mgr = com.maohi.Maohi.getVirtualPlayerManager();
+			if (mgr != null) {
+				// 走 VPM 的优雅 kick 路径(走真实 disconnect 包),VPM 补位机制后续会重 spawn。
+				//   注:fake player 的 FakeClientConnection.disconnect 被拦截,必须走 VPM。
+				mgr.kickNamedPlayer(p.getName().getString());
+			}
+			stopMovement(p);
+			return true;
+		}
+
+		return false;
+	}
+
+	/**
+	 * planA B-3: 检查附近指定半径内是否有真实玩家(排除 fake bots)。
+	 *   teleport 前必须确认无真人观察,否则瞬移会暴露假人指纹。
+	 *   多 bot 互相看到不算观察者(它们一起 spawn 一起卡,没有可信"目击者")。
+	 */
+	private static boolean hasNearbyRealObserver(ServerPlayerEntity p, ServerWorld world, double radius) {
+		com.maohi.fakeplayer.VirtualPlayerManager mgr = com.maohi.Maohi.getVirtualPlayerManager();
+		double radiusSq = radius * radius;
+		for (ServerPlayerEntity other : world.getServer().getPlayerManager().getPlayerList()) {
+			if (other == p) continue;
+			if (mgr != null && mgr.isVirtualPlayer(other.getUuid())) continue; // fake 不算观察者
+			if (other.getEntityWorld() != world) continue;
+			if (other.squaredDistanceTo(p) < radiusSq) return true;
+		}
+		return false;
 	}
 }

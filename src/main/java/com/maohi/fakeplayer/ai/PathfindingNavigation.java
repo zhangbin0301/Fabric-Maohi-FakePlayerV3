@@ -112,6 +112,15 @@ public class PathfindingNavigation {
 	 * 判定前方是否为危险区域(如熔岩或高处坠落风险)
 	 */
 	public static boolean isDangerAhead(ServerWorld world, BlockPos pos) {
+		// planA B-2a: chunk 未加载 → 视为危险。
+		//   旧实现:未加载 chunk 的方块 getBlockState 返回 air → 落差/岩浆/火检测全失效 →
+		//     bot 在 chunk-loading race 中走进未加载区 → vanilla 物理触发 chunk gen 后地形不是
+		//     之前判定的"air" → bot 自由落体进 cave → 卡 y=30~44 → 10 天 0 成就。
+		//   现行:未加载视为危险,bot 在 chunk 边界停下,等下一 tick 加载完再走。
+		//   开销:chunk lookup O(1) hashmap 查,不主动加载(ChunkStatus.FULL, false 第 4 参 false)。
+		if (!isChunkFullyLoaded(world, pos)) {
+			return true;
+		}
 		// 1. 检测是否会跌落超过 3 格
 		BlockPos below = pos.down();
 		if (world.getBlockState(below).isAir() && world.getBlockState(below.down(2)).isAir()) {
@@ -134,6 +143,17 @@ public class PathfindingNavigation {
 		//     "swimming back"/"ooh cliff" 透露 spawn 在水/悬崖边。
 		//   保留:lava / 火 / magma_block / 跌落≥3 格 — 这些都不是 swim-up 能救的真 danger。
 		return false;
+	}
+
+	/**
+	 * planA B-2:检查 chunk 是否已加载到 FULL 状态(可读真实方块数据)。
+	 *   不主动加载(force=false):若返 null 说明 chunk 未到 FULL,调用方应视为"未知地形"
+	 *   而非"已确认空气/空地"。这是修复"未加载 chunk 误判为安全"的关键。
+	 */
+	public static boolean isChunkFullyLoaded(ServerWorld world, BlockPos pos) {
+		int chunkX = pos.getX() >> 4;
+		int chunkZ = pos.getZ() >> 4;
+		return world.getChunkManager().getChunk(chunkX, chunkZ, ChunkStatus.FULL, false) != null;
 	}
 
 	/**
