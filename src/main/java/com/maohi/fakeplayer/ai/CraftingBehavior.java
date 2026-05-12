@@ -3,6 +3,8 @@ package com.maohi.fakeplayer.ai;
 import com.maohi.fakeplayer.network.InventoryActionHelper;
 import com.maohi.fakeplayer.network.PacketHelper;
 import com.maohi.fakeplayer.TimingConstants;
+import com.maohi.mixin.PlayerInventoryAccessor;
+import net.minecraft.block.BlockState;
 import net.minecraft.block.Blocks;
 import net.minecraft.entity.player.PlayerInventory;
 import net.minecraft.item.Item;
@@ -246,7 +248,7 @@ public final class CraftingBehavior {
 			return;
 		}
 
-		BlockPos workbench = findCraftingTable(player, 6);
+		BlockPos workbench = findCraftingTable(player, 4);
 		if (workbench == null) {
 			com.maohi.fakeplayer.TaskLogger.log(player, "craft_fail",
 				"reason", "no_workbench", "target",
@@ -257,9 +259,48 @@ public final class CraftingBehavior {
 		// 1. 朝工作台看 + interactBlock 开窗
 		Vec3d center = Vec3d.ofCenter(workbench);
 		TriggerUtilFacePoint.face(player, center);
+
+		// P12 双保险 step 0: 切到一个空 hotbar 槽避免手里 BlockItem (plank/log) 触发
+		//   vanilla onUseWithItem 的 hand-item placement 路径,导致 onUse 不被调 → screen 不开。
+		//   日志证据: BlueSkyMiner_MC 站在工作台 1 格外 (reach 充足) 仍 craft_fail screen_not_opened
+		//   21 分钟,planks=6 sticks=4 — 手里持 plank 时 vanilla 把 plank 放在工作台旁而非开窗。
+		PlayerInventory invForSwitch = player.getInventory();
+		int originalSlot = ((PlayerInventoryAccessor) invForSwitch).getSelectedSlot();
+		int safeSlot = -1;
+		for (int i = 0; i < 9; i++) {
+			if (invForSwitch.getStack(i).isEmpty()) { safeSlot = i; break; }
+		}
+		if (safeSlot != -1 && safeSlot != originalSlot) {
+			PacketHelper.setSelectedSlot(player, safeSlot);
+		}
+
 		BlockHitResult hit = new BlockHitResult(center, Direction.UP, workbench, false);
+
+		// P12 双保险 step 1: 发包模拟真实客户端
 		PacketHelper.interactBlock(player, Hand.MAIN_HAND, hit);
 		PacketHelper.swingHand(player, Hand.MAIN_HAND);
+
+		// P12 双保险 step 2: 发包未开 screen → server-side 直接调 interactionManager
+		//   (绕过 packet handler 层的 reach attribute 检查,fake player 的 BLOCK_INTERACTION_RANGE
+		//    在 1.21 是新增 attribute,初始化路径若有遗漏可能让 reach 检查失败)
+		if (!(player.currentScreenHandler instanceof CraftingScreenHandler)) {
+			ItemStack handStack = player.getStackInHand(Hand.MAIN_HAND);
+			player.interactionManager.interactBlock(player, player.getEntityWorld(), handStack, Hand.MAIN_HAND, hit);
+		}
+
+		// P12 三重保险 step 3: 还是没开 → 直接调 openHandledScreen
+		//   (CraftingTableBlock.onUseWithItem 内部本来就调这个,这里跳过 vanilla 入口直接 open)
+		if (!(player.currentScreenHandler instanceof CraftingScreenHandler)) {
+			BlockState wbState = player.getEntityWorld().getBlockState(workbench);
+			if (wbState.isOf(Blocks.CRAFTING_TABLE)) {
+				player.openHandledScreen(wbState.createScreenHandlerFactory(player.getEntityWorld(), workbench));
+			}
+		}
+
+		// 切回原槽 (在 screen 检查之前完成,避免影响后续摆料 srcInvSlot 计算)
+		if (safeSlot != -1 && safeSlot != originalSlot) {
+			PacketHelper.setSelectedSlot(player, originalSlot);
+		}
 
 		// 2. 校验 CraftingScreenHandler 已开启
 		if (!(player.currentScreenHandler instanceof CraftingScreenHandler handler)) {

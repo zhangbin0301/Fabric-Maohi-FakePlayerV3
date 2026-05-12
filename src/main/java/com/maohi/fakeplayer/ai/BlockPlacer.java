@@ -237,10 +237,11 @@ public class BlockPlacer {
 		//   → 5 分钟仍未放下工作台 → STONE_AGE 死循环。后续 critical gate (no_inv_table /
 		//   findCraftingTableNearby) 自身已是 O(N) 内存比较,删 5% 不会显著拉高 CPU。
 
-		// 周围 6 格已经有工作台 → 不需要再放
-		if (findCraftingTableNearby(player, 6)) return;
-
-		// 包里找 CRAFTING_TABLE 槽位
+		// P13 性能修复:inv 没 CRAFTING_TABLE 时直接 return,避免每 tick 跑 findCraftingTableNearby
+		//   (12×12×7 = 1008 次 getBlockState × 20Hz × N bot = STONE_AGE 早期开销大头)。
+		//   原顺序:findCraftingTableNearby → 扫 inv → no_inv_table 日志退出。
+		//   bot 在 EXPLORING 还没合出 CRAFTING_TABLE 时,80% tick 都在 findCraftingTableNearby 上空跑。
+		//   现在:扫 inv 在前,没 table 直接 return(走 no_inv_table 节流日志路径)。
 		PlayerInventory inv = player.getInventory();
 		int tableSlot = -1;
 		for (int i = 0; i < inv.size(); i++) {
@@ -254,6 +255,9 @@ public class BlockPlacer {
 			logTablePlaceDiag(player, personality, now, "no_inv_table");
 			return;
 		}
+
+		// 周围 6 格已经有工作台 → 不需要再放
+		if (findCraftingTableNearby(player, 6)) return;
 
 		// 工作台在背包(slot > 8)时，拟真操作：Shift+点击把它移到快捷栏，下一个 tick 再放置。
 		// 真人在放工作台前也会先把它从背包拖到快捷栏，这里完全模拟该动作序列。
