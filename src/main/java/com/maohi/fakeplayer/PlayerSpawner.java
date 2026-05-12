@@ -287,6 +287,14 @@ public class PlayerSpawner {
             int radius) {
         if (radius <= 0) return base;
         java.util.concurrent.ThreadLocalRandom rng = java.util.concurrent.ThreadLocalRandom.current();
+
+        // P12: 限制同步 chunk 加载次数，防止主线程卡顿 3-4 秒触发 'Can't keep up!'。
+        //   原实现 50 次循环每次都 force=true 同步加载 chunk，单次 100-300ms，
+        //   连续 spawn 多个假人时累计耗时轻松超过 3000ms → 73+ ticks behind。
+        //   策略：前 3 次允许同步加载（保证至少有可用 chunk），之后只查已加载的 chunk。
+        //   已加载 chunk 查询 O(1)，不阻塞主线程。
+        int syncLoadsRemaining = 3;
+
         for (int attempt = 0; attempt < 50; attempt++) {
             double angle = rng.nextDouble() * Math.PI * 2.0;
             // V5.40: sqrt 让面积分布均匀,避免线性 distance 让 bot 大概率挤在原点附近;
@@ -297,16 +305,21 @@ public class PlayerSpawner {
             int candidateX = base.getX() + (int) Math.round(Math.cos(angle) * distance);
             int candidateZ = base.getZ() + (int) Math.round(Math.sin(angle) * distance);
 
-            // planA B-1: 强制同步加载 candidate chunk 到 FULL,确保 heightmap / getBlockState
-            //   返回真实数据。force=true 在主线程同步阻塞,spawn 路径本就在 server.execute,
-            //   阻塞几十毫秒可接受(比后续 bot 卡 cave 几分钟便宜)。
+            // P12: chunk 可用性检查——前几次允许同步加载，之后只用已加载的
             int chunkX = candidateX >> 4;
             int chunkZ = candidateZ >> 4;
-            try {
-                world.getChunkManager().getChunk(chunkX, chunkZ,
-                    net.minecraft.world.chunk.ChunkStatus.FULL, true);
-            } catch (Throwable ignored) {
-                continue; // 加载失败 → 跳过这个 candidate
+            if (syncLoadsRemaining > 0) {
+                // 允许同步加载：保证至少有几个 chunk 的真实 heightmap 数据
+                try {
+                    world.getChunkManager().getChunk(chunkX, chunkZ,
+                        net.minecraft.world.chunk.ChunkStatus.FULL, true);
+                    syncLoadsRemaining--;
+                } catch (Throwable ignored) {
+                    continue;
+                }
+            } else {
+                // 耗尽同步配额：只检查已加载的 chunk，跳过未加载的
+                if (!world.isChunkLoaded(chunkX, chunkZ)) continue;
             }
 
             // V5.40: getSafeSpawnY 用 NO_LEAVES heightmap,跳过树叶落到真实地表;
