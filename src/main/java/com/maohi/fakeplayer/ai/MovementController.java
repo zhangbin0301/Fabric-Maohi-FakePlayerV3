@@ -505,6 +505,28 @@ public class MovementController {
 				int surfaceY = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(
 					world, botPos.getX(), botPos.getZ(), Integer.MIN_VALUE);
 				if (surfaceY != Integer.MIN_VALUE && surfaceY > p.getBlockY() + 2) {
+					int deltaY = surfaceY - p.getBlockY();
+					// P20 D-skip: ΔY>8 的 teleport 会触发 main thread 2-3s 的 tracking re-init + 后续
+					//   远征行进的 chunk-flood lag(日志 06:29:11 / 06:29:42 / 06:33:27 三次跨 29 格
+					//   teleport 各跟 2.7s+ lag)。这种大跨度 rescue 改成放弃 stage 2,等 stuckTicks
+					//   累到 1200 走 stage 3 kick → saved=true 重连(stage 3 已清 taskTarget,
+					//   重连后从 phase_change 干净起步,无远征点遗留)。escalation 推到 2,避免后续 tick
+					//   反复进 stage 2 检查浪费 CPU。
+					if (deltaY > 8) {
+						pers.stuckEscalation = 2;
+						// P20 D-skip-accel: 跳过 30s 等待,把 stuckTicks 直接顶到 1199 让下 1~2 tick
+						//   stage 3 立刻 kick。stage 2 入口已 hasNearbyRealObserver(32) 通过 → 此处
+						//   1s 内 kick 真人路过概率极低,不形成"凭空消失"指纹。bot 卡 30s 后断线 比
+						//   卡 60s 后断线 更像真人 Alt+F4 行为。
+						pers.stuckTicks = 1199;
+						com.maohi.fakeplayer.TaskLogger.log(p, "stuck_teleport_skip",
+							"reason", "delta_y_too_large",
+							"from_y", String.format("%.1f", pos.y),
+							"surface_y", surfaceY,
+							"deltaY", deltaY);
+						stopMovement(p);
+						return true;
+					}
 					// teleport 到 surface 上方 1 格(站立位)。surfaceY 是 MOTION_BLOCKING 顶面,+1 = 站立 y。
 					double newY = surfaceY + 1.0;
 					p.refreshPositionAndAngles(pos.x, newY, pos.z, p.getYaw(), p.getPitch());
@@ -514,6 +536,12 @@ public class MovementController {
 					pers.currentTask = com.maohi.fakeplayer.TaskType.IDLE;
 					pers.taskTarget = null;
 					pers.currentPath.clear();
+					// P20 D-freeze: teleport 落地后 5s 冻结 AI 决策入队,给 vanilla tracking re-init
+					//   留出干净的 main thread 窗口(同 P19 spawn freeze 语义,manageLoop:212 已有
+					//   `tickNow < lagFreezeUntil` continue 跳过)。原行为:teleport 后下一 tick AI 立刻
+					//   排 doSmartMove,与 tracking 撞 main thread → 2.7s 级 lag。ΔY ≤ 8 的小幅
+					//   teleport 走到这里,5s 冻结后才允许新任务/移动。
+					pers.lagFreezeUntil = nowMs + 5_000L;
 					com.maohi.fakeplayer.TaskLogger.log(p, "stuck_teleport",
 						"from_y", String.format("%.1f", pos.y),
 						"to_y", String.format("%.1f", newY),
@@ -531,6 +559,17 @@ public class MovementController {
 			com.maohi.fakeplayer.TaskLogger.log(p, "stuck_kick",
 				"stuckTicks", pers.stuckTicks, "y", String.format("%.1f", pos.y),
 				"observers_nearby", hasNearbyRealObserver(p, world, 32));
+			// P20 B: kick 前清 personality 上的远征状态,防 saved=true 重连后立即沿旧
+			//   force_explore target 继续跑(日志证据: HunterFrost 06:30:37 kick → 06:31:52 重连,
+			//   move_diag 仍指向 60s 前的 (244,37,278) 远征点,400 格远征 → 二次 chunk-flood lag)。
+			//   personality 与 knownPlayers[uuid].personality 同一引用,清字段后 saveData() 序列化
+			//   就是 null;saved=true 重连时 loadPlayerData 装回的 Gson 状态也是 null,新会话从
+			//   detectPhase → assignRandomTask 干净起步。
+			pers.currentTask = com.maohi.fakeplayer.TaskType.IDLE;
+			pers.taskTarget = null;
+			pers.pathWaypoint = null;
+			pers.currentPath.clear();
+			pers.failedTargets.clear();
 			com.maohi.fakeplayer.VirtualPlayerManager mgr = com.maohi.Maohi.getVirtualPlayerManager();
 			if (mgr != null) {
 				// 走 VPM 的优雅 kick 路径(走真实 disconnect 包),VPM 补位机制后续会重 spawn。

@@ -1071,7 +1071,11 @@ prepareAndSpawnVirtualPlayer();
             personality.forceExploreEscalation = 4;
         }
         int escalation = Math.min(personality.forceExploreEscalation, 6); // cap 阶梯到 6 级
-        int baseRadius = 60 + (escalation - 1) * 50;                       // 1→60, 2→110, 3→160 ... 6→310
+        // P20 A: 原 1→60..6→310,bot 一次 force_explore 跨 300 格 → 30s 走 395 格 → chunk-flood
+        //   12s+ Can't keep up。半径压到 25 格/阶并封顶 80,无树 biome(isTreelessBiome 推 4 阶起步)
+        //   单次 80 格大概率仍在 desert 内,但 escalation 累 fail 后第二/第三次 force_explore 总位移
+        //   160/240 格,3 次内必跨出 biome 边界,无死循环风险。
+        int baseRadius = Math.min(60 + (escalation - 1) * 25, 80);         // 1→60, 2→80, 3+→80 cap
         float yaw = p.getYaw() + (rng.nextFloat() * 120f - 60f);
         double rad = Math.toRadians(yaw);
         double dist = baseRadius + rng.nextDouble() * 20.0;                // ±20 浮动
