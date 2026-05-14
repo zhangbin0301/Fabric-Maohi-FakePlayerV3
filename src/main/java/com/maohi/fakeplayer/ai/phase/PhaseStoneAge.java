@@ -257,6 +257,19 @@ public final class PhaseStoneAge implements Phase {
                 setExplore(p, player);
                 return;
             }
+            // P25: bot 自身比 target 高 5+ 格时,vanilla 没有"主动跳下树枝/楼层"逻辑,
+            //   doSmartMove 到达检测 |dy|≤3 永远不通过,WOODCUTTING/MINING 反复 task_fail expired。
+            //   日志证据(2026-05-15): SwiftArcher51 远征落 y=72(被树叶/树枝挡),反复挖
+            //     target=(279,65,-627) dy=-7.42 持续 2 分钟 0 移动 → 4 次 fail。
+            //   该情形通常是 sink_guard 远征 / nudge_teleport 后 bot 卡树冠 / 楼层副作用,
+            //   abs(12) 总阈值看不见 bot 高于 target 的反向情形(7 < 12 不拦)。
+            //   修复:bot.y - target.y > 5 时拒 target,blacklist 60s + setExplore 让 bot
+            //     朝水平方向走,通过 vanilla 重力 + setExplore target.y 锚 surface 自然下降。
+            if (player.getBlockY() - target.getY() > 5) {
+                p.failedTargets.put(target, System.currentTimeMillis() + 60_000L);
+                setExplore(p, player);
+                return;
+            }
             // V5.43.1 P-2.C: 远距离/高山树先走过去再挖,而不是直接 WOODCUTTING(45/120s 任意 timeout
             //   都不够"走 12+ 格山坡 + 挖 1 棵树"的复合工作)。距离判断:
             //     dist² > 144 (12 格外) → set EXPLORING 走过去,下次 reassign(5s 后)在 12 格内自动切 WOODCUTTING
@@ -288,6 +301,19 @@ public final class PhaseStoneAge implements Phase {
             if (Math.abs(target.getY() - player.getBlockY()) > 12) {
                 p.failedTargets.put(target, System.currentTimeMillis() + 60_000L);
                 Personality.markRegionScanEmpty(p, player.getBlockPos());
+                setExplore(p, player);
+                return;
+            }
+            // P25: bot 自身比 target 高 5+ 格时,vanilla 没有"主动跳下树枝/楼层"逻辑,
+            //   doSmartMove 到达检测 |dy|≤3 永远不通过,WOODCUTTING/MINING 反复 task_fail expired。
+            //   日志证据(2026-05-15): SwiftArcher51 远征落 y=72(被树叶/树枝挡),反复挖
+            //     target=(279,65,-627) dy=-7.42 持续 2 分钟 0 移动 → 4 次 fail。
+            //   该情形通常是 sink_guard 远征 / nudge_teleport 后 bot 卡树冠 / 楼层副作用,
+            //   abs(12) 总阈值看不见 bot 高于 target 的反向情形(7 < 12 不拦)。
+            //   修复:bot.y - target.y > 5 时拒 target,blacklist 60s + setExplore 让 bot
+            //     朝水平方向走,通过 vanilla 重力 + setExplore target.y 锚 surface 自然下降。
+            if (player.getBlockY() - target.getY() > 5) {
+                p.failedTargets.put(target, System.currentTimeMillis() + 60_000L);
                 setExplore(p, player);
                 return;
             }

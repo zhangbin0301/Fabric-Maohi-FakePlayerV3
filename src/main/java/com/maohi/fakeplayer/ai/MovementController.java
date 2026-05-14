@@ -271,6 +271,19 @@ public class MovementController {
 						double dist = 500.0 + ThreadLocalRandom.current().nextDouble(0, 1000.0);
 						int farX = (int) (pos.x + Math.cos(angle) * dist);
 						int farZ = (int) (pos.z + Math.sin(angle) * dist);
+						// P25: 远征落点强加载 chunk,否则 getSafeTopY 在未加载 chunk 上返 fallback=80,
+						//   bot teleport 到 y=81 实际地表 y=63 → 空中卡死(假人没 client tick 不会自由落体)。
+						//   日志证据(2026-05-15): SwiftArcher51 远征 to=(268,81,-637)、Ava2011 to=(1331,81,-344)、
+						//     Wild123 to=(-1088,81,595) 全部 y=81 fallback,后续 stuck_no_surface +
+						//     4 分钟 0 移动,最终 stuck_kick。
+						//   单 chunk 强加载 ~500-1000ms 主线程,可接受:
+						//     - 远征本身是连续 3 次 sink_guard 后的兜底中的兜底
+						//     - 已有 lagFreezeUntil = 15s 缓冲(下方)
+						//     - 加载失败也接受不准 Y(getSafeTopY 自带 fallback)
+						try {
+							world.getChunkManager().getChunk(farX >> 4, farZ >> 4,
+								net.minecraft.world.chunk.ChunkStatus.FULL, true);
+						} catch (Throwable ignored) { /* 加载失败也接受 fallback */ }
 						int farSurfaceY = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(
 							world, farX, farZ, 80);
 						double newY = farSurfaceY + 1.0;
