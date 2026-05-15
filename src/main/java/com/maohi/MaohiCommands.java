@@ -261,17 +261,28 @@ public class MaohiCommands {
             feedback(ctx.getSource(), "§7[FS Core] 当前没有在线的假人");
             return 0;
         }
-        // P25: 把整段 list 合并为单次 feedback,行间用 \n 显式分隔。
-        //   原 N+2 次独立 feedback 在游戏内看着每条独立一行,但用户复制粘贴(尤其从 web/log 转发)
-        //   时换行会被合并成空格,导致诊断信息糊成一团。\n 内嵌后无论复制路径都保留换行。
-        //   Minecraft chat hud 渲染 Text.of(含 \n 的 string) 时按 \n 切行,游戏内显示不受影响。
-        StringBuilder sb = new StringBuilder();
-        sb.append("§6[FS Core] 在线假人 §f").append(uuids.size()).append(" §6名:\n");
-        for (UUID uuid : new java.util.ArrayList<>(uuids)) {
-            sb.append(formatBotLine(manager, uuid)).append('\n');
+        // P25: console / 玩家 分两路径输出。
+        //   玩家:单 Text + \n 拼接,游戏 chat hud 按 \n 切行,§ 渲染颜色,看着整齐
+        //   console (server console / RCON / 命令方块): 每个 bot 一次独立 sendFeedback,feedback()
+        //     内部 stripColors 已剥 §,避免 TerminalConsoleAppender 把 § 翻成 ANSI 残留(用户日志里的 [0m
+        //     就是 \x1b[0m 在不支持 ANSI 的 viewer 里掉了 \x1b 的残骸)。每条 sendFeedback 在 console
+        //     是独立 INFO 行,viewer 自然分行不合并。
+        boolean isPlayer = ctx.getSource().getEntity() instanceof ServerPlayerEntity;
+        if (isPlayer) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("§6[FS Core] 在线假人 §f").append(uuids.size()).append(" §6名:\n");
+            for (UUID uuid : new java.util.ArrayList<>(uuids)) {
+                sb.append(formatBotLine(manager, uuid)).append('\n');
+            }
+            sb.append("§7用 §f/maohi list <name> §7查看单假人详细成就列表");
+            feedback(ctx.getSource(), sb.toString());
+        } else {
+            feedback(ctx.getSource(), "§6[FS Core] 在线假人 §f" + uuids.size() + " §6名:");
+            for (UUID uuid : new java.util.ArrayList<>(uuids)) {
+                feedback(ctx.getSource(), formatBotLine(manager, uuid));
+            }
+            feedback(ctx.getSource(), "§7用 §f/maohi list <name> §7查看单假人详细成就列表");
         }
-        sb.append("§7用 §f/maohi list <name> §7查看单假人详细成就列表");
-        feedback(ctx.getSource(), sb.toString());
         return uuids.size();
     }
 
