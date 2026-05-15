@@ -185,6 +185,9 @@ public class MovementController {
 		//   日志证据(commit 7648837):DragonGhost target=(13,80,5) 站 (0.5,64,0.5),
 		//     xz²≈170 走到 (13,64,5) 时 xz²=0 直接算到达 → stopMovement → 8 分钟 7 次 fail。
 		//   阈值 3.0 容忍正常 1-3 格高差(vanilla 跳 1 格 + 短爬坡),> 3 视为不可达。
+		// P25: 阈值 3.0 → 4.0。背景:配合 isDangerAhead fall+HP 放宽,bot 现在可以无伤跳 3 格 +
+		//   有血时跳 4 格。到达阈值同步放到 4 让 bot 在 target 上方 4 格(山坡 + 4 格悬崖)算到达,
+		//   后续 vanilla 重力 + EatingBehavior 兜底自然下降到 target。
 		double dx = target.getX() + 0.5 - pos.x;
 		double dz = target.getZ() + 0.5 - pos.z;
 		double dy = target.getY() + 0.5 - pos.y;
@@ -193,7 +196,7 @@ public class MovementController {
 		//   永远 distSq > 2.25 → 60s expired,bot 站在目标 1.8 格远但算"未到达"。
 		//   2 格半径仍在 vanilla reach 4.5 内,允许 mine_start;不会让 bot 5 格远就算到达。
 		double distSq = dx * dx + dz * dz;
-		if (distSq <= 4.0 && Math.abs(dy) <= 3.0) { stopMovement(p); return true; }
+		if (distSq <= 4.0 && Math.abs(dy) <= 4.0) { stopMovement(p); return true; }
 
 		// planA P-1 诊断:每 30s 节流一条 move_diag,看 bot 是不是真的在挪动。
 		//   核心指标:30s 内 bot 是否朝 target 靠近(对比上次采样位置)。
@@ -466,7 +469,19 @@ public class MovementController {
 
 		// V5.43.3 P-3.D: isDangerAhead 已删除"深水=danger"判断(深水靠 wantJump swim-up 兜底,不会淹),
 		//   保留落差/岩浆/火等真 danger。这里直接调用即可,不再需要 isTouchingWater 二次豁免。
-		if (PathfindingNavigation.isDangerAhead(world, nextPos)) {
+		// P25: 把"落差判定"从 isDangerAhead 拆出来走 fall + HP 联合决策:
+		//   - fall ≤ 3 (vanilla 无伤): 永远放行 — 修陡坡卡死(山坡 spawn 走不下来主因)
+		//   - fall = 4 (扣 1 心): bot HP > 2 心(4 HP)时放行,低血量时拒(避免 1 跳致死)
+		//   - fall ≥ 5 (扣 2+ 心): 必拒,等同深悬崖
+		//   岩浆/火/magma 等"非落差类危险"仍然必拒,走 isHazardousBlock。
+		//   A* 邻居展开里也加了 down(3) cost 1.8,A* 能直接算 3 格台阶路径;4 格冒险
+		//   交给本处 HP-guarded 决策,A* 不展开 down(4) 邻居(避免 A* 算出"4 格跳"
+		//   路径让低血量 bot 也走那条)。
+		int fallDepth = PathfindingNavigation.getFallDepth(world, nextPos, 6);
+		boolean tooDeep = fallDepth >= 5;
+		boolean riskyWithLowHp = fallDepth == 4 && p.getHealth() <= 4f;
+		boolean hazardBlock = PathfindingNavigation.isHazardousBlock(world, nextPos);
+		if (tooDeep || riskyWithLowHp || hazardBlock) {
 			stopMovement(p);
 			if (pers != null) pers.currentPath.clear();
 			return true;

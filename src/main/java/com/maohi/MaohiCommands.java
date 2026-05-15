@@ -261,12 +261,17 @@ public class MaohiCommands {
             feedback(ctx.getSource(), "§7[FS Core] 当前没有在线的假人");
             return 0;
         }
-        feedback(ctx.getSource(), "§6[FS Core] 在线假人 §f" + uuids.size() + " §6名:");
-
+        // P25: 把整段 list 合并为单次 feedback,行间用 \n 显式分隔。
+        //   原 N+2 次独立 feedback 在游戏内看着每条独立一行,但用户复制粘贴(尤其从 web/log 转发)
+        //   时换行会被合并成空格,导致诊断信息糊成一团。\n 内嵌后无论复制路径都保留换行。
+        //   Minecraft chat hud 渲染 Text.of(含 \n 的 string) 时按 \n 切行,游戏内显示不受影响。
+        StringBuilder sb = new StringBuilder();
+        sb.append("§6[FS Core] 在线假人 §f").append(uuids.size()).append(" §6名:\n");
         for (UUID uuid : new java.util.ArrayList<>(uuids)) {
-            feedback(ctx.getSource(), formatBotLine(manager, uuid));
+            sb.append(formatBotLine(manager, uuid)).append('\n');
         }
-        feedback(ctx.getSource(), "§7用 §f/maohi list <name> §7查看单假人详细成就列表");
+        sb.append("§7用 §f/maohi list <name> §7查看单假人详细成就列表");
+        feedback(ctx.getSource(), sb.toString());
         return uuids.size();
     }
 
@@ -374,7 +379,44 @@ public class MaohiCommands {
         int advCount = pers != null && pers.unlockedAdvancements != null
             ? pers.unlockedAdvancements.size() : 0;
 
-        return String.format("  §a%s §7[§e%s§7] §7ping §f%dms §7| %s §7| §f%s §7| 成就 §f%d",
-            name, task, ping, posPart, uptime, advCount);
+        // P25: 诊断字段 — 让 list 一行就能判定阶段 / 卡死状态 / 物品推进
+        String phase = pers != null && pers.growthPhase != null ? pers.growthPhase.name() : "?";
+        // 缩写 STONE_AGE → STONE, IRON_AGE → IRON, END_GAME → END
+        String phaseShort = phase.replace("_AGE", "").replace("END_GAME", "END");
+
+        // 背包关键物品计数 + 最高级镐
+        int logs = 0, planks = 0, sticks = 0, cobble = 0;
+        char pickGrade = '-'; // W=wooden S=stone I=iron D=diamond N=netherite
+        if (p != null) {
+            net.minecraft.entity.player.PlayerInventory inv = p.getInventory();
+            for (int i = 0; i < inv.size(); i++) {
+                net.minecraft.item.ItemStack s = inv.getStack(i);
+                if (s.isEmpty()) continue;
+                net.minecraft.item.Item it = s.getItem();
+                int n = s.getCount();
+                if (s.isIn(net.minecraft.registry.tag.ItemTags.LOGS)) logs += n;
+                else if (s.isIn(net.minecraft.registry.tag.ItemTags.PLANKS)) planks += n;
+                else if (it == net.minecraft.item.Items.STICK) sticks += n;
+                else if (it == net.minecraft.item.Items.COBBLESTONE
+                    || it == net.minecraft.item.Items.COBBLED_DEEPSLATE) cobble += n;
+                // 镐升级
+                if (it == net.minecraft.item.Items.NETHERITE_PICKAXE) pickGrade = 'N';
+                else if (it == net.minecraft.item.Items.DIAMOND_PICKAXE && pickGrade != 'N') pickGrade = 'D';
+                else if (it == net.minecraft.item.Items.IRON_PICKAXE
+                    && pickGrade != 'N' && pickGrade != 'D') pickGrade = 'I';
+                else if (it == net.minecraft.item.Items.STONE_PICKAXE
+                    && pickGrade != 'N' && pickGrade != 'D' && pickGrade != 'I') pickGrade = 'S';
+                else if (it == net.minecraft.item.Items.WOODEN_PICKAXE && pickGrade == '-') pickGrade = 'W';
+            }
+        }
+
+        String hp = p != null ? String.format("%.0f/%.0f", p.getHealth(), p.getMaxHealth()) : "?";
+        int failCnt = pers != null ? pers.taskFailCount : 0;
+        int stk = pers != null ? pers.stuckEscalation : 0;
+
+        return String.format(
+            "  §a%s §7[§b%s§7] §e%s §7| hp§f%s §7| L§f%d §7P§f%d §7S§f%d §7C§f%d §7| Pk:§f%c §7| f§f%d§7/s§f%d §7| %s §7| %s §7| %dms §7| 成就§f%d",
+            name, phaseShort, task, hp, logs, planks, sticks, cobble, pickGrade,
+            failCnt, stk, posPart, uptime, ping, advCount);
     }
 }
