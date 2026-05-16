@@ -261,28 +261,15 @@ public class MaohiCommands {
             feedback(ctx.getSource(), "§7[FS Core] 当前没有在线的假人");
             return 0;
         }
-        // P25: console / 玩家 分两路径输出。
-        //   玩家:单 Text + \n 拼接,游戏 chat hud 按 \n 切行,§ 渲染颜色,看着整齐
-        //   console (server console / RCON / 命令方块): 每个 bot 一次独立 sendFeedback,feedback()
-        //     内部 stripColors 已剥 §,避免 TerminalConsoleAppender 把 § 翻成 ANSI 残留(用户日志里的 [0m
-        //     就是 \x1b[0m 在不支持 ANSI 的 viewer 里掉了 \x1b 的残骸)。每条 sendFeedback 在 console
-        //     是独立 INFO 行,viewer 自然分行不合并。
-        boolean isPlayer = ctx.getSource().getEntity() instanceof ServerPlayerEntity;
-        if (isPlayer) {
-            StringBuilder sb = new StringBuilder();
-            sb.append("§6[FS Core] 在线假人 §f").append(uuids.size()).append(" §6名:\n");
-            for (UUID uuid : new java.util.ArrayList<>(uuids)) {
-                sb.append(formatBotLine(manager, uuid)).append('\n');
-            }
-            sb.append("§7用 §f/maohi list <name> §7查看单假人详细成就列表");
-            feedback(ctx.getSource(), sb.toString());
-        } else {
-            feedback(ctx.getSource(), "§6[FS Core] 在线假人 §f" + uuids.size() + " §6名:");
-            for (UUID uuid : new java.util.ArrayList<>(uuids)) {
-                feedback(ctx.getSource(), formatBotLine(manager, uuid));
-            }
-            feedback(ctx.getSource(), "§7用 §f/maohi list <name> §7查看单假人详细成就列表");
+
+        StringBuilder sb = new StringBuilder();
+        sb.append("§6[FS Core] 在线假人 §f").append(uuids.size()).append(" §6名:\n");
+        for (UUID uuid : new java.util.ArrayList<>(uuids)) {
+            sb.append(formatBotLine(manager, uuid)).append('\n');
         }
+        sb.append("§7用 §f/maohi list <name> §7查看单假人详细成就列表");
+        
+        feedback(ctx.getSource(), sb.toString());
         return uuids.size();
     }
 
