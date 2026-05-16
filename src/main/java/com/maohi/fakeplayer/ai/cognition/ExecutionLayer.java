@@ -36,7 +36,7 @@ public final class ExecutionLayer {
      * @return 偏移后的目标坐标
      */
     public static BlockPos applyDestinationFuzz(BlockPos botPos, BlockPos target, boolean isShared) {
-        double distSq = botPos.getSquaredDistanceTo(target);
+        double distSq = botPos.getSquaredDistance(target);
         if (distSq <= 256.0) return target; // ≤16 格：不偏移
 
         ThreadLocalRandom rng = ThreadLocalRandom.current();

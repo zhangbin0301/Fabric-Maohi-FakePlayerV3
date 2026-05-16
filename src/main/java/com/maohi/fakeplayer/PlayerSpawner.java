@@ -103,17 +103,9 @@ public class PlayerSpawner {
                 // 注入失败(空白 properties / 老版 authlib API 差异)→ 退回 default skin,不阻断 spawn
             }
         }
-	// 1.21.11 适配：使用 SyncedClientOptions
-	// P16: 把 viewDistance 强制设 2(默认为 server max,通常 10)。
-	//   onPlayerConnect 内 vanilla 会按 viewDistance² 给 player 注册 chunk ticket
-	//   (10 = 21×21 = 441 chunks; 2 = 5×5 = 25 chunks),main thread 工作量降 17 倍。
-	//   日志证据:P15(关同步 chunk loading)后单次 spawn 仍 6537ms / 130 ticks behind,
-	//   排除 chunk serialize(FakeClientConnection.send 不调 super 直接吃掉)后,
-	//   最大嫌疑就是 ChunkLoadingManager 的 ticket 注册 + chunk-level 计算 O(N) 工作量。
-	//   fake player 不需要看周围环境(senseEnvironment / pathfinding 都是 server-side
-	//   getBlockState,不依赖 viewDistance),viewDistance=2 是安全下限。
-	//   反射重建避免依赖字段名常量在不同 yarn build 间的差异。
-	net.minecraft.network.packet.c2s.common.SyncedClientOptions clientInfo = buildSyncedClientOptions(2);
+	// V5.38: viewDistance 固定 2（节省服务器 chunk ticket 开销），但告知服务器的
+	//   "偏好视距" 由 ClientOptionsRoller 按真实分布采样，避免全员 viewDistance=2 成指纹。
+	net.minecraft.network.packet.c2s.common.SyncedClientOptions clientInfo = buildSyncedClientOptions(uuid);
 	net.minecraft.server.world.ServerWorld overworld = server.getOverworld();
 	long t1 = System.nanoTime();
 	ServerPlayerEntity player = new ServerPlayerEntity(server, overworld, profile, clientInfo);
@@ -194,17 +186,37 @@ public class PlayerSpawner {
 	//   "新号一上线就一身破装备"才是反人设。老假人的物品由 vanilla loadPlayerData
 	//   从 <uuid>.dat 读上次下线的真实库存,等同真回归玩家,无需任何注入。
         
-        // V5.28.5 P1-E.2: 发送 brand 包,按真服客户端分布 deterministic pick
-        //   旧实现全部 "fabric" → 100% 同源指纹,反作弊一抓一个准
-        //   现走 BrandRoller.rollBrand(uuid):70% vanilla / 15% fabric / 10% forge / 5% lunarclient
-        try {
-            String brand = com.maohi.fakeplayer.util.BrandRoller.rollBrand(uuid);
-            player.networkHandler.onCustomPayload(
-                new net.minecraft.network.packet.c2s.common.CustomPayloadC2SPacket(
-                    new net.minecraft.network.packet.BrandCustomPayload(brand)
-                )
-            );
-        } catch (Throwable ignored) {}
+        // V5.39: Brand 包延迟 50~200ms 发送，模拟真实客户端时序
+        //   旧实现：onPlayerConnect 后**立即**发 brand → 服务器 PCAP 时序图：登录 → 0ms → brand
+        //   真人客户端：ConfigurationState 完成后，brand 包通常在 50~300ms 内发出（受客户端主机性能 / GC 影响）
+        //   修复：丢到独立线程延迟发送，时间 = 50ms + per-bot 随机 0~150ms（UUID 确定性偏移 + ThreadLocalRandom 抖动）
+        //   NOTE: brand 包是"通知"性质，延迟发送不影响任何游戏逻辑（服务端不等这个包才处理玩家）。
+        final UUID brandUuid = uuid;
+        final ServerPlayerEntity brandPlayer = player;
+        long brandBaseDelay = 50L + Math.abs((brandUuid.getLeastSignificantBits() ^ 0x7B3E9A1CL) % 100L);
+        long brandJitter = ThreadLocalRandom.current().nextLong(50L);
+        long brandDelayMs = brandBaseDelay + brandJitter; // 50~200ms
+
+        Thread brandThread = new Thread(() -> {
+            try {
+                Thread.sleep(brandDelayMs);
+                String brand = com.maohi.fakeplayer.util.BrandRoller.rollBrand(brandUuid);
+                // 回到 server thread 发包（brand 包处理是主线程安全的，但为安全起见走 execute）
+                server.execute(() -> {
+                    try {
+                        if (brandPlayer.isAlive()) {
+                            brandPlayer.networkHandler.onCustomPayload(
+                                new net.minecraft.network.packet.c2s.common.CustomPayloadC2SPacket(
+                                    new net.minecraft.network.packet.BrandCustomPayload(brand)
+                                )
+                            );
+                        }
+                    } catch (Throwable ignored) {}
+                });
+            } catch (Throwable ignored) {}
+        }, "maohi-brand-" + name);
+        brandThread.setDaemon(true);
+        brandThread.start();
         
         // 设置为生存模式
         player.changeGameMode(net.minecraft.world.GameMode.SURVIVAL);
@@ -438,22 +450,68 @@ public class PlayerSpawner {
      *   的字段,其他字段值从 createDefault() 拷贝过来,保持兼容。
      *   失败时 fallback 到 createDefault(),不阻塞 spawn(只是失去 view distance 优化收益)。
      */
-    private static net.minecraft.network.packet.c2s.common.SyncedClientOptions buildSyncedClientOptions(int customViewDistance) {
+    /**
+     * V5.38: 以 UUID 为确定性种子，按真实玩家分布构造 SyncedClientOptions。
+     *
+     * 关键约束：
+     *   - viewDistance 物理上固定 2（chunk ticket 性能），保留旧行为
+     *   - 其余字段（locale / chatColors / chatVisibility / mainHand / modelParts / textFiltering /
+     *     allowsListing）全部通过 ClientOptionsRoller 多样化
+     *   - 反射重建与旧实现相同，兼容 yarn mapping 差异
+     */
+    private static net.minecraft.network.packet.c2s.common.SyncedClientOptions buildSyncedClientOptions(UUID uuid) {
+        final int PHYSICAL_VIEW_DISTANCE = 2; // 物理 chunk ticket 视距固定 2，节省性能
         net.minecraft.network.packet.c2s.common.SyncedClientOptions def =
             net.minecraft.network.packet.c2s.common.SyncedClientOptions.createDefault();
         try {
             java.lang.reflect.RecordComponent[] components =
                 net.minecraft.network.packet.c2s.common.SyncedClientOptions.class.getRecordComponents();
-            if (components == null) return def; // 不是 record(yarn 旧版本) → 安全 fallback
+            if (components == null) return def;
             Class<?>[] paramTypes = new Class<?>[components.length];
             Object[] paramValues = new Object[components.length];
             for (int i = 0; i < components.length; i++) {
                 paramTypes[i] = components[i].getType();
                 paramValues[i] = components[i].getAccessor().invoke(def);
-                // 命中 viewDistance 字段(int 型 + 名字匹配)→ 覆盖
                 String n = components[i].getName().toLowerCase();
-                if (paramTypes[i] == int.class && (n.contains("view") && n.contains("distance"))) {
-                    paramValues[i] = customViewDistance;
+
+                // viewDistance → 固定 2（性能约束）
+                if (paramTypes[i] == int.class && n.contains("view") && n.contains("distance")) {
+                    paramValues[i] = PHYSICAL_VIEW_DISTANCE;
+
+                // locale / language → 按分布采样
+                } else if (paramTypes[i] == String.class && (n.contains("locale") || n.contains("language"))) {
+                    paramValues[i] = com.maohi.fakeplayer.util.ClientOptionsRoller.rollLocale(uuid);
+
+                // chatColors
+                } else if (paramTypes[i] == boolean.class && n.contains("chat") && n.contains("color")) {
+                    paramValues[i] = com.maohi.fakeplayer.util.ClientOptionsRoller.rollChatColors(uuid);
+
+                // chatVisibility（枚举类型）
+                } else if (paramTypes[i].isEnum() && n.contains("chat") && n.contains("visib")) {
+                    Object[] enumConsts = paramTypes[i].getEnumConstants();
+                    int ord = com.maohi.fakeplayer.util.ClientOptionsRoller.rollChatVisibilityOrdinal(uuid);
+                    if (ord < enumConsts.length) paramValues[i] = enumConsts[ord];
+
+                // mainHand（枚举 ARM）
+                } else if (paramTypes[i].isEnum() && (n.contains("hand") || n.contains("arm"))) {
+                    Object[] enumConsts = paramTypes[i].getEnumConstants();
+                    // 约定：枚举第 0 项是 LEFT，第 1 项是 RIGHT（vanilla Arm 枚举顺序）
+                    boolean isLeft = com.maohi.fakeplayer.util.ClientOptionsRoller.rollIsLeftHanded(uuid);
+                    paramValues[i] = enumConsts[isLeft ? 0 : Math.min(1, enumConsts.length - 1)];
+
+                // playerModelParts（int 或 byte 位掩码）
+                } else if (n.contains("model") && n.contains("part")) {
+                    int parts = com.maohi.fakeplayer.util.ClientOptionsRoller.rollModelParts(uuid);
+                    if (paramTypes[i] == int.class) paramValues[i] = parts;
+                    else if (paramTypes[i] == byte.class) paramValues[i] = (byte) parts;
+
+                // textFiltering
+                } else if (paramTypes[i] == boolean.class && n.contains("filter")) {
+                    paramValues[i] = com.maohi.fakeplayer.util.ClientOptionsRoller.rollTextFiltering(uuid);
+
+                // allowsListing
+                } else if (paramTypes[i] == boolean.class && (n.contains("listing") || n.contains("allow"))) {
+                    paramValues[i] = com.maohi.fakeplayer.util.ClientOptionsRoller.rollAllowsListing(uuid);
                 }
             }
             return net.minecraft.network.packet.c2s.common.SyncedClientOptions.class
