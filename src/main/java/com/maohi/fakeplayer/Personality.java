@@ -117,8 +117,13 @@ public class Personality {
 	// transient：只在本会话有效，不序列化（重启后认领自动失效符合设计）。
 	/** 当前正在前往的共享地标节点，null 表示没有激活的共享任务 */
 	public transient com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkNode sharedTarget = null;
-	/** bot「听到」情报后的反应延迟剩余 tick（倒计时到 0 才出发） */
-	public transient int sharedReactionDelayTicks = 0;
+	/**
+	 * bot「听到」情报后的反应延迟到期时间戳（System.currentTimeMillis() 格式）。
+	 * Bug fix: 旧设计用 tick 计数（每次 setExplore 才减 1），实际延迟会放大 100x+。
+	 * 改为 wall-clock ms 时间戳：nowMs < sharedReactionDelayMs 时继续等待。
+	 * 0 表示无延迟或延迟已结束。
+	 */
+	public transient long sharedReactionDelayMs = 0L;
 
 	// P3: ExecutionLayer 路径漂移状态。
 	/** 每次 setExplore 时重置的漂移种子，防止每段路都是同一个漂移模式 */

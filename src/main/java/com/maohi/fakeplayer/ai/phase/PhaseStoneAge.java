@@ -443,108 +443,25 @@ public final class PhaseStoneAge implements Phase {
         // 兼容保留：旧的 scannedEmptyRegions 也同步清理
         Personality.pruneScannedEmptyRegions(p);
 
-        ThreadLocalRandom rng = ThreadLocalRandom.current();
-        final int NUM_CANDIDATES = 12; // 生成候选数（比旧的 10 次更多，给加权抽签更多选项）
-        int[][] candidates = new int[NUM_CANDIDATES][2]; // [tx, tz]
-        int validCount = 0;
-
-        // P1: 根据当前 biome 判断 bot 最需要什么资源
-        // STONE_STABLE 假人最紧缺的通常是树（用于合成）或石头（用于工具）
-        com.maohi.fakeplayer.ai.cognition.BiomePrior.ResourceType neededResource;
-        if (p.growthPhase == com.maohi.fakeplayer.GrowthPhase.STONE_AGE) {
-            // 石器时代：判断缺什么。有镐但没 log → 需要木头；没镐 → 需要石头
-            boolean wantsLog = (p.currentTask == TaskType.WOODCUTTING
-                || p.stoneStableCyclesNoIron > 0); // 进入 strip-mine 循环说明铁是瓶颈
-            neededResource = wantsLog
-                ? com.maohi.fakeplayer.ai.cognition.BiomePrior.ResourceType.LOG
-                : com.maohi.fakeplayer.ai.cognition.BiomePrior.ResourceType.STONE;
-        } else {
-            neededResource = com.maohi.fakeplayer.ai.cognition.BiomePrior.ResourceType.LOG; // 默认
-        }
-
-        // P1: 检查当前 biome 是否对目标资源极端不利
-        boolean currentBiomeIsHostile = com.maohi.fakeplayer.ai.cognition.BiomePrior.isHostile(player, neededResource);
-
-        // 生成候选方向
-        for (int attempt = 0; attempt < NUM_CANDIDATES * 2 && validCount < NUM_CANDIDATES; attempt++) {
-            // P1: 如果当前 biome 极度不友好（如沙漠里找树），扩大扇形范围（转向更大）
-            float angleSpan = currentBiomeIsHostile
-                ? (attempt < 4 ? 180f : 360f) // 不友好 biome：更积极地转向
-                : (attempt < 3 ? 120f : 360f); // 正常情况：前几次保持方向感
-
-            float offsetDeg = rng.nextFloat() * angleSpan - angleSpan / 2f;
-            double rad = Math.toRadians(player.getYaw() + offsetDeg);
-
-            double multiplier = 1.0 + (attempt / 4) * 0.2;
-            if (p.taskFailCount >= 2) multiplier *= 0.4;
-
-            double dist = EXPLORE_RADIUS * multiplier * (0.85 + rng.nextDouble() * 0.15);
-            int dx = (int) Math.round(-Math.sin(rad) * dist);
-            int dz = (int) Math.round(Math.cos(rad) * dist);
-            int tx = player.getBlockX() + dx;
-            int tz = player.getBlockZ() + dz;
-
-            // 危险方向跳过（沿用原有逻辑）
-            int sdx = Integer.signum(dx);
-            int sdz = Integer.signum(dz);
-            BlockPos firstStep = player.getBlockPos().add(sdx, 0, sdz);
-            if (com.maohi.fakeplayer.ai.PathfindingNavigation.isDangerAhead(
-                    player.getEntityWorld(), firstStep)) continue;
-
-            candidates[validCount][0] = tx;
-            candidates[validCount][1] = tz;
-            validCount++;
-        }
-
-        int tx, tz;
-
-        if (validCount == 0) {
-            // 极端兜底：全部方向都是危险，强制往大半径随机走
-            double rad = rng.nextDouble() * Math.PI * 2;
-            double dist = EXPLORE_RADIUS * 2.0;
-            tx = player.getBlockX() + (int) Math.round(-Math.sin(rad) * dist);
-            tz = player.getBlockZ() + (int) Math.round(Math.cos(rad) * dist);
-            com.maohi.fakeplayer.TaskLogger.log(player, "explore_fallback", "reason", "no_valid_candidates");
-        } else {
-            // P0+P1: 加权抽签选出最优候选
-            // 先用 RegionMemoryMap 加权（RICH/MEDIUM/EMPTY/未知）
-            int[][] validCandidates = java.util.Arrays.copyOf(candidates, validCount);
-            int picked = p.regionMemory.weightedPick(validCandidates);
-
-            if (picked == -1) {
-                // 所有候选都是 EMPTY → 沿用旧兜底：打破死循环，随机大半径
-                double rad = rng.nextDouble() * Math.PI * 2;
-                double dist = EXPLORE_RADIUS * 2.0;
-                tx = player.getBlockX() + (int) Math.round(-Math.sin(rad) * dist);
-                tz = player.getBlockZ() + (int) Math.round(Math.cos(rad) * dist);
-                com.maohi.fakeplayer.TaskLogger.log(player, "explore_all_empty", "candidates", validCount);
-            } else {
-                tx = validCandidates[picked][0];
-                tz = validCandidates[picked][1];
-                // P0 日志：记录选中 region 的评分，便于观察加权效果
-                int rx = com.maohi.fakeplayer.ai.cognition.RegionMemoryMap.blockToRegion(tx);
-                int rz = com.maohi.fakeplayer.ai.cognition.RegionMemoryMap.blockToRegion(tz);
-                com.maohi.fakeplayer.ai.cognition.RegionScore pickedScore = p.regionMemory.query(rx, rz);
-                com.maohi.fakeplayer.TaskLogger.log(player, "explore_weighted_pick",
-                    "score", pickedScore == null ? "UNKNOWN" : pickedScore.name(),
-                    "candidates", validCount, "biomeHostile", currentBiomeIsHostile,
-                    "resource", neededResource.name());
-            }
-        }
-
         // P3: 每次 setExplore 刷新漂移种子（防止路径模式重复）
         p.exploreDriftSeed = com.maohi.fakeplayer.ai.cognition.ExecutionLayer.freshDriftSeed();
         p.headingToSharedTarget = false;
 
-        // P2: 错峰查询共享地标（先检查反应延迟倒计时）
-        // sharedReactionDelayTicks > 0 说明 bot 已经「听到」情报，还在犹豫中，继续倒计时
-        if (p.sharedReactionDelayTicks > 0) {
-            p.sharedReactionDelayTicks--;
-            // 倒计时期间正常走 setExplore 逻辑，直到倒计时为 0 才出发
+        // ============================================================
+        // P2: 共享情报优先路径（先于本地采样，避免无效计算）
+        // Bug fix: 倒计时用 wall-clock ms，不是 setExplore 调用次数
+        // ============================================================
+        long nowMs = System.currentTimeMillis();
+
+        if (p.sharedReactionDelayMs > 0 && nowMs < p.sharedReactionDelayMs) {
+            // 还在「犹豫」中，本次走正常探索逻辑（不傻等）
+            // 故意 fall-through 到下面的本地采样
         } else if (p.sharedTarget != null) {
-            // 倒计时到 0，出发前往共享目标
+            // 反应延迟结束，出发前往共享目标
             com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkNode shared = p.sharedTarget;
-            p.sharedTarget = null; // 清除，避免下次 setExplore 重复处理
+            p.sharedTarget = null;
+            p.sharedReactionDelayMs = 0L;
+
             BlockPos sharedPos = com.maohi.fakeplayer.ai.cognition.ExecutionLayer.applyDestinationFuzz(
                 player.getBlockPos(), shared.approxPos, true);
             int sty = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(
@@ -565,19 +482,113 @@ public final class PhaseStoneAge implements Phase {
             com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkNode found =
                 map.queryNearest(player.getBlockPos(), player.getUuid(), null);
             if (found != null && map.claim(found, player.getUuid())) {
-                // 认领成功！设置反应延迟，不立刻出发（防止 bot 同 tick 同时转向）
+                // 认领成功，设置 wall-clock 反应延迟（3~15 秒）
+                int delayTicks = com.maohi.fakeplayer.ai.cognition.ExecutionLayer.reactionDelayTicks(player.getUuid());
                 p.sharedTarget = found;
-                p.sharedReactionDelayTicks = com.maohi.fakeplayer.ai.cognition.ExecutionLayer.reactionDelayTicks(player.getUuid());
+                p.sharedReactionDelayMs = nowMs + (delayTicks * 50L); // tick → ms
                 com.maohi.fakeplayer.TaskLogger.log(player, "shared_landmark_claimed",
-                    "type", found.type.name(), "delayTicks", p.sharedReactionDelayTicks);
-                // 本次 setExplore 继续走正常逻辑（延迟期间正常探索，不是傻站着等）
+                    "type", found.type.name(), "delayMs", delayTicks * 50);
+                // 本次 setExplore 继续走本地采样逻辑（延迟期间继续探索，不是傻等）
+            }
+        }
+
+        // ============================================================
+        // P1: 根据背包判断当前最需要什么资源（不依赖 currentTask，因为即将被覆盖）
+        // Bug fix: 改为直接检查背包，而不是读取即将失效的 currentTask
+        // ============================================================
+        com.maohi.fakeplayer.ai.cognition.BiomePrior.ResourceType neededResource;
+        if (p.growthPhase == com.maohi.fakeplayer.GrowthPhase.STONE_AGE) {
+            // 检查背包里是否有足够木头（>=4 原木 ≈ 够做工具）
+            net.minecraft.item.ItemStack mainHand = player.getMainHandStack();
+            boolean hasPickaxe = !mainHand.isEmpty()
+                && mainHand.getItem() instanceof net.minecraft.item.PickaxeItem;
+            // 有镐子说明已有石头阶段，当前更需要树（维持工具链）
+            // 没镐子说明需要石头
+            neededResource = hasPickaxe
+                ? com.maohi.fakeplayer.ai.cognition.BiomePrior.ResourceType.LOG
+                : com.maohi.fakeplayer.ai.cognition.BiomePrior.ResourceType.STONE;
+        } else {
+            neededResource = com.maohi.fakeplayer.ai.cognition.BiomePrior.ResourceType.LOG;
+        }
+
+        // P1: 检查当前 biome 是否对目标资源极端不利
+        boolean currentBiomeIsHostile = com.maohi.fakeplayer.ai.cognition.BiomePrior.isHostile(player, neededResource);
+
+        // 生成候选方向
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
+        final int NUM_CANDIDATES = 12;
+        int[][] candidates = new int[NUM_CANDIDATES][2]; // [tx, tz]
+        int validCount = 0;
+
+        for (int attempt = 0; attempt < NUM_CANDIDATES * 2 && validCount < NUM_CANDIDATES; attempt++) {
+            // P1: 不友好 biome 时扩大扇形（积极转向离开沙漠/海洋）
+            float angleSpan = currentBiomeIsHostile
+                ? (attempt < 4 ? 180f : 360f)
+                : (attempt < 3 ? 120f : 360f);
+
+            float offsetDeg = rng.nextFloat() * angleSpan - angleSpan / 2f;
+            double rad = Math.toRadians(player.getYaw() + offsetDeg);
+
+            double multiplier = 1.0 + (attempt / 4) * 0.2;
+            if (p.taskFailCount >= 2) multiplier *= 0.4;
+
+            double dist = EXPLORE_RADIUS * multiplier * (0.85 + rng.nextDouble() * 0.15);
+            int dx = (int) Math.round(-Math.sin(rad) * dist);
+            int dz = (int) Math.round(Math.cos(rad) * dist);
+            int tx = player.getBlockX() + dx;
+            int tz = player.getBlockZ() + dz;
+
+            int sdx = Integer.signum(dx);
+            int sdz = Integer.signum(dz);
+            BlockPos firstStep = player.getBlockPos().add(sdx, 0, sdz);
+            if (com.maohi.fakeplayer.ai.PathfindingNavigation.isDangerAhead(
+                    player.getEntityWorld(), firstStep)) continue;
+
+            candidates[validCount][0] = tx;
+            candidates[validCount][1] = tz;
+            validCount++;
+        }
+
+        // 确定最终 tx, tz（变量在此处初始化，编译器一定能看到赋值路径）
+        final int finalTx;
+        final int finalTz;
+
+        if (validCount == 0) {
+            // 极端兜底：全部方向危险，强制大半径随机走
+            double rad = rng.nextDouble() * Math.PI * 2;
+            double dist = EXPLORE_RADIUS * 2.0;
+            finalTx = player.getBlockX() + (int) Math.round(-Math.sin(rad) * dist);
+            finalTz = player.getBlockZ() + (int) Math.round(Math.cos(rad) * dist);
+            com.maohi.fakeplayer.TaskLogger.log(player, "explore_fallback", "reason", "no_valid_candidates");
+        } else {
+            // P0: 加权抽签（RICH=5 / UNKNOWN=3 / MEDIUM=2 / EMPTY=跳过）
+            int[][] validCandidates = java.util.Arrays.copyOf(candidates, validCount);
+            int picked = p.regionMemory.weightedPick(validCandidates);
+
+            if (picked == -1) {
+                // 全是 EMPTY → 大半径随机兜底打破死循环
+                double rad = rng.nextDouble() * Math.PI * 2;
+                double dist = EXPLORE_RADIUS * 2.0;
+                finalTx = player.getBlockX() + (int) Math.round(-Math.sin(rad) * dist);
+                finalTz = player.getBlockZ() + (int) Math.round(Math.cos(rad) * dist);
+                com.maohi.fakeplayer.TaskLogger.log(player, "explore_all_empty", "candidates", validCount);
+            } else {
+                finalTx = validCandidates[picked][0];
+                finalTz = validCandidates[picked][1];
+                int rx = com.maohi.fakeplayer.ai.cognition.RegionMemoryMap.blockToRegion(finalTx);
+                int rz = com.maohi.fakeplayer.ai.cognition.RegionMemoryMap.blockToRegion(finalTz);
+                com.maohi.fakeplayer.ai.cognition.RegionScore pickedScore = p.regionMemory.query(rx, rz);
+                com.maohi.fakeplayer.TaskLogger.log(player, "explore_weighted_pick",
+                    "score", pickedScore == null ? "UNKNOWN" : pickedScore.name(),
+                    "candidates", validCount, "biomeHostile", currentBiomeIsHostile,
+                    "resource", neededResource.name());
             }
         }
 
         int ty = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(
-            player.getEntityWorld(), tx, tz, player.getBlockY());
-        BlockPos rawTarget = new BlockPos(tx, ty, tz);
-        // P3: 对目标施加终点模糊偏移（近距离自动关闭）
+            player.getEntityWorld(), finalTx, finalTz, player.getBlockY());
+        BlockPos rawTarget = new BlockPos(finalTx, ty, finalTz);
+        // P3: 终点模糊偏移（≤16 格自动关闭）
         BlockPos fuzzedTarget = com.maohi.fakeplayer.ai.cognition.ExecutionLayer.applyDestinationFuzz(
             player.getBlockPos(), rawTarget, false);
         p.currentTask = TaskType.EXPLORING;
