@@ -113,6 +113,19 @@ public class Personality {
 	public transient com.maohi.fakeplayer.ai.cognition.RegionMemoryMap regionMemory
 		= new com.maohi.fakeplayer.ai.cognition.RegionMemoryMap();
 
+	// P2: 共享情报目标状态。bot 从 SharedResourceMap 认领地标后填写。
+	// transient：只在本会话有效，不序列化（重启后认领自动失效符合设计）。
+	/** 当前正在前往的共享地标节点，null 表示没有激活的共享任务 */
+	public transient com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkNode sharedTarget = null;
+	/** bot「听到」情报后的反应延迟剩余 tick（倒计时到 0 才出发） */
+	public transient int sharedReactionDelayTicks = 0;
+
+	// P3: ExecutionLayer 路径漂移状态。
+	/** 每次 setExplore 时重置的漂移种子，防止每段路都是同一个漂移模式 */
+	public transient double exploreDriftSeed = 0.0;
+	/** 本次 EXPLORING 是否前往共享情报目标（影响速度限制） */
+	public transient boolean headingToSharedTarget = false;
+
 	// V5.43 reassign 节流时间戳(P-1.A 紧急修):
 	//   原节流条件 totalTicks % 100 == 0 在 MSPT 熔断时(>80ms)失效——totalTicks 停止递增,
 	//   bot 在 chunk gen / 多 bot 同 tick 寻路时被静默冻几分钟才 reassign 一次。

@@ -532,10 +532,56 @@ public final class PhaseStoneAge implements Phase {
             }
         }
 
+        // P3: 每次 setExplore 刷新漂移种子（防止路径模式重复）
+        p.exploreDriftSeed = com.maohi.fakeplayer.ai.cognition.ExecutionLayer.freshDriftSeed();
+        p.headingToSharedTarget = false;
+
+        // P2: 错峰查询共享地标（先检查反应延迟倒计时）
+        // sharedReactionDelayTicks > 0 说明 bot 已经「听到」情报，还在犹豫中，继续倒计时
+        if (p.sharedReactionDelayTicks > 0) {
+            p.sharedReactionDelayTicks--;
+            // 倒计时期间正常走 setExplore 逻辑，直到倒计时为 0 才出发
+        } else if (p.sharedTarget != null) {
+            // 倒计时到 0，出发前往共享目标
+            com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkNode shared = p.sharedTarget;
+            p.sharedTarget = null; // 清除，避免下次 setExplore 重复处理
+            BlockPos sharedPos = com.maohi.fakeplayer.ai.cognition.ExecutionLayer.applyDestinationFuzz(
+                player.getBlockPos(), shared.approxPos, true);
+            int sty = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(
+                player.getEntityWorld(), sharedPos.getX(), sharedPos.getZ(), player.getBlockY());
+            p.currentTask = TaskType.EXPLORING;
+            p.taskTarget = new BlockPos(sharedPos.getX(), sty, sharedPos.getZ());
+            p.taskExpireTime = player.getEntityWorld().getServer().getTicks() + TimingConstants.TICK_TIMEOUT_EXPLORE * 2;
+            p.headingToSharedTarget = true;
+            com.maohi.fakeplayer.TaskLogger.log(player, "explore_shared_landmark",
+                "type", shared.type.name(), "approxPos", shared.approxPos);
+            return;
+        } else if (com.maohi.fakeplayer.ai.cognition.SharedResourceMap.shouldQueryThisTick(
+                player.getEntityWorld().getServer().getTicks(),
+                p.triggerPhaseSeed, p.taskFailCount)) {
+            // 本 tick 轮到该 bot 查询共享地图
+            com.maohi.fakeplayer.ai.cognition.SharedResourceMap map =
+                com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance();
+            com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkNode found =
+                map.queryNearest(player.getBlockPos(), player.getUuid(), null);
+            if (found != null && map.claim(found, player.getUuid())) {
+                // 认领成功！设置反应延迟，不立刻出发（防止 bot 同 tick 同时转向）
+                p.sharedTarget = found;
+                p.sharedReactionDelayTicks = com.maohi.fakeplayer.ai.cognition.ExecutionLayer.reactionDelayTicks(player.getUuid());
+                com.maohi.fakeplayer.TaskLogger.log(player, "shared_landmark_claimed",
+                    "type", found.type.name(), "delayTicks", p.sharedReactionDelayTicks);
+                // 本次 setExplore 继续走正常逻辑（延迟期间正常探索，不是傻站着等）
+            }
+        }
+
         int ty = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(
             player.getEntityWorld(), tx, tz, player.getBlockY());
+        BlockPos rawTarget = new BlockPos(tx, ty, tz);
+        // P3: 对目标施加终点模糊偏移（近距离自动关闭）
+        BlockPos fuzzedTarget = com.maohi.fakeplayer.ai.cognition.ExecutionLayer.applyDestinationFuzz(
+            player.getBlockPos(), rawTarget, false);
         p.currentTask = TaskType.EXPLORING;
-        p.taskTarget = new BlockPos(tx, ty, tz);
+        p.taskTarget = fuzzedTarget;
         p.taskExpireTime = player.getEntityWorld().getServer().getTicks() + TimingConstants.TICK_TIMEOUT_EXPLORE;
     }
 
