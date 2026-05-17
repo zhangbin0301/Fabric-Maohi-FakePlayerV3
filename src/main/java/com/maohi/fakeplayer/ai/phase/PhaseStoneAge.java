@@ -86,6 +86,10 @@ public final class PhaseStoneAge implements Phase {
         int cobbleCount = 0;
         boolean hasAnyPickaxe = false;
         boolean hasStonePickaxe = false; // 石镐及以上(石/铁/钻/合金)
+        // V5.45 FIX: 背包内任一石镐(及以上)的剩余耐久最大值。strip mine 入口用其判断是否够预算走完全程。
+        //   语义:取"最高"而非"总和" — bot 单 tick 只能用主手挖,无法切槽合并多把镐的耐久。
+        //   备件靠 CraftingBehavior 的"持仓 3 把"策略,这里仅校验"开局有 1 把足够新的"。
+        int maxStonePickaxeRemainingDurability = 0;
         boolean hasTable = false;
         boolean hasSword = false;
 
@@ -112,7 +116,14 @@ public final class PhaseStoneAge implements Phase {
                 || it == Items.IRON_PICKAXE || it == Items.DIAMOND_PICKAXE
                 || it == Items.NETHERITE_PICKAXE) d.hasAnyPickaxe = true;
             if (it == Items.STONE_PICKAXE || it == Items.IRON_PICKAXE
-                || it == Items.DIAMOND_PICKAXE || it == Items.NETHERITE_PICKAXE) d.hasStonePickaxe = true;
+                || it == Items.DIAMOND_PICKAXE || it == Items.NETHERITE_PICKAXE) {
+                d.hasStonePickaxe = true;
+                // V5.45 FIX: 计算这把镐的剩余耐久,保留最大值
+                int remaining = s.getMaxDamage() - s.getDamage();
+                if (remaining > d.maxStonePickaxeRemainingDurability) {
+                    d.maxStonePickaxeRemainingDurability = remaining;
+                }
+            }
 
             // sword 用 id 字符串模糊匹配(任何 *_sword 算)
             String id = Registries.ITEM.getId(it).getPath();
@@ -209,14 +220,17 @@ public final class PhaseStoneAge implements Phase {
                         personality.stoneStableCyclesNoIron++;
                         if (personality.stoneStableCyclesNoIron >= cfg.stripMineTriggerCycles
                                 && player.getHealth() > 14.0f
-                                && d.hasStonePickaxe) {
+                                && d.hasStonePickaxe
+                                && d.maxStonePickaxeRemainingDurability >= 100) {
                             personality.stripMineState = SubPhase.STRIP_MINE_DESCEND;
                             personality.stripMineStartPos = player.getBlockPos().toImmutable();
                             personality.stripMineStartY = player.getBlockY();
                             personality.stripMineTunnelLen = 0;
                             personality.currentTask = TaskType.STRIP_MINE;
                             com.maohi.fakeplayer.TaskLogger.log(player, "stripmine_enter",
-                                "startY", personality.stripMineStartY, "cycles", personality.stoneStableCyclesNoIron);
+                                "startY", personality.stripMineStartY,
+                                "cycles", personality.stoneStableCyclesNoIron,
+                                "pickDur", d.maxStonePickaxeRemainingDurability);
                             return;
                         }
                     }

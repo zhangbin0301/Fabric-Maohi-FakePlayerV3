@@ -6,6 +6,7 @@ import com.maohi.fakeplayer.Personality;
 import com.maohi.fakeplayer.TaskLogger;
 import com.maohi.fakeplayer.TaskType;
 import com.maohi.fakeplayer.ai.phase.PhaseStoneAge;
+import com.maohi.fakeplayer.network.InventoryActionHelper;
 import com.maohi.fakeplayer.network.PacketHelper;
 import net.minecraft.block.BlockState;
 import net.minecraft.item.Item;
@@ -84,6 +85,12 @@ public class StripMineBehavior {
             return;
         }
 
+        // V5.45 FIX C: 确保主手有耐久镐(否则 vanilla breakBlock 按 air 工具判 canHarvest=false → 块不破坏)。
+        //   返回 false 表示本 tick 在切槽/搬运,下个 tick 再挖,避免无效 mineBlock 调用。
+        if (!ensurePickaxeInMainHand(player)) {
+            return;
+        }
+
         // 到达目标层
         if (pos.getY() <= cfg.stripMineTargetY) {
             pers.stripMineState = PhaseStoneAge.SubPhase.STRIP_MINE_LAYER;
@@ -136,6 +143,11 @@ public class StripMineBehavior {
         }
         if (!hasSufficientPickaxe(player, 20)) {
             abort(pers, player, "low_durability");
+            return;
+        }
+
+        // V5.45 FIX C: 确保主手有耐久镐(LAYER 阶段同 DESCEND,vanilla breakBlock 按主手判 canHarvest)。
+        if (!ensurePickaxeInMainHand(player)) {
             return;
         }
 
@@ -285,6 +297,88 @@ public class StripMineBehavior {
                 if (max - current >= minDurability) return true;
             }
         }
+        return false;
+    }
+
+    /**
+     * V5.45 FIX C: 检查 stack 是否是耐久 ≥ 1 的镐(任何材质)。
+     */
+    private static boolean isUsablePickaxe(ItemStack stack) {
+        if (stack == null || stack.isEmpty()) return false;
+        Item it = stack.getItem();
+        if (it != Items.WOODEN_PICKAXE && it != Items.STONE_PICKAXE
+            && it != Items.IRON_PICKAXE && it != Items.DIAMOND_PICKAXE
+            && it != Items.NETHERITE_PICKAXE) return false;
+        return stack.getMaxDamage() - stack.getDamage() > 0;
+    }
+
+    /**
+     * V5.45 FIX C: 确保主手有耐久 ≥ 1 的镐。
+     *
+     * 背景:vanilla world.breakBlock(pos, true, player) 按主手物品判 canHarvest;
+     *   主手镐爆掉自动消失变 air → 后续 breakBlock 对 cobble/iron_ore 无效(块仍在)。
+     *   原 hasSufficientPickaxe 扫整个背包,即使主手没了也返回 true → bot 卡在原地用 air 挖空气。
+     *
+     * 策略(三档):
+     *   1. 主手是耐久镐 → return true,可直接挖。
+     *   2. hotbar(0-8) 有耐久镐 → setSelectedSlot 切到耐久最高的那把 → return true,本 tick 已切完可挖。
+     *   3. 主背包(9+) 有耐久镐 → quickMove(Shift+点击) 搬到 hotbar,return false 本 tick 不挖,下 tick 再来。
+     *   4. 整背包无耐久镐 → return false,调用方走 abort("low_durability")。
+     *
+     * 选 hotbar 内"耐久最高"而非"耐久最低":vanilla 玩家 strip mine 也是先用新镐,保留低耐久作"垫脚石"。
+     *
+     * 返回值:true = 可挖, false = 本 tick 跳过(切槽中或无镐)
+     */
+    private static boolean ensurePickaxeInMainHand(ServerPlayerEntity player) {
+        net.minecraft.entity.player.PlayerInventory inv = player.getInventory();
+
+        // 1. 主手已是耐久镐
+        if (isUsablePickaxe(player.getMainHandStack())) return true;
+
+        // 2. 扫 hotbar(0-8) 找耐久最高的镐
+        int bestHotbarSlot = -1;
+        int bestHotbarDur = 0;
+        for (int i = 0; i < 9; i++) {
+            ItemStack s = inv.getStack(i);
+            if (isUsablePickaxe(s)) {
+                int dur = s.getMaxDamage() - s.getDamage();
+                if (dur > bestHotbarDur) {
+                    bestHotbarDur = dur;
+                    bestHotbarSlot = i;
+                }
+            }
+        }
+        if (bestHotbarSlot >= 0) {
+            PacketHelper.setSelectedSlot(player, bestHotbarSlot);
+            TaskLogger.log(player, "stripmine_switch_pick",
+                "from", "main_air", "to", "hotbar_" + bestHotbarSlot, "dur", bestHotbarDur);
+            return true;  // 本 tick 已切完,可立即挖
+        }
+
+        // 3. 扫主背包(9-35) 找耐久最高的镐 → quickMove 到 hotbar
+        int bestInvSlot = -1;
+        int bestInvDur = 0;
+        for (int i = 9; i < inv.size(); i++) {
+            ItemStack s = inv.getStack(i);
+            if (isUsablePickaxe(s)) {
+                int dur = s.getMaxDamage() - s.getDamage();
+                if (dur > bestInvDur) {
+                    bestInvDur = dur;
+                    bestInvSlot = i;
+                }
+            }
+        }
+        if (bestInvSlot >= 0) {
+            int screenSlot = InventoryActionHelper.playerInvSlotToScreenSlot(player.playerScreenHandler, bestInvSlot);
+            if (screenSlot >= 0) {
+                InventoryActionHelper.quickMove(player, screenSlot);
+                TaskLogger.log(player, "stripmine_quickmove_pick",
+                    "from", "inv_" + bestInvSlot, "to", "hotbar", "dur", bestInvDur);
+            }
+            return false;  // 本 tick 在搬运,下 tick 再来挖
+        }
+
+        // 4. 真没镐了
         return false;
     }
 
