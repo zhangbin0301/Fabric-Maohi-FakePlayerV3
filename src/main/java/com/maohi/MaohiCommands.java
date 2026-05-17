@@ -352,58 +352,91 @@ public class MaohiCommands {
         return Command.SINGLE_SUCCESS;
     }
 
-    /** 单行格式化:name | [task] | ping | dim:x,y,z | 在线时长 | adv 数 */
+    /** 单行格式化(全中文):名称 | [阶段] 任务 | 等级 | 血量 | 背包 | 镐 | 诊断 | 维度坐标 | 在线时长 | 成就数 */
     private static String formatBotLine(com.maohi.fakeplayer.VirtualPlayerManager manager, UUID uuid) {
         String name = manager.getVirtualPlayerName(uuid);
         com.maohi.fakeplayer.Personality pers = manager.getPersonality(uuid);
         ServerPlayerEntity p = manager.getServer().getPlayerManager().getPlayer(uuid);
 
-        String task = pers != null && pers.currentTask != null ? pers.currentTask.name() : "?";
+        // ---- 任务：全中文映射 ----
+        String taskRaw = pers != null && pers.currentTask != null ? pers.currentTask.name() : "?";
+        String task;
         if (pers != null && pers.currentTask == com.maohi.fakeplayer.TaskType.STRIP_MINE && pers.stripMineState != null) {
-            task = pers.stripMineState.name();
-            if (pers.stripMineState == com.maohi.fakeplayer.ai.phase.PhaseStoneAge.SubPhase.STRIP_MINE_LAYER) {
-                com.maohi.MaohiConfig cfg = com.maohi.MaohiConfig.getInstance();
-                int max = cfg != null ? cfg.stripMineMaxTunnelLen : 64;
-                int y = p != null ? p.getBlockY() : pers.stripMineStartY;
-                task += String.format(" y=%d len=%d/%d", y, pers.stripMineTunnelLen, max);
+            // NOTE: StripMine 子状态需要附加坐标信息，单独处理
+            switch (pers.stripMineState) {
+                case STRIP_MINE_DESCEND -> task = "斜挖下探";
+                case STRIP_MINE_ASCEND  -> task = "安全爬升";
+                case STRIP_MINE_LAYER   -> {
+                    com.maohi.MaohiConfig cfg = com.maohi.MaohiConfig.getInstance();
+                    int max = cfg != null ? cfg.stripMineMaxTunnelLen : 64;
+                    int y = p != null ? p.getBlockY() : pers.stripMineStartY;
+                    task = String.format("平推挖矿 y=%d 进%d/%d", y, pers.stripMineTunnelLen, max);
+                }
+                default -> task = "条形挖矿";
             }
+        } else {
+            task = switch (taskRaw) {
+                case "WOODCUTTING" -> "砍树";
+                case "MINING"      -> "挖矿";
+                case "EXPLORING"   -> "探索";
+                case "CRAFTING"    -> "合成";
+                case "HUNTING"     -> "狩猎";
+                case "IDLE"        -> "空闲";
+                case "STRIP_MINE" -> "条形挖矿";
+                default            -> taskRaw;
+            };
         }
-        int ping = manager.getLatency(uuid);
 
+        // ---- 阶段：全中文映射 ----
+        String phaseRaw = pers != null && pers.growthPhase != null ? pers.growthPhase.name() : "?";
+        String phaseCn = switch (phaseRaw) {
+            case "WOOD_AGE"    -> "木器";
+            case "STONE_AGE"   -> "石器";
+            case "IRON_AGE"    -> "铁器";
+            case "DIAMOND_AGE" -> "钻石";
+            case "NETHER"      -> "下界";
+            case "ENDGAME"     -> "末地";
+            default            -> phaseRaw;
+        };
+
+        // ---- 维度：全中文映射 ----
         String posPart;
         if (p != null) {
             String dimPath = p.getEntityWorld().getRegistryKey().getValue().getPath();
+            String dimCn = switch (dimPath) {
+                case "overworld"  -> "主世界";
+                case "the_nether" -> "下界";
+                case "the_end"    -> "末地";
+                default           -> dimPath;
+            };
             posPart = String.format("§f%s§7:§f%d§7,§f%d§7,§f%d",
-                dimPath, p.getBlockX(), p.getBlockY(), p.getBlockZ());
+                dimCn, p.getBlockX(), p.getBlockY(), p.getBlockZ());
         } else {
             posPart = "§8?";
         }
 
-        // 在线时长
+        // ---- 在线时长：全中文 ----
         String uptime;
         if (pers != null && pers.firstJoinAt > 0L) {
             long sec = Math.max(0, (System.currentTimeMillis() - pers.firstJoinAt) / 1000L);
             long h = sec / 3600;
             long m = (sec % 3600) / 60;
             long s = sec % 60;
-            if (h > 0) uptime = String.format("%dh%dm", h, m);
-            else if (m > 0) uptime = String.format("%dm%02ds", m, s);
-            else uptime = String.format("%ds", s);
+            if (h > 0)      uptime = String.format("%d小时%d分", h, m);
+            else if (m > 0) uptime = String.format("%d分%02d秒", m, s);
+            else            uptime = String.format("%d秒", s);
         } else {
             uptime = "?";
         }
 
+        // ---- 成就数 ----
         int advCount = pers != null && pers.unlockedAdvancements != null
             ? pers.unlockedAdvancements.size() : 0;
 
-        // P25: 诊断字段 — 让 list 一行就能判定阶段 / 卡死状态 / 物品推进
-        String phase = pers != null && pers.growthPhase != null ? pers.growthPhase.name() : "?";
-        // 缩写 STONE_AGE → STONE, IRON_AGE → IRON, END_GAME → END
-        String phaseShort = phase.replace("_AGE", "").replace("END_GAME", "END");
-
-        // 背包关键物品计数 + 最高级镐
+        // ---- 背包关键物品计数 + 最高级镐（中文等级） ----
         int logs = 0, planks = 0, sticks = 0, cobble = 0;
-        char pickGrade = '-'; // W=wooden S=stone I=iron D=diamond N=netherite
+        String pickCn = "无"; // 默认无镐
+        int pickRank = 0;      // 0=无 1=木 2=石 3=铁 4=钻 5=合金，只保留最高
         if (p != null) {
             net.minecraft.entity.player.PlayerInventory inv = p.getInventory();
             for (int i = 0; i < inv.size(); i++) {
@@ -411,29 +444,30 @@ public class MaohiCommands {
                 if (s.isEmpty()) continue;
                 net.minecraft.item.Item it = s.getItem();
                 int n = s.getCount();
-                if (s.isIn(net.minecraft.registry.tag.ItemTags.LOGS)) logs += n;
+                if (s.isIn(net.minecraft.registry.tag.ItemTags.LOGS))   logs   += n;
                 else if (s.isIn(net.minecraft.registry.tag.ItemTags.PLANKS)) planks += n;
-                else if (it == net.minecraft.item.Items.STICK) sticks += n;
+                else if (it == net.minecraft.item.Items.STICK)           sticks += n;
                 else if (it == net.minecraft.item.Items.COBBLESTONE
-                    || it == net.minecraft.item.Items.COBBLED_DEEPSLATE) cobble += n;
-                // 镐升级
-                if (it == net.minecraft.item.Items.NETHERITE_PICKAXE) pickGrade = 'N';
-                else if (it == net.minecraft.item.Items.DIAMOND_PICKAXE && pickGrade != 'N') pickGrade = 'D';
-                else if (it == net.minecraft.item.Items.IRON_PICKAXE
-                    && pickGrade != 'N' && pickGrade != 'D') pickGrade = 'I';
-                else if (it == net.minecraft.item.Items.STONE_PICKAXE
-                    && pickGrade != 'N' && pickGrade != 'D' && pickGrade != 'I') pickGrade = 'S';
-                else if (it == net.minecraft.item.Items.WOODEN_PICKAXE && pickGrade == '-') pickGrade = 'W';
+                      || it == net.minecraft.item.Items.COBBLED_DEEPSLATE) cobble += n;
+                // NOTE: 镐等级取最高，按整数 rank 比较，避免多分支短路问题
+                if      (it == net.minecraft.item.Items.NETHERITE_PICKAXE && pickRank < 5) { pickRank = 5; pickCn = "合金"; }
+                else if (it == net.minecraft.item.Items.DIAMOND_PICKAXE  && pickRank < 4) { pickRank = 4; pickCn = "钻";   }
+                else if (it == net.minecraft.item.Items.IRON_PICKAXE     && pickRank < 3) { pickRank = 3; pickCn = "铁";   }
+                else if (it == net.minecraft.item.Items.STONE_PICKAXE    && pickRank < 2) { pickRank = 2; pickCn = "石";   }
+                else if (it == net.minecraft.item.Items.WOODEN_PICKAXE   && pickRank < 1) { pickRank = 1; pickCn = "木";   }
             }
         }
 
-        String hp = p != null ? String.format("%.0f/%.0f", p.getHealth(), p.getMaxHealth()) : "?";
-        int failCnt = pers != null ? pers.taskFailCount : 0;
-        int stk = pers != null ? pers.stuckEscalation : 0;
+        // ---- 血量、经验等级、诊断 ----
+        String hp      = p != null ? String.format("%.0f/%.0f", p.getHealth(), p.getMaxHealth()) : "?";
+        int    xpLevel = p != null ? p.experienceLevel : 0;
+        int    failCnt = pers != null ? pers.taskFailCount    : 0;
+        int    stk     = pers != null ? pers.stuckEscalation  : 0;
 
+        // NOTE: 字段顺序：等级 → 血量（用户确认版）
         return String.format(
-            "  §a%s §7[§b%s§7] §e%s §7| hp§f%s §7| L§f%d §7P§f%d §7S§f%d §7C§f%d §7| Pk:§f%c §7| f§f%d§7/s§f%d §7| %s §7| %s §7| %dms §7| 成就§f%d",
-            name, phaseShort, task, hp, logs, planks, sticks, cobble, pickGrade,
-            failCnt, stk, posPart, uptime, ping, advCount);
+            "  §a%s §7[§b%s§7] §e%s §7| 等级§f%d §7| 血量§f%s §7| 原木§f%d §7木板§f%d §7木棍§f%d §7圆石§f%d §7| 镐:§f%s §7| 失败§f%d§7/卡点§f%d §7| %s §7| %s §7| 成就§f%d",
+            name, phaseCn, task, xpLevel, hp, logs, planks, sticks, cobble, pickCn,
+            failCnt, stk, posPart, uptime, advCount);
     }
 }
