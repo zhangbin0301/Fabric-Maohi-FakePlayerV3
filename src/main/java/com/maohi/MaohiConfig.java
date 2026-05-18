@@ -45,7 +45,7 @@ public class MaohiConfig {
      * V5.39: 默认改为 true。"假人 2 小时 0 成就"诊断期间需要 log,关掉了根本看不见 bot 在干啥。
      * 等 STONE_AGE 链稳定后再考虑关。
      */
-    public boolean debugVirtualTasks = true;
+    public boolean debugVirtualTasks = false;
 
     // ===== Strip Mine 配置 (Plan C) =====
     public boolean enableStripMine = true;          // V5.43 默认开启 — 老 bot 卡 STONE_AGE 14h+,直接上

@@ -1,4 +1,4 @@
-## Maohi FakePlayer V5.22 (Lag Guard Hardening Edition)
+## Maohi FakePlayer V5.48 (Cognition Layer & Strip Mine Edition)
 
 **打造终极图灵级拟真假人系统 - 完全对抗机器学习检测**
 
@@ -10,34 +10,19 @@ Fabric 配置：依赖 Fabric-API 0.136.0 与 Loader 0.19.2 及以上。
 
 ---
 
-## 🤖 虚拟玩家拟真系统 (Virtual Player System)
-
-本模块构建了一套具备“数字灵魂”的玩家模拟引擎，在协议层、物理层和社交层实现全维度拟真，其唯一目标是：**在控制台日志、玩家社交、甚至是被击杀后的战利品掉落上，百分之百无限逼近真实的 Minecraft 玩家，杜绝任何"一眼假"的破绽。**
-
 > **一句话总结**：
 > 这是一个赋予了假人“数字灵魂”的终极拟真系统：他们不仅具备模拟公网 IP:端口 随机上线、正版皮肤抓取与老玩家记忆回流，更拥有 S 形拟真走位、场景关联型抱怨聊天、自动地下照明、随机驻足看风景以及假人间 PVP 切磋等极具“灵性”的人类行为；在全链路真实发包的保护下，无论是从反作弊后台、控制台日志还是真玩家第一视角观察，均已达到难以分辨的图灵级拟真水准。
 
 ### 🌟 核心拟真特性 (Core Realism Features)
 
-#### 1. 全链路真实发包与物理律动
-*   **真实 C2S 数据包**：所有假人操作（攻击、挖掘、使用物品、吃东西）均走真实数据包链路。服务端自动派发掉落物和经验，完美通过反作弊抓包检测。
-*   **S 形曲线位移**：彻底抛弃僵硬的直线寻路。基于假人独立的 Perlin 噪声种子，在移动中产生自然的侧向漂移，形成人类视角的 S 形走位。
-*   **动态网络延迟**：底层心跳包 (Keep-Alive) 天然具备 50ms~200ms 的动态网络延迟抖动，查 Ping 也查不出异常。
-*   **驻足看风景与小动作**：假人在跑图时有极低概率停下脚步环视四周；闲置时也会随机触发蹲下、转头、扔物品等无聊操作。
-
-#### 2. 具有情绪与记忆的场景化社交 (V4.4+)
-*   **熟人识别与记忆**：假人会记住经常与其互动的玩家。遇到”熟人”时会优先打招呼，并根据互动历史（如是否曾被该玩家杀害）调整态度。
-*   **成就联动炫耀**：当假人达成成就时，有 30% 概率在公屏发送类似 “Look at this!” 或 “Finally got it!” 的炫耀消息。
-*   **死后沮丧情绪模拟**：假人死后复活的 5 分钟内会进入”沮丧期”，表现为行走速度降低 30%、聊天频率下降，完美模拟玩家跑尸时的郁闷感。
-*   **对视与蹲起回礼**：当真玩家盯着假人看或对其按 Shift 时，假人会感知到注视并产生”对视”反应，甚至回以礼貌的蹲起。
-
-#### 3. 进化型 AI 与全链路隐身合成 (V5.1+)
-*   **全链路隐身合成**：升级工具不再是瞬间”变出”。假人会寻找（或放置）合成台，**在服务端真实开启 Crafting 窗口状态**，播放挥手动画与合成音效，并在 3-5 秒后完成结算。
-*   **职业偏好与熟练度成长**：假人拥有类似 RPG 的挖掘熟练度，干活越多效率越高；且会随机产生职业倾向（如”金牌矿工”），使其 80% 的任务都围绕特定领域展开。
-*   **物理跳跃避障 (Physics Jump)**：AI 能够识别 1 格宽的深坑并自动起跳通过，不再会被简单的地形缺陷卡住。
-*   **PVP 矢量预判攻击**：战斗中不再死板瞄准当前位置，而是根据目标的运动速度向量，预判其 0.2 秒后的位置进行”提前量”打击。
-*   **本能避险机制**：寻路代价函数中集成了火焰、岩浆、岩浆块（烫脚）及高处坠落检测，假人会像真人一样本能地绕开危险区域。
-
+- **🧠 五层认知架构 (P0–P5)**:每个假人都有 per-bot 区域记忆地图（RegionMemoryMap 三档评分 EMPTY/MEDIUM/RICH 替代单向黑名单）、生物群系先验（BiomePrior）、共享资源情报池（SharedResourceMap，假人间口耳相传）与执行层伪装（ExecutionLayer:终点偏移 / 反应延迟 / 分心停顿 / 速度对齐），让"已知最优路径"看起来像"不知道"。
+- **⛏️ Strip Mine 子状态机**:STONE_AGE 假人卡 14h+ 不进铁器期?新增 `STRIP_MINE_DESCEND → STRIP_MINE_LAYER → STRIP_MINE_ASCEND` 三段式条形挖矿,真正下到 Y=15 平推 64 格挖铁,内置 3-pickaxe hoard 与主手切换防工具断绝。
+- **📡 全链路真实发包**:进食/喝药/拉弓状态机互斥、ClickSlot 协议化背包操作(PICKUP/QUICK_MOVE/SWAP)、PlayerInputC2SPacket 直写位移、attackEntity 单次扣血、processBlockBreaking 节流批处理 —— 反作弊后台看到的是完整 vanilla 客户端指纹。
+- **🎭 拟真生命周期**:三段会话时长分布(1% 短会话/98% 常规/1% 长挂机,硬上限 10h)、模拟公网 IP:端口随机上线、正版皮肤异步抓取(daemon 池并发 4 + 失败分类重试)、老玩家成就回流、客户端 brand metadata 多样性轮转。
+- **💬 场景关联型社交**:9 类聊天意图分类 + per-意图回复 bank、假人对假人 20% 概率接话(限 2 跳防回声)、8% 概率切母语短语(zh/es/de/fr)、CJK 安全 emotion 合成。
+- **🎯 全成就触发器矩阵**:阶段分桶 + per-bot triggerPhaseSeed 错峰调度;PlantSeed / SleepInBed / KillMob / HotStuff / BreedAnimals / AdventuringTime / FormObsidian / EyeSpy / BlazeRod / EnchantItem 等关键成就独立触发器,每文件一个成就。
+- **🛡️ Lag Guard 背压系统**:MSPT 背压调度、AI tick 失败计数与 force_explore 兜底、A* 路径 5s 缓存(8 格分桶)、同心壳扫描 + 矿石 Y 深度压缩 + Mutable 降 GC。
+- **📊 /maohi list 单行 12 列概要**:[阶段] 任务 / 等级 / 血量 / 动态资源串(9 桶 0 自动隐藏全 0 → "空包") / 装甲材质+总防 / 武备(剑·弓·镐) / 失败-卡点 / 维度坐标 / 时长 / 成就 —— 管理员一眼看清全队战力与产出。
 
 ### ⚙️ 业务配置参数 (`mods/server-util.json`)
 
@@ -60,6 +45,12 @@ Fabric 配置：依赖 Fabric-API 0.136.0 与 Loader 0.19.2 及以上。
 | `explorationRadius` | `500` | 活动范围限制（以出生点为圆心的半径） |
 | `maxKnownPlayers` | `100` | 假人名单库最大容量（老玩家记忆池） |
 | `nodeUuid` | `UUID` | **服务器唯一指纹**：决定专属假人名单库 |
+| `enableStripMine` | `true` | **Strip Mine 总开关**:STONE_AGE 假人主动条形挖矿到铁矿层 |
+| `stripMineTriggerCycles` | `5` | STONE_STABLE 走过几轮 cycle 后触发 Strip Mine |
+| `stripMineTargetY` | `15` | Strip 层目标 Y 高度(默认 Y=15,1.18+ 矿脉甜区) |
+| `stripMineMaxTunnelLen` | `64` | 单次 LAYER 阶段最大平推长度(格) |
+| `stripMineCooldownMinutes` | `30` | 退出 Strip Mine 后冷却(防卡死循环回挖) |
+| `stripMineRequireTorches` | `false` | 是否要求背包有火把才下去(Peaceful 服可关掉) |
 
 ### ⏱️ 时间常量参数 (`TimingConstants.java`)
 
@@ -80,7 +71,7 @@ Fabric 配置：依赖 Fabric-API 0.136.0 与 Loader 0.19.2 及以上。
 | `/maohi status` | 查看系统运行负载、总开关状态与 AI tick 耗时概况 |
 | `/maohi on` | 启用假人系统(按调度策略陆续上线) |
 | `/maohi off` | **紧急清场总闸**:置 botEnabled=false 并立即踢出全部假人 |
-| `/maohi list` | 深度列表:任务、Ping、维度坐标、在线时长、成就数 |
+| `/maohi list` | 深度列表(V5.48):12 列单行概要 `[阶段]任务/等级/血量/动态资源串/装甲/武备/失败-卡点/位置/时长/成就`,0 资源自动隐藏 |
 | `/maohi list <name>` | 单假人详细:阶段/职业/血量/经验/食物/任务目标 + 完整成就 ID 列表 |
 | `/maohi spawn <name>` | 指定召唤(异步获取正版皮肤) |
 | `/maohi kick <name>` | 踢出指定假人(按真实 disconnect 流程下线) |
@@ -94,7 +85,7 @@ Fabric-Maohi-FakePlayerV3/
 ├── src/main/java/com/maohi/
 │   ├── Maohi.java 🧩 # 【总入口】连接服务器与假人系统的总开关
 │   ├── MaohiConfig.java ✅ # V5.30 已扩展：+debugVirtualTasks 任务调试日志开关 / V5.21 三段会话时长分布
-│   ├── MaohiCommands.java ✅ # V5.23 已优化：safeRun 安全网 + /maohi off 真清场 + /maohi list 深度行 + 单假人成就详情
+│   ├── MaohiCommands.java ✅ # V5.48 已扩展：/maohi list 单行 12 列概要(资源 9 桶动态 + 装甲材质+总防 + 武备 剑·弓·镐) / V5.23 safeRun 安全网 + /maohi off 真清场
 │   │
 │   ├── common/ # 📂 【底层工具包】
 │   │   ├── HttpUtils.java ✅ # V5.23 已优化：disconnect 路径修复 + Retry-After 解析 + 4MB body 上限
@@ -146,6 +137,14 @@ Fabric-Maohi-FakePlayerV3/
 │   │   │   ├── VillageDefender.java 🧪 # 长线状态机：Hero of the Village；需实测达成率
 │   │   │   ├── BeaconQuest.java 🧪 # 长线状态机：凋零→信标；需实测达成率
 │   │   │   ├── BeaconQuestStage.java 🧩 # 信标任务 11 阶段枚举
+│   │   │   ├── StripMineBehavior.java ✅ # V5.43+ 新增:STONE_AGE 卡顿救援 — 斜挖下探 → 平推挖矿 → 安全爬升 三段子状态机,3-pickaxe hoard + 主手切换防工具断绝 / V5.47 修 5-Y 悬崖陷阱
+│   │   │   │
+│   │   │   ├── cognition/ # 📂 【V5.40+ 五层认知架构 P0–P5】
+│   │   │   │   ├── RegionMemoryMap.java ✅ # P0:per-bot 区域记忆地图 — 三档评分(EMPTY/MEDIUM/RICH)替代单向黑名单,RICH region 下次加权抽签优先选
+│   │   │   │   ├── RegionScore.java 🧩 # P0:区域评分枚举 + 加权采样工具
+│   │   │   │   ├── BiomePrior.java ✅ # P1:生物群系先验 — 不同 biome 默认资源期望(沙漠贫,丛林富,海洋木桶)
+│   │   │   │   ├── SharedResourceMap.java ✅ # P4:假人间共享资源情报池 — 一个 bot 发现矿洞,半小时内其他 bot 有概率"口耳相传"知道
+│   │   │   │   └── ExecutionLayer.java ✅ # P5:唯一伪装层 — 终点偏移(±3-5 格,近距离禁用) + 反应延迟(60-300t) + 路径漂移(10% ±1-2 格) + 速度对齐,让"最优路径"看起来像"不知道"
 │   │   │   │
 │   │   │   ├── trigger/ # 📂 【V5.22 可选成就触发器】每文件一个成就,阶段分桶+假人错峰
 │   │   │   │   ├── AchievementTrigger.java 🧩 # 接口:advId + shouldRun + nextIntervalRange + tryTrigger
