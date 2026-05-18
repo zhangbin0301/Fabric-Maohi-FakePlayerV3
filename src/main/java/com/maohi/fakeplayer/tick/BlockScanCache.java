@@ -101,8 +101,17 @@ public final class BlockScanCache {
 			//
 			// 副作用:bot 永远只能找眼前 ±5 Y 的树。但这正符合 STONE_AGE 物理能力,
 			//   也消除了"看得到却拿不到"的循环。
+			//
+			// V5.47 修复:yMax 5 → 4。对齐 doSmartMove arrival 阈值 |dy|≤4(MovementController:199)。
+			//   日志证据(14:12-14:17, 5 分钟): 8 bot 总共 ~30 次 move_diag,其中 ~20 条 dy=5.5
+			//   ~6 条 dy=6.5,加 V5.46 对角爬阶都无法救场 — 5/6 Y 高差超过 vanilla 跳跃 +
+			//   handleMiningTask outer gate (3D dist²≤25),bot 走到树底正下方 moved30s 仍 0。
+			//   极端 case: HunterFrost (14:16:51) distSq=0.61 dy=5.5 → xz 完美贴脸,但 dy 双重
+			//   阈值都跨不过,永卡。
+			//   yMax=4 让 scan 直接不扫 +5 Y 的树,bot 早期 setExplore 远征到爬得上的位置再扫。
+			//   yMin 保 -5 不动(下落允许,无问题)。
 			yMin = -5;
-			yMax = 5;
+			yMax = 4;
 		} else {
 			yMin = -2;
 			yMax = 2;

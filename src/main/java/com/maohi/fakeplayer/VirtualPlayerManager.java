@@ -1698,15 +1698,44 @@ prepareAndSpawnVirtualPlayer();
         //   修复: CRAFTING 状态下 reassignDue=false,tickCrafting 自由跑到归零或 60s wall-clock
         //     兜底超时 (P-3.A taskExpireTime 已扩到 60s buffer,真卡死 60s 后 reassign 才接管)。
         long serverTicks = server.getTicks();
+        // V5.47.1: WOODCUTTING/MINING target 比 bot 高 > 5 格 → 视同 task fail 提前放行 reassign。
+        //   背景: PandaTiny case (8171c2d 跑测 15:56:08-15:56:38) target=(-13, 94, 20) dy=6.5,
+        //     bot.y=87.5 (跌入山谷); WOODCUTTING task taskExpireTime 用 TICK_TIMEOUT_WORK=2400 ticks
+        //     (120s),锁死 2 分钟期间 reassign gate 不过 → bot 反复朝够不到的树走 → moved30s 接近 0。
+        //     V5.46 yMax=5 / V5.47 yMax=4 收紧 scan 范围,但老 taskTarget 仍可能从更高 bot.y 时
+        //     被选中后跨越 fall 进入 stale 状态 (此案 bot 原 y≈89 时选到 y=94,跌到 y=87 才显形)。
+        //   修复: dy>5(高过 yMax+1 缓冲) 视为永久不可达,跳过 120s 等待 → 立刻 reassign。
+        //     5 不是 4 是给 V5.46 yMax=5 时代留 0 buffer 容忍,V5.47 yMax=4 后实际上限 4 完全无误判。
+        //   语义: 仅看"target 在 bot 上方过远"。target 在下方 (mining ore Y < bot.Y) 不触发 — bot
+        //     可以下落或 down(3) 邻居解决,不应被本条阻塞。
+        boolean targetTooHighVertical = personality.taskTarget != null
+            && (personality.currentTask == TaskType.WOODCUTTING || personality.currentTask == TaskType.MINING)
+            && (personality.taskTarget.getY() - p.getBlockY() > 5);
         boolean reassignDue = (tickNow - personality.lastReassignAt) >= 5_000L
             && personality.currentTask != TaskType.CRAFTING
-            && (personality.currentTask == TaskType.IDLE || serverTicks > personality.taskExpireTime);
+            && (personality.currentTask == TaskType.IDLE
+                || serverTicks > personality.taskExpireTime
+                || targetTooHighVertical);
         if (reassignDue) {
             personality.lastReassignAt = tickNow;
+            // V5.47.1: target_too_high 单独算一类 fail,不混进 expired 路径(便于诊断/分类统计)。
+            //   走黑名单 + recordTaskFailure,与 expired/blocked_no_path/reach_too_far 同等级处理。
+            if (targetTooHighVertical) {
+                com.maohi.fakeplayer.TaskLogger.log(p, "task_fail",
+                    "reason", "target_too_high", "task", personality.currentTask,
+                    "target", personality.taskTarget,
+                    "dy", personality.taskTarget.getY() - p.getBlockY(),
+                    "fails", personality.taskFailCount + 1);
+                com.maohi.fakeplayer.TaskMetrics.countTaskFail(p.getUuid(), "target_too_high");
+                Personality.recordTaskFailure(personality, personality.taskTarget);
+                personality.failedTargets.put(personality.taskTarget,
+                    System.currentTimeMillis() + 60_000L);
+            }
             // V5.30 任务失败计数:任务过期但仍非 IDLE → 算一次未完成失败
             //   (IDLE 进入分支是正常 idle→reassign,不计失败)
             // V5.40 PICKUP_DROP 是软超时(3s 等 vanilla 拾取),expire 是预期路径,不算 fail。
-            if (personality.currentTask != TaskType.IDLE
+            // V5.47.1: targetTooHighVertical 路径已在上面单独 log+计数,避免在此处重复打 expired。
+            else if (personality.currentTask != TaskType.IDLE
                 && personality.currentTask != TaskType.PICKUP_DROP
                 && personality.taskTarget != null
                 && serverTicks > personality.taskExpireTime) {
@@ -1905,7 +1934,24 @@ prepareAndSpawnVirtualPlayer();
                 //     8 分钟 4 次 WOODCUTTING 全 fail 0 次 mine_start, force_explore 才解锁。
                 //   阈值 25 = 5 格 squared, vanilla survival reach 4.5 格 (squared=20.25) 留 25% 余量。
                 //   handleMiningTask 内部仍走 raycast/距离校验, 阈值放宽不会让 bot 隔空挖。
-                if (dist <= 25.0) {
+                //
+                // V5.47 修复: 3D `dist² <= 25` (脚位距离) 改为 eye→target-center reach²。
+                //   背景: HunterFrost case (14:16:51 跑测日志) xz²=0.61 dy=5.5 → 3D distSq=30.86 > 25
+                //   → 不进 mining state; doSmartMove arrival |dy|≤4 也不满足 → bot xz 完美贴树根
+                //   但永远 moved30s≈0 卡 WOODCUTTING 不动。实际 eye-to-target reach=sqrt(0.61+3.88²)
+                //   ≈ 3.96 < vanilla 4.5,完全能挖到。
+                //   修复: outer gate 直接算 vanilla reach (eye = bot.y + 1.62; target center = +0.5),
+                //   reachSq ≤ 25 (5 格² = vanilla 4.5 + 0.5 buffer) 进 mining state。内部
+                //   handleMiningTask 还有 reachDist > 4.5 二次校验, 不会让 bot 隔空挖。
+                //   反向收益: Kevin_2008 STONE_AGE (14:17:05) reach=5.33 dy=-3.12 case 现在
+                //   reachSq ≈ 28.4 > 25 直接不进 mining,免去 reach_too_far 浪费 1 次 fail count,
+                //   bot 继续走近后再触发。
+                double eyeY = p.getY() + 1.62;
+                double rdx = personality.taskTarget.getX() + 0.5 - p.getX();
+                double rdy = personality.taskTarget.getY() + 0.5 - eyeY;
+                double rdz = personality.taskTarget.getZ() + 0.5 - p.getZ();
+                double reachSq = rdx*rdx + rdy*rdy + rdz*rdz;
+                if (reachSq <= 25.0) {
                     handleMiningTask(p, personality);
                 }
             } else if (personality.currentTask == TaskType.HUNTING) {
