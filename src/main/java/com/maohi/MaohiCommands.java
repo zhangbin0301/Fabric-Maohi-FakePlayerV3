@@ -433,10 +433,19 @@ public class MaohiCommands {
         int advCount = pers != null && pers.unlockedAdvancements != null
             ? pers.unlockedAdvancements.size() : 0;
 
-        // ---- 背包关键物品计数 + 最高级镐（中文等级） ----
-        int logs = 0, planks = 0, sticks = 0, cobble = 0;
-        String pickCn = "无"; // 默认无镐
-        int pickRank = 0;      // 0=无 1=木 2=石 3=铁 4=钻 5=合金，只保留最高
+        // ---- 背包资源统计 + 镐/剑/弓 等级（中文等级，0=无 1=木 2=石 3=铁 4=钻 5=合金） ----
+        // V5.48: 扩大资源扫描清单 + 装甲/武备显式化。
+        //   原行为: 写死 4 列原木/木板/木棍/圆石,即使全 0 也占聊天行宽,中高期 bot 反而看不到自己的铁/钻/合金。
+        //   新行为: 9 个桶(含 5 个新增矿物),高价值排前,0 自动隐藏,全 0 显示"空包"。
+        //   新增装甲列: 4 装备槽材质集合 + getArmor() 总防,单材质 "铁(15防)"、多材质 "铁/金混(8防)"。
+        //   新增武备列: 剑/[弓 仅有时显]/镐,消化掉原 "镐:" 列。
+        int logs=0, planks=0, sticks=0, cobble=0;
+        int coal=0, iron=0, gold=0, diamond=0, netherite=0;
+        String pickCn = "无", swordCn = "无";
+        // 等级 10×:wood=10 / gold=15 / stone=20 / iron=30 / diamond=40 / netherite=50。
+        //   10× 而非 1-5 是为了给 gold 留 1.5 档(攻速/durability 介于木与石之间,真人不爱用但 bot 可能合)。
+        int pickRank = 0, swordRank = 0;
+        boolean hasBow = false;
         if (p != null) {
             net.minecraft.entity.player.PlayerInventory inv = p.getInventory();
             for (int i = 0; i < inv.size(); i++) {
@@ -444,19 +453,97 @@ public class MaohiCommands {
                 if (s.isEmpty()) continue;
                 net.minecraft.item.Item it = s.getItem();
                 int n = s.getCount();
+                // 木系基础资源
                 if (s.isIn(net.minecraft.registry.tag.ItemTags.LOGS))   logs   += n;
                 else if (s.isIn(net.minecraft.registry.tag.ItemTags.PLANKS)) planks += n;
                 else if (it == net.minecraft.item.Items.STICK)           sticks += n;
                 else if (it == net.minecraft.item.Items.COBBLESTONE
                       || it == net.minecraft.item.Items.COBBLED_DEEPSLATE) cobble += n;
-                // NOTE: 镐等级取最高，按整数 rank 比较，避免多分支短路问题
-                if      (it == net.minecraft.item.Items.NETHERITE_PICKAXE && pickRank < 5) { pickRank = 5; pickCn = "合金"; }
-                else if (it == net.minecraft.item.Items.DIAMOND_PICKAXE  && pickRank < 4) { pickRank = 4; pickCn = "钻";   }
-                else if (it == net.minecraft.item.Items.IRON_PICKAXE     && pickRank < 3) { pickRank = 3; pickCn = "铁";   }
-                else if (it == net.minecraft.item.Items.STONE_PICKAXE    && pickRank < 2) { pickRank = 2; pickCn = "石";   }
-                else if (it == net.minecraft.item.Items.WOODEN_PICKAXE   && pickRank < 1) { pickRank = 1; pickCn = "木";   }
+                // V5.48 矿物战略资源(含生矿,与冶炼前后通算)
+                else if (it == net.minecraft.item.Items.COAL)            coal += n;
+                else if (it == net.minecraft.item.Items.IRON_INGOT
+                      || it == net.minecraft.item.Items.RAW_IRON)        iron += n;
+                else if (it == net.minecraft.item.Items.GOLD_INGOT
+                      || it == net.minecraft.item.Items.RAW_GOLD)        gold += n;
+                else if (it == net.minecraft.item.Items.DIAMOND)         diamond += n;
+                else if (it == net.minecraft.item.Items.NETHERITE_INGOT
+                      || it == net.minecraft.item.Items.NETHERITE_SCRAP) netherite += n;
+                // 镐等级取最高
+                if      (it == net.minecraft.item.Items.NETHERITE_PICKAXE && pickRank < 50) { pickRank = 50; pickCn = "合金"; }
+                else if (it == net.minecraft.item.Items.DIAMOND_PICKAXE   && pickRank < 40) { pickRank = 40; pickCn = "钻";   }
+                else if (it == net.minecraft.item.Items.IRON_PICKAXE      && pickRank < 30) { pickRank = 30; pickCn = "铁";   }
+                else if (it == net.minecraft.item.Items.STONE_PICKAXE     && pickRank < 20) { pickRank = 20; pickCn = "石";   }
+                else if (it == net.minecraft.item.Items.GOLDEN_PICKAXE    && pickRank < 15) { pickRank = 15; pickCn = "金";   }
+                else if (it == net.minecraft.item.Items.WOODEN_PICKAXE    && pickRank < 10) { pickRank = 10; pickCn = "木";   }
+                // V5.48 剑等级取最高(同 ladder)
+                if      (it == net.minecraft.item.Items.NETHERITE_SWORD && swordRank < 50) { swordRank = 50; swordCn = "合金"; }
+                else if (it == net.minecraft.item.Items.DIAMOND_SWORD   && swordRank < 40) { swordRank = 40; swordCn = "钻";   }
+                else if (it == net.minecraft.item.Items.IRON_SWORD      && swordRank < 30) { swordRank = 30; swordCn = "铁";   }
+                else if (it == net.minecraft.item.Items.STONE_SWORD     && swordRank < 20) { swordRank = 20; swordCn = "石";   }
+                else if (it == net.minecraft.item.Items.GOLDEN_SWORD    && swordRank < 15) { swordRank = 15; swordCn = "金";   }
+                else if (it == net.minecraft.item.Items.WOODEN_SWORD    && swordRank < 10) { swordRank = 10; swordCn = "木";   }
+                // V5.48 弓/弩存在性(等级不区分)
+                if (it == net.minecraft.item.Items.BOW || it == net.minecraft.item.Items.CROSSBOW) hasBow = true;
             }
         }
+
+        // ---- V5.48 资源串拼装(高价值前,0 自动隐藏,全 0 → "空包") ----
+        StringBuilder rsb = new StringBuilder();
+        if (netherite > 0) rsb.append("合金").append(netherite).append(' ');
+        if (diamond   > 0) rsb.append("钻石").append(diamond).append(' ');
+        if (gold      > 0) rsb.append("金").append(gold).append(' ');
+        if (iron      > 0) rsb.append("铁").append(iron).append(' ');
+        if (coal      > 0) rsb.append("煤").append(coal).append(' ');
+        if (cobble    > 0) rsb.append("圆石").append(cobble).append(' ');
+        if (logs      > 0) rsb.append("原木").append(logs).append(' ');
+        if (planks    > 0) rsb.append("木板").append(planks).append(' ');
+        if (sticks    > 0) rsb.append("木棍").append(sticks).append(' ');
+        String resourceStr = rsb.length() == 0 ? "空包" : rsb.toString().trim();
+
+        // ---- V5.48 装甲扫描: 4 槽 → 材质集合 + getArmor() 总防 ----
+        String armorStr;
+        if (p != null) {
+            java.util.Set<String> armorMaterials = new java.util.LinkedHashSet<>();
+            for (net.minecraft.entity.EquipmentSlot slot : new net.minecraft.entity.EquipmentSlot[]{
+                    net.minecraft.entity.EquipmentSlot.HEAD,
+                    net.minecraft.entity.EquipmentSlot.CHEST,
+                    net.minecraft.entity.EquipmentSlot.LEGS,
+                    net.minecraft.entity.EquipmentSlot.FEET}) {
+                net.minecraft.item.ItemStack a = p.getEquippedStack(slot);
+                if (a.isEmpty()) continue;
+                String id = net.minecraft.registry.Registries.ITEM.getId(a.getItem()).getPath();
+                if      (id.startsWith("netherite_")) armorMaterials.add("合金");
+                else if (id.startsWith("diamond_"))   armorMaterials.add("钻");
+                else if (id.startsWith("iron_"))      armorMaterials.add("铁");
+                else if (id.startsWith("chainmail_")) armorMaterials.add("锁链");
+                else if (id.startsWith("golden_"))    armorMaterials.add("金");
+                else if (id.startsWith("leather_"))   armorMaterials.add("皮");
+                else if (id.startsWith("turtle_"))    armorMaterials.add("海龟");
+            }
+            if (armorMaterials.isEmpty()) {
+                armorStr = "裸奔";
+            } else {
+                // 按预定 ladder 排序(高 → 低)显示
+                String[] order = {"合金", "钻", "铁", "锁链", "金", "海龟", "皮"};
+                java.util.List<String> sorted = new java.util.ArrayList<>();
+                for (String m : order) if (armorMaterials.contains(m)) sorted.add(m);
+                int prot = p.getArmor();
+                if (sorted.size() == 1) {
+                    armorStr = String.format("%s(%d防)", sorted.get(0), prot);
+                } else {
+                    armorStr = String.format("%s混(%d防)", String.join("/", sorted), prot);
+                }
+            }
+        } else {
+            armorStr = "?";
+        }
+
+        // ---- V5.48 武备串: 剑/[弓 仅有时显]/镐 ----
+        StringBuilder wsb = new StringBuilder();
+        wsb.append(swordRank > 0 ? swordCn + "剑" : "无");
+        if (hasBow) wsb.append("/弓");
+        wsb.append('/').append(pickRank > 0 ? pickCn + "镐" : "无");
+        String weaponStr = wsb.toString();
 
         // ---- 血量、经验等级、诊断 ----
         String hp      = p != null ? String.format("%.0f/%.0f", p.getHealth(), p.getMaxHealth()) : "?";
@@ -464,10 +551,10 @@ public class MaohiCommands {
         int    failCnt = pers != null ? pers.taskFailCount    : 0;
         int    stk     = pers != null ? pers.stuckEscalation  : 0;
 
-        // NOTE: 字段顺序：等级 → 血量（用户确认版）
+        // NOTE: 字段顺序：等级 → 血量 → 资源 → 装甲 → 武备 → 失败/卡点 → 位置 → 在线 → 成就
         return String.format(
-            "  §a%s §7[§b%s§7] §e%s §7| 等级§f%d §7| 血量§f%s §7| 原木§f%d §7木板§f%d §7木棍§f%d §7圆石§f%d §7| 镐:§f%s §7| 失败§f%d§7/卡点§f%d §7| %s §7| %s §7| 成就§f%d",
-            name, phaseCn, task, xpLevel, hp, logs, planks, sticks, cobble, pickCn,
+            "  §a%s §7[§b%s§7] §e%s §7| 等级§f%d §7| 血量§f%s §7| §f%s §7| 装甲:§f%s §7| 武备:§f%s §7| 失败§f%d§7/卡点§f%d §7| %s §7| %s §7| 成就§f%d",
+            name, phaseCn, task, xpLevel, hp, resourceStr, armorStr, weaponStr,
             failCnt, stk, posPart, uptime, advCount);
     }
 }
