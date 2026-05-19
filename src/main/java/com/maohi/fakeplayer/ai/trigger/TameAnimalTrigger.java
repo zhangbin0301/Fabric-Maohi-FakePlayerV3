@@ -3,7 +3,7 @@ package com.maohi.fakeplayer.ai.trigger;
 import com.maohi.fakeplayer.Personality;
 import com.maohi.fakeplayer.TaskType;
 import com.maohi.fakeplayer.network.PacketHelper;
-import net.minecraft.entity.mob.MobEntity;
+import net.minecraft.entity.passive.AnimalEntity;
 import net.minecraft.entity.passive.CatEntity;
 import net.minecraft.entity.passive.WolfEntity;
 import net.minecraft.entity.player.PlayerInventory;
@@ -86,7 +86,7 @@ public final class TameAnimalTrigger implements AchievementTrigger {
 	/** 共用收尾:走过去 → 切饲料 → 朝目标 → 连续 interactMob 最多 8 次 → 挥手 */
 	private static boolean feedAndInteract(ServerPlayerEntity player, Personality personality,
 	                                       PlayerInventory inv, net.minecraft.item.Item food,
-	                                       MobEntity target) {
+	                                       AnimalEntity target) {
 		double distSq = player.squaredDistanceTo(target);
 		if (distSq > 9.0) {
 			personality.taskTarget = target.getBlockPos();
@@ -109,11 +109,14 @@ public final class TameAnimalTrigger implements AchievementTrigger {
 		//   每次 1/3 成功几率,成功后 vanilla 内部 isTamed=true,后续调用 short-circuit return
 		//   (vanilla WolfEntity.interactMob 第一行就检查 isTamed,已驯则不消耗骨头 + 不走 tame 逻辑)。
 		//   roll 失败也消耗 1 骨头(vanilla 内部 stack.decrement),所以最多消耗 8 个骨头(罕见全失败时)。
+		// V5.53.1: 1.21.11 yarn AnimalEntity 上 interactMob 退回 protected,这里用 public Entity.interact
+		//   走同一路径(MobEntity.interact 内部转发到 interactMob,bone/fish 非 leash/spawn-egg 不会被
+		//   前置分支拦截),语义等价。
 		int foodCount = countItem(inv, food);
 		int maxTries = Math.min(foodCount, 8);
 		for (int i = 0; i < maxTries; i++) {
 			if (isTamed(target)) break; // vanilla 已 setOwner,提前停
-			target.interactMob(player, Hand.MAIN_HAND);
+			target.interact(player, Hand.MAIN_HAND);
 			player.swingHand(Hand.MAIN_HAND, true);
 		}
 
@@ -134,7 +137,7 @@ public final class TameAnimalTrigger implements AchievementTrigger {
 	}
 
 	/** 检查 WolfEntity / CatEntity 是否已驯服(用于循环早停) */
-	private static boolean isTamed(MobEntity target) {
+	private static boolean isTamed(AnimalEntity target) {
 		if (target instanceof WolfEntity w) return w.isTamed();
 		if (target instanceof CatEntity c) return c.isTamed();
 		return false; // 未知类型当作未 tamed,继续 try(由 maxTries 上限兜底防溢出)
@@ -157,7 +160,7 @@ public final class TameAnimalTrigger implements AchievementTrigger {
 		return nearest(player, cats);
 	}
 
-	private static <T extends MobEntity> T nearest(ServerPlayerEntity player, List<T> candidates) {
+	private static <T extends AnimalEntity> T nearest(ServerPlayerEntity player, List<T> candidates) {
 		T best = null;
 		double bestSq = Double.MAX_VALUE;
 		for (T e : candidates) {
