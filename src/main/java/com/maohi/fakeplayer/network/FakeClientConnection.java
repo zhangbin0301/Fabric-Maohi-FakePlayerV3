@@ -26,12 +26,19 @@ public class FakeClientConnection extends ClientConnection {
 	public FakeClientConnection() {
 	super(NetworkSide.SERVERBOUND);
 
-	// 生成一个看起来真实的公网 IP（避开保留网段 10.x, 127.x, 192.168.x 等）
+	// V5.54: 生成一个真正避开保留网段的伪公网 IP。
+	//   旧实现 ip1 ∈ [20, 219] 仅排除 0-19 / 220-255,但 127.x(回环) / 169.254.x(link-local) /
+	//   172.16-31.x(私网 B) / 192.168.x(私网 C) 都落在 [20,219] 内,~10% 概率生成私网/回环 IP
+	//   登录公网服务器,反作弊扫日志一眼可疑。这里 reject 后重 roll,最多 8 次(实测概率极低)。
 	java.util.concurrent.ThreadLocalRandom random = java.util.concurrent.ThreadLocalRandom.current();
-	int ip1 = random.nextInt(200) + 20;
-	int ip2 = random.nextInt(255);
-	int ip3 = random.nextInt(255);
-	int ip4 = random.nextInt(254) + 1;
+	int ip1, ip2, ip3, ip4;
+	int rollGuard = 8;
+	do {
+		ip1 = random.nextInt(200) + 20;     // [20, 219]
+		ip2 = random.nextInt(255);
+		ip3 = random.nextInt(255);
+		ip4 = random.nextInt(254) + 1;
+	} while (--rollGuard > 0 && isReservedIp(ip1, ip2, ip3));
 	int port = random.nextInt(40000) + 10000;
 	this.fakeAddress = new java.net.InetSocketAddress(ip1 + "." + ip2 + "." + ip3 + "." + ip4, port);
 
@@ -56,6 +63,20 @@ public class FakeClientConnection extends ClientConnection {
         // 使用 Access Widener 赋予的权限直接注入，彻底告别反射，保证跨版本稳定性
         this.channel = embeddedChannel;
         this.address = fakeAddress;
+    }
+
+    /** V5.54: 私网 / 回环 / link-local / 多播 / 文档段 等保留 IPv4 网段判定,用于 IP 生成 reject 重 roll。 */
+    private static boolean isReservedIp(int a, int b, int c) {
+        if (a == 10) return true;                              // 10.0.0.0/8 私网 A
+        if (a == 127) return true;                             // 127.0.0.0/8 回环
+        if (a == 169 && b == 254) return true;                 // 169.254.0.0/16 link-local
+        if (a == 172 && b >= 16 && b <= 31) return true;       // 172.16.0.0/12 私网 B
+        if (a == 192 && b == 168) return true;                 // 192.168.0.0/16 私网 C
+        if (a == 192 && b == 0 && c == 2) return true;         // 192.0.2.0/24 文档示例 TEST-NET-1
+        if (a == 198 && b == 51 && c == 100) return true;      // 198.51.100.0/24 文档示例 TEST-NET-2
+        if (a == 203 && b == 0 && c == 113) return true;       // 203.0.113.0/24 文档示例 TEST-NET-3
+        if (a == 100 && b >= 64 && b <= 127) return true;      // 100.64.0.0/10 CGNAT(合法公网但反作弊也常拉黑)
+        return false;
     }
 
     public void disableAutoRead() {
@@ -170,7 +191,13 @@ public class FakeClientConnection extends ClientConnection {
     }
 
     // 适配 1.20+ 的新版 API
+    // V5.54: 响应 server.properties log-ips 参数 — vanilla 在 log-ips=false 时返回固定脱敏字符串
+    //   (不含 IP),假人如果永远返回完整 IP,服主关 log-ips 后真人日志没 IP 假人却有,反差暴露。
+    //   委托 vanilla 父类实现:this.address 在构造时已被赋值为 fakeAddress(line 58),父类的脱敏
+    //   分支会拿这个 fakeAddress 走标准路径 → logIps=true 返完整 IP / false 返 vanilla 真人同款
+    //   脱敏文案,跨 yarn 版本字符串变化时也跟着 vanilla 自动对齐,不再硬编码。
+    @Override
     public String getAddressAsString(boolean logIps) {
-        return fakeAddress.toString();
+        return super.getAddressAsString(logIps);
     }
 }

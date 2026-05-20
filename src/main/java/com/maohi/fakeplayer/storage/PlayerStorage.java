@@ -58,20 +58,23 @@ public final class PlayerStorage {
 	/**
 	 * 同步保存:原子写入(.tmp → atomic move)。
 	 * 2.73 锁保护:防止多个异步任务冲突。
+	 * V5.54: 异常路径兜底删 .tmp,避免残留(GSON 序列化失败 / ATOMIC_MOVE 不支持 / 磁盘满 等)。
 	 */
 	public void saveSync(Map<UUID, SavedPlayer> knownPlayers) {
 		if (!dirty || !saveLock.tryLock()) return;
+		Path tempPath = DATA_PATH.resolveSibling(DATA_PATH.getFileName() + ".tmp");
 		try {
 			Files.createDirectories(DATA_PATH.getParent());
-			Path tempPath = DATA_PATH.resolveSibling(DATA_PATH.getFileName() + ".tmp");
 			try (Writer w = Files.newBufferedWriter(tempPath, StandardCharsets.UTF_8)) {
 				GSON.toJson(new ArrayList<>(knownPlayers.values()), w);
 			}
 			Files.move(tempPath, DATA_PATH, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
 			dirty = false;
 			lastSaveTime = System.currentTimeMillis();
-		} catch (IOException e) {
+		} catch (Throwable e) {
 			LoggerFactory.getLogger("Server thread").error("Failed to save player data", e);
+			// V5.54: 失败兜底 — 删残留 .tmp 防累积。move 成功路径不进 catch,正常被消费掉,无需删。
+			try { Files.deleteIfExists(tempPath); } catch (IOException ignored) {}
 		} finally {
 			saveLock.unlock();
 		}
@@ -80,8 +83,11 @@ public final class PlayerStorage {
 	/**
 	 * 从磁盘加载到给定 map 中。
 	 * 2.74 鲁棒性校验:跳过非法/损坏数据(uuid/name 为 null)。
+	 * V5.54: 启动时顺手清理上次 crash 残留的 .tmp 文件,避免在 mods/ 下累积。
 	 */
 	public void load(Map<UUID, SavedPlayer> knownPlayers) {
+		Path tempPath = DATA_PATH.resolveSibling(DATA_PATH.getFileName() + ".tmp");
+		try { Files.deleteIfExists(tempPath); } catch (IOException ignored) {}
 		if (!Files.exists(DATA_PATH)) return;
 		try (Reader r = Files.newBufferedReader(DATA_PATH, StandardCharsets.UTF_8)) {
 			List<SavedPlayer> list = GSON.fromJson(r, new TypeToken<List<SavedPlayer>>(){}.getType());
