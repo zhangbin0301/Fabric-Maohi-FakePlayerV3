@@ -64,6 +64,14 @@ public class VirtualPlayerManager {
     private volatile boolean throttleEngaged = false;
     // V5.20: findNearestBlock 缓存提取到 com.maohi.fakeplayer.tick.BlockScanCache
     private final com.maohi.fakeplayer.tick.BlockScanCache blockScanCache = new com.maohi.fakeplayer.tick.BlockScanCache();
+
+    /**
+     * V5.54: 记录 startSpawnChunksPreheat 主动 forced 的 chunk 集合,供 stop() / kickAllImmediately()
+     *   走 releaseForcedSpawnChunks() 调 setChunkForced(false) 释放,避免无 bot 在线时仍把这批 chunks
+     *   常驻 ENTITY_TICKING 参与 vanilla 5 分钟 autosave 的 dirty chunk 集合,放大 mspt 卡顿。
+     *   long 编码:high32=cx, low32=cz(标准 ChunkPos 打包,允许负坐标)。
+     */
+    private final java.util.Set<Long> forcedSpawnChunks = java.util.concurrent.ConcurrentHashMap.newKeySet();
     private volatile boolean running = false;
     private Thread managerThread;
 
@@ -203,14 +211,15 @@ public class VirtualPlayerManager {
                 // worldSpawn 反射读取(与 PlayerSpawner 同语义,跨 yarn 兼容)
                 net.minecraft.util.math.BlockPos spawn = readWorldSpawnSafe(overworld);
                 int blockRadius = readSpawnRadiusSafe(overworld);
-                // V5.49: chunkRadius 至少 2(5×5=25 chunks)。
-                //   旧 max(1, ...) → 默认 blockRadius=10 时只预热 3×3=9 chunks。pickScatteredSpawn 选到
-                //   边缘 chunk(如 (-1,0))时,vanilla getChunk(FULL,true) 会 cascade 加载邻居 chunks
-                //   ((-2,*)) 用于 lighting/structures,这些 3×3 之外是冷的,触发同步 chunk gen 3×~1.5s
-                //   = 5s 主线程阻塞(实测 DragonSneaky pickPos=5001ms)。
-                //   扩到 5×5 给候选 chunk(-1..1) 留 1 格邻居 buffer,cascade 永远命中热 chunk。
-                //   代价:多 16 chunks 常驻 ≈ +5MB 内存,远低于一次 5s lag burst 的体感成本。
-                int chunkRadius = Math.max(2, (blockRadius + 15) / 16 + 1);
+                // V5.54: 缩回 max(1, ...) → 默认 3×3=9 chunks 常驻 forced。
+                //   背景:V5.49 把 chunkRadius 改成 max(2, ...) (5×5=25),根因是当时 pickScatteredSpawn
+                //     还有 getChunk(FULL, true) cascade 同步加载邻居 chunks 的路径,5×5 是为了给候选
+                //     chunk 留 1 格 buffer 避免 cascade 触发主线程阻塞。
+                //   V5.49 同版本里 PlayerSpawner.pickScatteredSpawn 已经改成纯 isChunkLoaded 判断
+                //     (line 347-348),未加载就 continue 重试,不再 cascade → 5×5 buffer 失去理由。
+                //   缩回 9 chunks 直接减 16 个 forced chunks 参与 vanilla 5min autosave dirty list,
+                //     缓解长期观察到的 mspt 周期性飙升(827ms / 5min)。
+                int chunkRadius = Math.max(1, (blockRadius + 15) / 16);
                 int spawnChunkX = spawn.getX() >> 4;
                 int spawnChunkZ = spawn.getZ() >> 4;
                 int issued = 0;
@@ -230,6 +239,8 @@ public class VirtualPlayerManager {
                                 //   chunks 在 server done 时已被 vanilla "Preparing spawn area: 100%"
                                 //   加载到 CHUNK_LOADED,setChunkForced 只触发 level 升级,无需重新 gen。
                                 overworld.setChunkForced(cx, cz, true);
+                                // V5.54: 记账,供 releaseForcedSpawnChunks 释放(/maohi off & stop)。
+                                forcedSpawnChunks.add(((long) cx << 32) | (cz & 0xFFFFFFFFL));
                             } catch (Throwable ignored) {}
                         });
                         issued++;
@@ -253,6 +264,32 @@ public class VirtualPlayerManager {
         }, "MaohiSpawnPreheat");
         preheat.setDaemon(true);
         preheat.start();
+    }
+
+    /**
+     * V5.54: 释放 startSpawnChunksPreheat 期间主动 forced 的 chunks。
+     *   场景:/maohi off(kickAllImmediately) 与 stop()。无 bot 在线时这批 chunks 仍占 ENTITY_TICKING
+     *     会被 vanilla 5min autosave 扫进 dirty list,放大 mspt 卡顿(实测周期性 800ms+ Server thread
+     *     "Can't keep up" + mspt_throttle_outer bots=0)。
+     *   行为:遍历 forcedSpawnChunks 集合,每个 chunk 派一个 setChunkForced(cx, cz, false) 到主线程
+     *     (lambda <1ms,与 preheat 入队对称),完成后 clear 集合。
+     *   /maohi on 重新启用后不会自动重新 preheat — preheat 是 onServerStarted 一次性,bot 重新上线
+     *     时 vanilla view distance 会按需加载 chunks,功能不受影响,只是首 bot 失去 preheat 加速。
+     */
+    public void releaseForcedSpawnChunks() {
+        if (forcedSpawnChunks.isEmpty()) return;
+        net.minecraft.server.world.ServerWorld overworld = server.getOverworld();
+        if (overworld == null) { forcedSpawnChunks.clear(); return; }
+        int released = forcedSpawnChunks.size();
+        for (Long packed : forcedSpawnChunks) {
+            final int cx = (int) (packed >> 32);
+            final int cz = packed.intValue();
+            server.execute(() -> {
+                try { overworld.setChunkForced(cx, cz, false); } catch (Throwable ignored) {}
+            });
+        }
+        forcedSpawnChunks.clear();
+        com.maohi.fakeplayer.TaskLogger.logRaw("SYSTEM", "spawn_chunks_release", "chunks", released);
     }
 
     /** P22 A: 安全读 worldSpawn,反射兼容多 yarn build。fallback (0,64,0)。 */
@@ -1160,6 +1197,9 @@ prepareAndSpawnVirtualPlayer();
 
 	public void stop() {
 	running = false;
+	// V5.54: 关服时主动释放 preheat 期间锁的 forced chunks(配合 /maohi off 释放路径),
+	//   避免关服期间 vanilla 自己尝试 unload chunks 时还要处理 FORCED ticket 的反向操作。
+	releaseForcedSpawnChunks();
 	// V3.2 修复 handleDisconnection called twice：
 	// 先正式从 PlayerManager 移除假人（调 onDisconnected），再清内部数据
 	// 否则关服时 Minecraft 还会再清理一次这些"僵尸连接"→ 两次 handleDisconnection
@@ -1426,6 +1466,10 @@ prepareAndSpawnVirtualPlayer();
                     .debug("kickAllImmediately failed for {}: {}", uuid, t.getMessage());
             }
         }
+        // V5.54: 无 bot 在线时释放 preheat forced chunks,让 vanilla 5min autosave 不再扫
+        //   这批常驻 ENTITY_TICKING 的 chunks,缓解 bots=0 时仍 mspt 800ms 的周期性卡顿。
+        //   /maohi on 重启后不重新 preheat — 由 vanilla view distance 按需加载,功能不受影响。
+        releaseForcedSpawnChunks();
         return count;
     }
 

@@ -242,7 +242,30 @@ public class MaohiCommands {
                         return Command.SINGLE_SUCCESS;
                     }))
                 )
+
+                // === /maohi debug [on|off] ===
+                // V5.54: 运行时翻转 debugVirtualTasks,即时影响 TaskLogger / TaskMetrics / spawn 诊断输出。
+                //   无参数 → toggle 当前值;显式 on/off → 设为对应状态。
+                //   与 /maohi on|off 一致只翻内存,不写盘 — 重启回到 json 配置值,符合 debug 开关定位。
+                .then(CommandManager.literal("debug")
+                    .executes(ctx -> safeRun(ctx, manager -> toggleDebug(ctx, null)))
+                    .then(CommandManager.literal("on")
+                        .executes(ctx -> safeRun(ctx, manager -> toggleDebug(ctx, Boolean.TRUE))))
+                    .then(CommandManager.literal("off")
+                        .executes(ctx -> safeRun(ctx, manager -> toggleDebug(ctx, Boolean.FALSE))))
+                )
         );
+    }
+
+    /** /maohi debug 子命令实现:target=null toggle,target=true/false 强制设置。 */
+    private static int toggleDebug(CommandContext<ServerCommandSource> ctx, Boolean target) {
+        MaohiConfig cfg = MaohiConfig.getInstance();
+        boolean newValue = target != null ? target : !cfg.debugVirtualTasks;
+        cfg.debugVirtualTasks = newValue;
+        feedback(ctx.getSource(), newValue
+            ? "§a[FS Core] debugVirtualTasks = §etrue §7(TaskLogger/TaskMetrics 已开启;重启不保留)"
+            : "§a[FS Core] debugVirtualTasks = §7false §7(TaskLogger/TaskMetrics 已关闭)");
+        return Command.SINGLE_SUCCESS;
     }
 
     // ============================================================
