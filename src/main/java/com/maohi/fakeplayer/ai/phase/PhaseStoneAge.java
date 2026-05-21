@@ -576,6 +576,11 @@ public final class PhaseStoneAge implements Phase {
 
         int ty = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(
             player.getEntityWorld(), finalTx, finalTz, player.getBlockY());
+        // V5.55 P1a: clamp ty 到 bot.y ±5 范围,避免 EXPLORING target 锚到山顶/cave 高度
+        //   doSmartMove arrival |dy|≤4,>5 永远到不了。EXPLORING 是"走过去"中转点,
+        //   不需要精确地表,只要 xz 方向正确即可;沿途 vanilla 物理自然处理上山/下坡。
+        int botY = player.getBlockY();
+        ty = Math.max(botY - 3, Math.min(botY + 5, ty));
         BlockPos rawTarget = new BlockPos(finalTx, ty, finalTz);
         // P3: 终点模糊偏移（≤16 格自动关闭）
         BlockPos fuzzedTarget = com.maohi.fakeplayer.ai.cognition.ExecutionLayer.applyDestinationFuzz(

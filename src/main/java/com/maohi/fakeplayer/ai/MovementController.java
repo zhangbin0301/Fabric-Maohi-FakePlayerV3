@@ -124,7 +124,14 @@ public class MovementController {
 	 */
 	public static boolean doSmartMove(ServerPlayerEntity p, BlockPos target, double moveStep,
 			double noisePhaseYaw, double noisePhasePitch) {
-		if (target == null) { stopMovement(p); return true; }
+		com.maohi.fakeplayer.Personality pers =
+			com.maohi.fakeplayer.Personality.get(p);
+
+		if (target == null) {
+			if (pers != null) logMoveLatchOnce(p, pers, "null_target");
+			stopMovement(p);
+			return true;
+		}
 
 		// V5.28 P1-B.1: 累积本 tick 的 jump/sprint 意图,最终一次 send。
 		//   早 send(jump=true) 后 send(jump=false) 会在 entity tick 前覆盖 jumping 字段,
@@ -139,9 +146,6 @@ public class MovementController {
 			wantJump = true;
 		}
 
-		com.maohi.fakeplayer.Personality pers =
-			com.maohi.fakeplayer.Personality.get(p);
-
 		// V5.0 A: 物理跳跃检测 (识别 1 格坑)
 		BlockPos ahead = p.getBlockPos().offset(p.getHorizontalFacing());
 		if (p.isOnGround() && p.getEntityWorld().getBlockState(ahead).isAir()
@@ -152,6 +156,7 @@ public class MovementController {
 		// 平滑转向逻辑
 		if (pers != null && pers.sightseeingTicks > 0) {
 			pers.sightseeingTicks--;
+			logMoveLatchOnce(p, pers, "sightseeing", "ticks", pers.sightseeingTicks);
 			stopMovement(p);
 			p.setYaw(p.getYaw() + perlinLike(noisePhaseYaw * 0.8, noiseTime, 1.5f));
 			return false;
@@ -161,6 +166,7 @@ public class MovementController {
 			&& pers.growthPhase.ordinal() >= GrowthPhase.DIAMOND_AGE.ordinal();
 		if (lateGame && ThreadLocalRandom.current().nextInt(300) == 0) {
 			pers.sightseeingTicks = 60 + ThreadLocalRandom.current().nextInt(100);
+			logMoveLatchOnce(p, pers, "entered_sightseeing");
 			stopMovement(p);
 			return false;
 		}
@@ -174,6 +180,9 @@ public class MovementController {
 		//   未加载 chunk 不强加载(getChunk force=false):服务器 lag 时不抢占主线程,等下一 tick
 		//   vanilla 自然加载。bot 此 tick stopMovement 不动,损失 ≤ 50ms,远胜于自由落体。
 		if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkFullyLoaded(world, p.getBlockPos())) {
+			if (pers != null) {
+				logMoveLatchOnce(p, pers, "chunk_not_loaded", "chunkX", p.getBlockX() >> 4, "chunkZ", p.getBlockZ() >> 4);
+			}
 			stopMovement(p);
 			return false;
 		}
@@ -221,6 +230,7 @@ public class MovementController {
 		// planA B-3 stuck-detection:每 tick 累计实际位移,触发阶梯反应让 bot 永远不会真死锁。
 		//   见 Personality.stuckTicks 字段注释的完整说明。
 		if (pers != null && handleStuckDetection(p, pers, world, pos, target)) {
+			logMoveLatchOnce(p, pers, "stuck_detect", "stage", pers.stuckEscalation);
 			// 阶梯反应已 stopMovement + 改 task 状态 → 提前退出,下一 tick 由新状态重新规划。
 			return false;
 		}
@@ -305,6 +315,7 @@ public class MovementController {
 							"to", String.format("(%d,%.1f,%d)", farX, newY, farZ),
 							"dist", String.format("%.0f", dist),
 							"consecutive", 3);
+						logMoveLatchOnce(p, pers, "sink_guard", "subType", "far_teleport");
 						stopMovement(p);
 						return true;
 					}
@@ -339,6 +350,7 @@ public class MovementController {
 								"yaw", String.format("%.1f", newYaw),
 								"deltaY", deltaY,
 								"consecutive", pers.sinkGuardConsecutiveCount);
+							logMoveLatchOnce(p, pers, "sink_guard", "subType", "teleport", "deltaY", deltaY);
 							stopMovement(p);
 							return true;
 						}
@@ -370,6 +382,7 @@ public class MovementController {
 					"newFloorY", String.format("%.1f", pers.heightFloorY),
 					"cooldownOk", cooldownOk,
 					"noObserver", noObserver);
+				logMoveLatchOnce(p, pers, "sink_guard", "subType", "blacklist");
 				stopMovement(p);
 				return true;
 			}
@@ -895,5 +908,17 @@ public class MovementController {
 			&& !world.getBlockState(pos.down()).isAir()
 			&& !world.getBlockState(pos.down()).isLiquid()
 			&& !world.getBlockState(pos.down()).getCollisionShape(world, pos.down()).isEmpty();
+	}
+
+	/** V5.55 P1b 诊断:30s/bot/reason 节流的 latch 原因 log,定位 moved30s=0 的真凶 */
+	private static void logMoveLatchOnce(ServerPlayerEntity p, com.maohi.fakeplayer.Personality pers,
+			String reason, Object... extra) {
+		long nowMs = System.currentTimeMillis();
+		if (nowMs - pers.lastMoveLatchLogAt < 30_000L) return;
+		pers.lastMoveLatchLogAt = nowMs;
+		Object[] kv = new Object[extra.length + 2];
+		kv[0] = "reason"; kv[1] = reason;
+		System.arraycopy(extra, 0, kv, 2, extra.length);
+		com.maohi.fakeplayer.TaskLogger.log(p, "move_latch", kv);
 	}
 }

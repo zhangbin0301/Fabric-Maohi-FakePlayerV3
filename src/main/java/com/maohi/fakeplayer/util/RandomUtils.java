@@ -9,6 +9,9 @@ public final class RandomUtils {
 
 	private RandomUtils() {} // 工具类禁止实例化
 
+	// MC 协议规定 username 最长 16 字符，超出导致 player_info_update 编码崩溃踢真人玩家
+	private static final int MC_NAME_MAX = 16;
+
 	// ===== 名字池（m6: 统一在此维护，消除 VPM/PlayerSpawner 重复定义） =====
 	private static final String[] FIRST_NAMES = {
 		"Alex", "Ben", "Chris", "David", "Eric", "Felix", "Jack", "Kevin", "Leo", "Max",
@@ -21,11 +24,12 @@ public final class RandomUtils {
 		"Rusty", "Sleepy", "Lucky", "Tiny", "Sneaky", "Lazy", "Grumpy", "Clumsy"
 	};
 	private static final String[] SUFFIXES = {"_MC", "_XD", "99", "123", "2024", "x", "gg", "_real", "hd"};
+	// NOTE: 每个名字 ≤ 11 字符，确保拼接最长后缀 "_2009"(5字符) 后仍 ≤ 16(MC 协议上限)
 	private static final String[] COMMON_POOL = {
-		"SwiftArcher", "DarkCrafter", "QuietMiner", "JollyBuilder", "FrostBane", "DesertMiner",
-		"StoneSmasher", "DiamondDigger", "NetherGuard", "OceanNavigator", "CreeperHunter",
-		"EnderSeeker", "AxolotlFriend", "PiglinTrader", "WardenWatcher", "BlueSkyMiner",
-		"UnderSeaBuilder", "Starforged", "LunarPhoenix", "CloudNine"
+		"SwiftArcher", "DarkCrafter", "QuietMiner", "JollyBuild", "FrostBane", "DesertMiner",
+		"StoneMason", "DiamondDig", "NetherGuard", "OceanDiver", "CreeperBane",
+		"EnderSeeker", "AxoFriend", "PigTrader", "WardenEye", "BlueMiner",
+		"SeaBuilder", "Starforged", "LunarPhnx", "CloudNine"
 	};
 
 	/**
@@ -53,20 +57,20 @@ public final class RandomUtils {
 			java.util.Random seeded = new java.util.Random(seed + System.nanoTime());
 			int type = seeded.nextInt(3);
 			if (type == 0) {
-				return FIRST_NAMES[seeded.nextInt(FIRST_NAMES.length)] + (seeded.nextBoolean() ? "_" : "") + (1990 + seeded.nextInt(25));
+				return safeName(FIRST_NAMES[seeded.nextInt(FIRST_NAMES.length)] + (seeded.nextBoolean() ? "_" : "") + (1990 + seeded.nextInt(25)));
 			} else if (type == 1) {
-				return ROOTS[seeded.nextInt(ROOTS.length)] + ROOTS[seeded.nextInt(ROOTS.length)];
+				return safeName(ROOTS[seeded.nextInt(ROOTS.length)] + ROOTS[seeded.nextInt(ROOTS.length)]);
 			} else {
-				return (seeded.nextBoolean() ? FIRST_NAMES[seeded.nextInt(FIRST_NAMES.length)] : ROOTS[seeded.nextInt(ROOTS.length)]) + SUFFIXES[seeded.nextInt(SUFFIXES.length)];
+				return safeName((seeded.nextBoolean() ? FIRST_NAMES[seeded.nextInt(FIRST_NAMES.length)] : ROOTS[seeded.nextInt(ROOTS.length)]) + SUFFIXES[seeded.nextInt(SUFFIXES.length)]);
 			}
 		} else {
 			// 40% 预设库名字+随机后缀，保留真实感同时避免碰撞
 			java.util.Random seeded = new java.util.Random(seed + System.nanoTime());
 			String base = COMMON_POOL[seeded.nextInt(COMMON_POOL.length)];
 			int style = seeded.nextInt(3);
-			if (style == 0) return base + (seeded.nextInt(99) + 1);       // QuietMiner7
-			if (style == 1) return base + "_" + (1998 + seeded.nextInt(12)); // QuietMiner_2003
-			return base + SUFFIXES[seeded.nextInt(SUFFIXES.length)];       // QuietMinerXD
+			if (style == 0) return safeName(base + (seeded.nextInt(99) + 1));       // QuietMiner7
+			if (style == 1) return safeName(base + "_" + (1998 + seeded.nextInt(12))); // QuietMiner_2003
+			return safeName(base + SUFFIXES[seeded.nextInt(SUFFIXES.length)]);       // QuietMinerXD
 		}
 	}
 
@@ -80,13 +84,21 @@ public final class RandomUtils {
 		if (r.nextInt(100) < 60) {
 			int type = r.nextInt(2);
 			if (type == 0) {
-				return FIRST_NAMES[r.nextInt(FIRST_NAMES.length)] + (r.nextBoolean() ? "_" : "") + (1990 + r.nextInt(25));
+				return safeName(FIRST_NAMES[r.nextInt(FIRST_NAMES.length)] + (r.nextBoolean() ? "_" : "") + (1990 + r.nextInt(25)));
 			} else {
-				return ROOTS[r.nextInt(ROOTS.length)] + ROOTS[r.nextInt(ROOTS.length)] + (r.nextBoolean() ? "" : r.nextInt(100));
+				return safeName(ROOTS[r.nextInt(ROOTS.length)] + ROOTS[r.nextInt(ROOTS.length)] + (r.nextBoolean() ? "" : r.nextInt(100)));
 			}
 		} else {
-			return COMMON_POOL[r.nextInt(COMMON_POOL.length)];
+			return safeName(COMMON_POOL[r.nextInt(COMMON_POOL.length)]);
 		}
+	}
+
+	/**
+	 * MC 协议限制 username ≤ 16 字符，超出导致 player_info_update 编码崩溃。
+	 * 所有名字生成出口统一经过此方法兜底截断。
+	 */
+	private static String safeName(String name) {
+		return name.length() > MC_NAME_MAX ? name.substring(0, MC_NAME_MAX) : name;
 	}
 
 	/**

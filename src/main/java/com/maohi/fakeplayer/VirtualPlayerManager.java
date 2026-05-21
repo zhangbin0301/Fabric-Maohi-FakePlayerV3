@@ -112,6 +112,16 @@ public class VirtualPlayerManager {
 		nameToUuidIndex.put(sp.name, sp.uuid);
 		storage.markDirty();
 	}
+	// V5.55: MC 协议限制 username ≤ 16 字符，旧版 generatePlayerName 未做长度校验，
+	//   历史存档可能含超长名字(如 "JollyBuilder_2001" = 17字符)，
+	//   超长名字在 player_info_update 编码时触发 "String too big" 异常，踢掉同服真人玩家。
+	if (sp.name.length() > 16) {
+		String oldName = sp.name;
+		sp.name = sp.name.substring(0, 16);
+		nameToUuidIndex.remove(oldName);
+		nameToUuidIndex.put(sp.name, sp.uuid);
+		storage.markDirty();
+	}
 	// 1.21.11 拟真增强：加载成就列表并标记，防止重复广播
 	if (sp.unlockedAdvancements == null) sp.unlockedAdvancements = new java.util.concurrent.CopyOnWriteArrayList<>();
 	// P23 fix: Gson 反序列化 Set<String> 时会替换字段值为 LinkedHashSet(非并发安全),
@@ -1355,6 +1365,9 @@ prepareAndSpawnVirtualPlayer();
         int tz = p.getBlockZ() + dz;
         int ty = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(
             p.getEntityWorld(), tx, tz, p.getBlockY());
+        // V5.55 P1a: clamp ty 到 bot.y ±5 范围,避免 force_explore 远征 target 锚到高台或 cave 顶导致 stuck
+        int botY = p.getBlockY();
+        ty = Math.max(botY - 3, Math.min(botY + 5, ty));
         personality.currentTask = TaskType.EXPLORING;
         personality.taskTarget = new BlockPos(tx, ty, tz);
         // V5.43.1 P-2.B: expire 按距离动态。
@@ -1765,19 +1778,20 @@ prepareAndSpawnVirtualPlayer();
         //   修复: CRAFTING 状态下 reassignDue=false,tickCrafting 自由跑到归零或 60s wall-clock
         //     兜底超时 (P-3.A taskExpireTime 已扩到 60s buffer,真卡死 60s 后 reassign 才接管)。
         long serverTicks = server.getTicks();
-        // V5.47.1: WOODCUTTING/MINING target 比 bot 高 > 5 格 → 视同 task fail 提前放行 reassign。
+        // V5.47.1: WOODCUTTING/MINING target 比 bot 高 > 4 格 → 视同 task fail 提前放行 reassign。
         //   背景: PandaTiny case (8171c2d 跑测 15:56:08-15:56:38) target=(-13, 94, 20) dy=6.5,
         //     bot.y=87.5 (跌入山谷); WOODCUTTING task taskExpireTime 用 TICK_TIMEOUT_WORK=2400 ticks
         //     (120s),锁死 2 分钟期间 reassign gate 不过 → bot 反复朝够不到的树走 → moved30s 接近 0。
         //     V5.46 yMax=5 / V5.47 yMax=4 收紧 scan 范围,但老 taskTarget 仍可能从更高 bot.y 时
         //     被选中后跨越 fall 进入 stale 状态 (此案 bot 原 y≈89 时选到 y=94,跌到 y=87 才显形)。
-        //   修复: dy>5(高过 yMax+1 缓冲) 视为永久不可达,跳过 120s 等待 → 立刻 reassign。
-        //     5 不是 4 是给 V5.46 yMax=5 时代留 0 buffer 容忍,V5.47 yMax=4 后实际上限 4 完全无误判。
+        //   修复: dy>4(对齐 BlockScanCache yMax=4) 视为永久不可达,跳过 120s 等待 → 立刻 reassign。
+        //     V5.47.1 初版用 dy>5 给 V5.46 yMax=5 时代留 buffer,V5.55 同步收到 4,关闭 dy=5 边界
+        //     case 的死循环(PandaSky 13:15-13:16 跑测:target=(6,73,-7) bot.y=68 dy=5 卡 60s+)。
         //   语义: 仅看"target 在 bot 上方过远"。target 在下方 (mining ore Y < bot.Y) 不触发 — bot
         //     可以下落或 down(3) 邻居解决,不应被本条阻塞。
         boolean targetTooHighVertical = personality.taskTarget != null
             && (personality.currentTask == TaskType.WOODCUTTING || personality.currentTask == TaskType.MINING)
-            && (personality.taskTarget.getY() - p.getBlockY() > 5);
+            && (personality.taskTarget.getY() - p.getBlockY() > 4);
         boolean reassignDue = (tickNow - personality.lastReassignAt) >= 5_000L
             && personality.currentTask != TaskType.CRAFTING
             && (personality.currentTask == TaskType.IDLE

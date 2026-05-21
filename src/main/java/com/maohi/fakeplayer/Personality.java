@@ -329,6 +329,8 @@ public class Personality {
 	public transient long lastTableNoInvDiagAt = 0L;
 	// planA P-1 诊断:doSmartMove 节流日志锚点 + 上次取样位置(检测 bot 是否真的在动)。
 	public transient long lastMovementDiagAt = 0L;
+	// V5.55 P1b 诊断:30s/bot/reason 节流的 latch 原因 log,定位 moved30s=0 的真凶
+	public transient long lastMoveLatchLogAt = 0L;
 	public transient double lastMovementSampleX = Double.NaN;
 	public transient double lastMovementSampleZ = Double.NaN;
 
