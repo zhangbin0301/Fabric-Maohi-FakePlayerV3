@@ -613,22 +613,33 @@ public final class PhaseStoneAge implements Phase {
         int blockedCount = 0;
         ServerWorld world = player.getEntityWorld();
         BlockPos pos = player.getBlockPos();
-        
+
         for (net.minecraft.util.math.Direction dir : new net.minecraft.util.math.Direction[]{
                 net.minecraft.util.math.Direction.NORTH, net.minecraft.util.math.Direction.SOUTH, net.minecraft.util.math.Direction.EAST, net.minecraft.util.math.Direction.WEST}) {
             BlockPos side = pos.offset(dir);
             BlockPos sideUp = side.up();
-            net.minecraft.block.BlockState state1 = world.getBlockState(side);
-            net.minecraft.block.BlockState state2 = world.getBlockState(sideUp);
-            
-            boolean blocked = !state1.getCollisionShape(world, side).isEmpty() || !state2.getCollisionShape(world, sideUp).isEmpty();
+            // V5.59+: pos.offset(dir) 可能跨越相邻 chunk，改用 safeGetBlockState。
+            //   null = chunk 未就绪，保守视为"实体方块堵死 + 非叶子"(bot 不在叶子包围判定里死循环)。
+            net.minecraft.block.BlockState state1 =
+                com.maohi.fakeplayer.ai.PathfindingNavigation.safeGetBlockState(world, side);
+            net.minecraft.block.BlockState state2 =
+                com.maohi.fakeplayer.ai.PathfindingNavigation.safeGetBlockState(world, sideUp);
+            if (state1 == null || state2 == null) {
+                // chunk 未就绪 → 视为阻挡但非叶子，保守计入 blockedCount
+                blockedCount++;
+                continue;
+            }
+
+            boolean blocked = !state1.getCollisionShape(world, side).isEmpty()
+                || !state2.getCollisionShape(world, sideUp).isEmpty();
             if (blocked) blockedCount++;
-            
-            if (state1.isIn(net.minecraft.registry.tag.BlockTags.LEAVES) || state2.isIn(net.minecraft.registry.tag.BlockTags.LEAVES)) {
+
+            if (state1.isIn(net.minecraft.registry.tag.BlockTags.LEAVES)
+                    || state2.isIn(net.minecraft.registry.tag.BlockTags.LEAVES)) {
                 leafCount++;
             }
         }
-        
+
         // 四面都被堵住，且至少有一面是叶子，才认为被叶子困住
         return blockedCount >= 4 && leafCount > 0;
     }
@@ -636,16 +647,21 @@ public final class PhaseStoneAge implements Phase {
     private static BlockPos findAdjacentLeaf(ServerPlayerEntity player) {
         ServerWorld world = player.getEntityWorld();
         BlockPos pos = player.getBlockPos();
-        
+
         for (net.minecraft.util.math.Direction dir : new net.minecraft.util.math.Direction[]{
                 net.minecraft.util.math.Direction.NORTH, net.minecraft.util.math.Direction.SOUTH, net.minecraft.util.math.Direction.EAST, net.minecraft.util.math.Direction.WEST}) {
             BlockPos side = pos.offset(dir);
             BlockPos sideUp = side.up();
-            
-            if (world.getBlockState(sideUp).isIn(net.minecraft.registry.tag.BlockTags.LEAVES)) {
+            // V5.59+: pos.offset(dir) 可能跨越相邻 chunk，改用 safeGetBlockState。
+            //   null = chunk 未就绪，跳过该方向（未加载 chunk 里不会有需要处理的叶子）。
+            net.minecraft.block.BlockState stateUp =
+                com.maohi.fakeplayer.ai.PathfindingNavigation.safeGetBlockState(world, sideUp);
+            if (stateUp != null && stateUp.isIn(net.minecraft.registry.tag.BlockTags.LEAVES)) {
                 return sideUp;
             }
-            if (world.getBlockState(side).isIn(net.minecraft.registry.tag.BlockTags.LEAVES)) {
+            net.minecraft.block.BlockState stateSide =
+                com.maohi.fakeplayer.ai.PathfindingNavigation.safeGetBlockState(world, side);
+            if (stateSide != null && stateSide.isIn(net.minecraft.registry.tag.BlockTags.LEAVES)) {
                 return side;
             }
         }
