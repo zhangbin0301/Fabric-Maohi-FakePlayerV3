@@ -147,9 +147,20 @@ public class MovementController {
 		}
 
 		// V5.0 A: 物理跳跃检测 (识别 1 格坑)
+		// V5.59: NSEW offset 跨相邻 chunk 风险 — bot 站在 chunk 边缘朝外时,ahead/ahead2 落在
+		//   下一 chunk,raw getBlockState 触发 vanilla getChunk(FULL,true) 在 gen 未完成时
+		//   pump 主线程任务队列 → watchdog 抓到 doSmartMove:151 卡 1065ms。
+		//   safeGetBlockState 未就绪返 null,语义降级为"看不见 → 不跳",bot 走平地步态过去
+		//   即可;chunk 一旦加载完毕下一 tick 就恢复正常跳跃。
 		BlockPos ahead = p.getBlockPos().offset(p.getHorizontalFacing());
-		if (p.isOnGround() && p.getEntityWorld().getBlockState(ahead).isAir()
-			&& !p.getEntityWorld().getBlockState(ahead.offset(p.getHorizontalFacing())).isAir()) {
+		BlockPos ahead2 = ahead.offset(p.getHorizontalFacing());
+		net.minecraft.block.BlockState aheadState =
+			PathfindingNavigation.safeGetBlockState(p.getEntityWorld(), ahead);
+		net.minecraft.block.BlockState ahead2State =
+			PathfindingNavigation.safeGetBlockState(p.getEntityWorld(), ahead2);
+		if (p.isOnGround()
+			&& aheadState != null && aheadState.isAir()
+			&& ahead2State != null && !ahead2State.isAir()) {
 			wantJump = true;
 		}
 
