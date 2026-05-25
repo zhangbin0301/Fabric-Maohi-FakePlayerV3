@@ -2826,13 +2826,17 @@ prepareAndSpawnVirtualPlayer();
 
                 // 缓存失效：防止假人返回已挖掘的坐标 (P2)
                 // V5.59: safeGetBlockState 避免 raw getBlockState 在 chunk 未加载时 pump 主线程任务队列;
-                //   null(chunk 已被卸载)即跳过 invalidate,cache 自然 30s TTL 过期。
+                //   null(chunk 已被卸载)→ minedType="",后续 endsWith/equals/contains 全返 false,
+                //   等同"看不到挖了啥 → 任何成就都不 grant",fallback 安全。
                 net.minecraft.block.BlockState postBreakState =
                     com.maohi.fakeplayer.ai.PathfindingNavigation.safeGetBlockState(
                         (net.minecraft.server.world.ServerWorld) p.getEntityWorld(), finalMinePos);
+                String minedType;
                 if (postBreakState != null) {
-                    String minedType = net.minecraft.registry.Registries.BLOCK.getId(postBreakState.getBlock()).getPath();
+                    minedType = net.minecraft.registry.Registries.BLOCK.getId(postBreakState.getBlock()).getPath();
                     blockScanCache.invalidate(finalMinePos, minedType);
+                } else {
+                    minedType = "";
                 }
 
                 // P22 终极兜底:直接记账,完全不依赖 vanilla advancement registry。
