@@ -11,7 +11,8 @@
 		"ServerChunkManagerAccessor",
 		"ServerPlayerEntityMixin",
 		"ServerCommonNetworkHandlerLatencyAccessor",
-		"PlayerInventoryAccessor"
+		"PlayerInventoryAccessor",
+		"SpawnRestrictionMixin"
 	],
   "injectors": {
     "defaultRequire": 1
