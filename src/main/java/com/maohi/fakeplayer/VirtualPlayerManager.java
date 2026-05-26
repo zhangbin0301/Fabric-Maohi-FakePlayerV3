@@ -1298,7 +1298,14 @@ prepareAndSpawnVirtualPlayer();
         for (Long packed : pers.botForcedChunks) {
             int cx = (int) (packed >> 32);
             int cz = packed.intValue();
+            // V5.59+ 双路径释放:bot ring 现走 addTicket(MovementController.maohiBotForceLoadRing),
+            //   vanilla forcedChunks set 没记账,setChunkForced(false) no-op,需补 removeTicket 兜底。
             try { overworld.setChunkForced(cx, cz, false); } catch (Throwable ignored) {}
+            try {
+                overworld.getChunkManager().removeTicket(
+                    net.minecraft.server.world.ChunkTicketType.FORCED,
+                    new net.minecraft.util.math.ChunkPos(cx, cz), 31);
+            } catch (Throwable ignored) {}
         }
         pers.botForcedChunks.clear();
         com.maohi.fakeplayer.TaskLogger.logRaw(

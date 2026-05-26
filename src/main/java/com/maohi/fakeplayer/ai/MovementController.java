@@ -994,24 +994,32 @@ public class MovementController {
 		int botCz = p.getBlockZ() >> 4;
 
 		// 1. force load 当前 3x3 ring(9 chunks)
+		// V5.59+: 用 chunkManager.addTicket(FORCED, pos, 31) 替代 setChunkForced(true)。
+		//   原 V5.59 加 isChunkReady gate 跳过未加载 chunk 避免 setChunkForced(true) 的同步等待
+		//   (chunkManager.getChunk(FULL,true) 同步 park 主线程),但 gate 副作用严重 — bot 跑远后
+		//   新区域 chunks 永远不被主动 force load,bot 走到 chunk 边界停下,15s task_timeout →
+		//   死循环 EXPLORING,跑 47 分钟仍 0 成就(2026-05-26 log 4 个 bot 全部受害)。
+		//   addTicket 只注册 FORCED ticket(异步),vanilla chunk worker thread 后台加载,
+		//   主线程 0 park,bot 走到哪 force 到哪,既消除 park 又恢复 bot 远程移动能力。
+		//   AccessWidener 已暴露 addTicket / removeTicket(maohi.accesswidener)。
 		for (int dx = -1; dx <= 1; dx++) {
 			for (int dz = -1; dz <= 1; dz++) {
 				int cx = botCx + dx;
 				int cz = botCz + dz;
-				// V5.59: chunk 未就绪即跳过本次 force。setChunkForced(true) 内部走
-				//   chunkManager.addTicket + getChunk(FULL,true),后者在 gen 未完成时 pump
-				//   主线程任务队列 → watchdog 抓到 maohiBotForceLoadRing:989 卡 ~1s。
-				//   策略:只 force 已 FULL 的 chunk(addTicket 路径快);未就绪由 bot 自身 player ticket
-				//   走异步加载,下个 5s ring tick 再补 force。
-				if (!PathfindingNavigation.isChunkReady(world, cx, cz)) continue;
 				long packed = ((long) cx << 32) | (cz & 0xFFFFFFFFL);
 				if (pers.botForcedChunks.add(packed)) {
-					try { world.setChunkForced(cx, cz, true); } catch (Throwable ignored) {}
+					try {
+						world.getChunkManager().addTicket(
+							net.minecraft.server.world.ChunkTicketType.FORCED,
+							new net.minecraft.util.math.ChunkPos(cx, cz), 31);
+					} catch (Throwable ignored) {}
 				}
 			}
 		}
 
 		// 2. 释放离 bot > 3 chunks 的旧 forced chunks(bot 已走远,不再需要)
+		// V5.59+: 配对释放走 removeTicket(addTicket 没写 vanilla forcedChunks set,setChunkForced(false)
+		//   no-op,需要 removeTicket 真正删 ticket)。
 		java.util.Iterator<Long> it = pers.botForcedChunks.iterator();
 		while (it.hasNext()) {
 			long packed = it.next();
@@ -1020,7 +1028,11 @@ public class MovementController {
 			int distX = Math.abs(cx - botCx);
 			int distZ = Math.abs(cz - botCz);
 			if (Math.max(distX, distZ) > 3) {
-				try { world.setChunkForced(cx, cz, false); } catch (Throwable ignored) {}
+				try {
+					world.getChunkManager().removeTicket(
+						net.minecraft.server.world.ChunkTicketType.FORCED,
+						new net.minecraft.util.math.ChunkPos(cx, cz), 31);
+				} catch (Throwable ignored) {}
 				it.remove();
 			}
 		}
