@@ -607,7 +607,15 @@ public class MovementController {
 			//     moved30s=0.00,17 分钟内 logs/sticks/cobble 全 0,完全无成就。
 			//   参数顺序:Vec3d(sideways=x, vertical=y, forward=z) 与 V5.28.6 之前一致,
 			//     vanilla LivingEntity.travel 的入参语义就是 (sideways, vertical, forward)。
-			p.travel(new Vec3d(side, 0, fwd));
+			// V5.62 travel 前置守卫:vanilla LivingEntity.travel → Entity.move →
+			//   BlockCollisionSpliterator 扫 boundingBox+movement 经过的所有方块,跨未加载
+			//   chunk 边界时调 World.getBlockState → ServerChunkManager.getChunk(create=true)
+			//   → server thread park 1+秒。watchdog 2026-05-27 stack 实抓 doSmartMove:610
+			//   → travel → park 1131ms。守卫:当前 3x3 chunk 全部 ready 才推 travel,否则跳过
+			//   本帧让 chunk 异步加载完(下一 tick 重试)。
+			if (areTravelChunksReady(p)) {
+				p.travel(new Vec3d(side, 0, fwd));
+			}
 		}
 
 		return false;
@@ -632,6 +640,34 @@ public class MovementController {
 			return !state.get(net.minecraft.block.TrapdoorBlock.OPEN);
 		}
 		return false;
+	}
+
+	/**
+	 * V5.62: travel 前置守卫 — 检查 bot 当前位置周围 3x3 chunk 是否全部就绪(FULL 状态)。
+	 *
+	 * <p>vanilla {@code LivingEntity.travel} 内部走 {@code Entity.move} → 碰撞检测,
+	 * {@code BlockCollisionSpliterator} 扫 boundingBox + movement 经过的所有方块。
+	 * 跨未加载 chunk 边界时调 {@code World.getBlockState} → {@code ServerChunkManager.getChunk(create=true)}
+	 * → 主线程 park 等待 chunk gen,实测 1131ms+。
+	 *
+	 * <p>3x3 是因为 bot 站 chunk 边界时 boundingBox 可能横跨相邻 chunk;3x3 ready 即覆盖
+	 * 任意 1 格速度的碰撞扫描范围。用 {@link com.maohi.fakeplayer.ai.PathfindingNavigation#isChunkReady}
+	 * (mixin O(1) 非阻塞)而非 vanilla {@code isChunkLoaded}。
+	 *
+	 * <p>未就绪时跳过本帧 travel,bot 站这一 tick;force-load ring 异步扩展完后下一 tick 重试。
+	 */
+	private static boolean areTravelChunksReady(ServerPlayerEntity p) {
+		ServerWorld w = p.getEntityWorld();
+		int cx = p.getBlockX() >> 4;
+		int cz = p.getBlockZ() >> 4;
+		for (int dx = -1; dx <= 1; dx++) {
+			for (int dz = -1; dz <= 1; dz++) {
+				if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(w, cx + dx, cz + dz)) {
+					return false;
+				}
+			}
+		}
+		return true;
 	}
 
 	/**
