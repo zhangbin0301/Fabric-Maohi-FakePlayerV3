@@ -37,10 +37,12 @@ import org.slf4j.LoggerFactory;
 public final class LagWatchdog {
 
     private static final Logger LOG = LoggerFactory.getLogger("Server thread");
-    private static final long CHECK_INTERVAL_MS = 200L;
-    /** 主线程心跳过期阈值,超过此值认定卡顿。1s = 20 vanilla tick,真实游戏循环中 50ms/tick,
-     *  1s 已是 20× 异常,误报概率低;再小(500ms)会被偶发 mob spawn / chunk save 触发。 */
-    private static final long STALL_THRESHOLD_MS = 1_000L;
+    private static final long CHECK_INTERVAL_MS = 100L;
+    /** 主线程心跳过期阈值,超过此值认定卡顿。
+     *  V5.62: 1000ms → 200ms。1000ms 漏掉了 100~160ms 反复 spike 的 stack 现场,而剩余卡顿
+     *  正是这种亚秒级问题。200ms = 4 vanilla tick,仍 4× 异常但已能捕到我们关心的范围。
+     *  误报防护靠 stallDumped 节流(单次 stall 只 dump 一次) + dump 后必须等心跳刷新才能再 dump。 */
+    private static final long STALL_THRESHOLD_MS = 200L;
 
     /** 主线程心跳时间戳,由 onServerTick 末尾刷新。volatile 保证 watchdog 线程能立即看到最新值。 */
     private static volatile long lastHeartbeatAt = 0L;

@@ -46,8 +46,22 @@ public final class AdventuringTimeTrigger implements AchievementTrigger {
 
 	/** 记录一次当前群系(Registry 级节流已命中,这里直接记) */
 	private static void recordCurrentBiome(ServerPlayerEntity player, Personality personality) {
+		// V5.62: 3x3 chunk-ready 守卫,避免 BiomeAccess.getBiome 内部 noise jitter 越界未加载 chunk
+		//   → ServerChunkManager.getChunkBlocking → 主线程 park 1+秒(同 isTreelessBiome/BiomePrior 修复)。
+		//   未就绪直接跳过本次记录;trigger 每 8~25s 节流,下次再试不影响累计功能。
+		net.minecraft.server.world.ServerWorld world = player.getEntityWorld();
+		BlockPos pos = player.getBlockPos();
+		int cx = pos.getX() >> 4;
+		int cz = pos.getZ() >> 4;
+		for (int dx = -1; dx <= 1; dx++) {
+			for (int dz = -1; dz <= 1; dz++) {
+				if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(world, cx + dx, cz + dz)) {
+					return;
+				}
+			}
+		}
 		net.minecraft.registry.entry.RegistryEntry<net.minecraft.world.biome.Biome> biomeEntry =
-			player.getEntityWorld().getBiome(player.getBlockPos());
+			world.getBiome(pos);
 		biomeEntry.getKey().ifPresent(key -> {
 			personality.visitedBiomes.add(key.getValue().toString());
 		});

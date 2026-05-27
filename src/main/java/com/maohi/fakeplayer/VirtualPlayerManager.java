@@ -1925,8 +1925,25 @@ prepareAndSpawnVirtualPlayer();
     /** 当前 player 所站 biome 是否在 TREELESS_BIOME_IDS 黑名单内 */
     private static boolean isTreelessBiome(ServerPlayerEntity player) {
         try {
+            net.minecraft.server.world.ServerWorld world = player.getEntityWorld();
+            net.minecraft.util.math.BlockPos pos = player.getBlockPos();
+            // V5.62: BiomeAccess.getBiome 内部 noise jittered sampling 偏移可达 ±8 方块,
+            //   chunk 边界处可越界采样邻居 chunk。未就绪即触发 ServerChunkManager.getChunkBlocking
+            //   → 主线程 park 1+秒(2026-05-28 stack 实抓 isTreelessBiome:1929 → park 1250ms)。
+            //   3x3 全部 ready 才安全调 world.getBiome;未就绪返 false(等同未知,不视为 treeless),
+            //   等价的退路语义和原 try/catch 一致。用 isChunkReady (mixin O(1) 严格 FULL 状态)
+            //   替代 vanilla isChunkLoaded(后者状态不严格)。
+            int cx = pos.getX() >> 4;
+            int cz = pos.getZ() >> 4;
+            for (int dx = -1; dx <= 1; dx++) {
+                for (int dz = -1; dz <= 1; dz++) {
+                    if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(world, cx + dx, cz + dz)) {
+                        return false;
+                    }
+                }
+            }
             net.minecraft.registry.entry.RegistryEntry<net.minecraft.world.biome.Biome> entry =
-                player.getEntityWorld().getBiome(player.getBlockPos());
+                world.getBiome(pos);
             java.util.Optional<net.minecraft.registry.RegistryKey<net.minecraft.world.biome.Biome>> key = entry.getKey();
             if (key.isEmpty()) return false;
             return TREELESS_BIOME_IDS.contains(key.get().getValue().getPath());
@@ -2697,21 +2714,45 @@ prepareAndSpawnVirtualPlayer();
      * 用法: invokeCriteriaTrigger(player, "INVENTORY_CHANGED")
      *
      * 步骤:
-     *   1) 反射拿 net.minecraft.advancement.criterion.Criteria 类的 INVENTORY_CHANGED static field
-     *   2) 拿 field 值的 class,找 trigger method:先 2-arg (ServerPlayerEntity, PlayerInventory),
-     *      再 3-arg (..., ItemStack),覆盖 1.21 yarn build 间变化
-     *   3) invoke 调用,vanilla 会扫整个 inventory 找匹配的 advancement criterion 让 isDone() 变 true
+     *   1) 反射拿 Criteria 类 — 跨多个候选 path 兼容 yarn build / Minecraft 版本(2026-05-27 抓到
+     *      1.21.11 runtime 报 ClassNotFoundException:net.minecraft.advancement.criterion.Criteria)
+     *   2) 拿 INVENTORY_CHANGED static field 的值,拿到 trigger 对象
+     *   3) trigger.trigger(player, inventory) — 先 2-arg 再 3-arg 兼容
+     *   4) vanilla 扫整个 inventory 找匹配的 advancement criterion 让 isDone() 变 true
      *
      * 失败时 log 一条 criteria_trigger_fail,但不抛异常,不影响 P11 后续模糊匹配 grant 路径。
      */
     public static void invokeCriteriaTrigger(ServerPlayerEntity p, String criteriaFieldName) {
+        // V5.62: 单一 path 行不通(1.21.11 yarn 改了 package),改成多候选列表逐个尝试。
+        //   只要任意一个 path 命中就用之;全部失败时 log 出尝试过的列表,便于未来 yarn 改名再加。
+        final String[] candidateClassNames = {
+            "net.minecraft.advancement.criterion.Criteria",  // yarn 1.20.x ~ 1.21.10
+            "net.minecraft.advancement.Criteria",            // yarn 重整后(若有)
+            "net.minecraft.criterion.Criteria",              // yarn 1.21.11+ 候选
+            "net.minecraft.advancements.critereon.CriteriaTriggers", // Mojang/MCP 风格(极少 Fabric 用,兜底)
+        };
+        Class<?> criteriaClass = null;
+        String matchedClassName = null;
+        for (String name : candidateClassNames) {
+            try {
+                criteriaClass = Class.forName(name);
+                matchedClassName = name;
+                break;
+            } catch (ClassNotFoundException ignored) {}
+        }
+        if (criteriaClass == null) {
+            com.maohi.fakeplayer.TaskLogger.log(p, "criteria_trigger_fail",
+                "criterion", criteriaFieldName, "err", "class_not_found",
+                "tried", java.util.Arrays.toString(candidateClassNames));
+            return;
+        }
         try {
-            Class<?> criteriaClass = Class.forName("net.minecraft.advancement.criterion.Criteria");
             java.lang.reflect.Field f = criteriaClass.getField(criteriaFieldName);
             Object trigger = f.get(null); // static field
             if (trigger == null) {
                 com.maohi.fakeplayer.TaskLogger.log(p, "criteria_trigger_fail",
-                    "criterion", criteriaFieldName, "err", "field_value_null");
+                    "criterion", criteriaFieldName, "err", "field_value_null",
+                    "class", matchedClassName);
                 return;
             }
             // 尝试 2-arg signature (ServerPlayerEntity, PlayerInventory) — yarn 1.21+ 常用
@@ -2742,7 +2783,16 @@ prepareAndSpawnVirtualPlayer();
             }
             com.maohi.fakeplayer.TaskLogger.log(p, "criteria_trigger_fail",
                 "criterion", criteriaFieldName, "err", "no_matching_trigger_method",
-                "candidates", methods.toString());
+                "class", matchedClassName, "candidates", methods.toString());
+        } catch (NoSuchFieldException nsfe) {
+            // 类找到了但 field 不存在 — 列出实际有哪些 static field 帮诊断
+            java.util.List<String> fields = new java.util.ArrayList<>();
+            for (java.lang.reflect.Field ff : criteriaClass.getFields()) {
+                fields.add(ff.getName());
+            }
+            com.maohi.fakeplayer.TaskLogger.log(p, "criteria_trigger_fail",
+                "criterion", criteriaFieldName, "err", "field_not_found",
+                "class", matchedClassName, "availableFields", fields.toString());
         } catch (Throwable t) {
             com.maohi.fakeplayer.TaskLogger.log(p, "criteria_trigger_fail",
                 "criterion", criteriaFieldName, "err", t.getClass().getSimpleName() + ":" + t.getMessage());
