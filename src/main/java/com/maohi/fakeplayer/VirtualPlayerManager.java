@@ -1831,6 +1831,54 @@ prepareAndSpawnVirtualPlayer();
     }
 
     /**
+     * V5.63: 砍 log 后清理同树孤立叶子。
+     *
+     * <h3>动机</h3>
+     * watchdog 反复抓到 ~226ms stall 在 class_2397 (LeavesBlock) random tick → setBlockState
+     * → NeighborUpdater (class_7159) 链路。bot 砍倒 ~10 棵树留下 ~150 块叶子,vanilla 在
+     * 100~600 tick 内零散触发衰减,每块叶子衰减一次 = 1 setBlockState + 邻居更新,持续小卡顿。
+     *
+     * <h3>策略</h3>
+     * 砍 log/wood 当时(chunk 必加载,刚 finishDestroy 完)就把周围孤立叶子批量清掉,
+     * 用 flag=2 (NOTIFY_LISTENERS only) 跳过邻居更新——叶子是装饰方块,跨方块依赖弱,
+     * 跳过 neighbor update 安全。一次小 burst 换持续 226ms stall 消失。
+     *
+     * <h3>保护</h3>
+     * 仅清理 PERSISTENT=false 的叶子(树自然生成,迟早会衰减);PERSISTENT=true 是玩家
+     * 手放的(树屋/造景)保留不动。半径 4x6x4 (上方更多覆盖橡树/巨型云杉)。
+     * 单次最多 32 块,巨型树多次 mine_done 分摊清理。
+     */
+    private static void cleanupOrphanLeavesAround(net.minecraft.server.world.ServerWorld world, net.minecraft.util.math.BlockPos center) {
+        int cleaned = 0;
+        int maxClean = 32;
+        for (int dx = -4; dx <= 4 && cleaned < maxClean; dx++) {
+            for (int dy = -1; dy <= 6 && cleaned < maxClean; dy++) {
+                for (int dz = -4; dz <= 4 && cleaned < maxClean; dz++) {
+                    net.minecraft.util.math.BlockPos lp = center.add(dx, dy, dz);
+                    int cx = lp.getX() >> 4;
+                    int cz = lp.getZ() >> 4;
+                    if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(world, cx, cz)) continue;
+                    net.minecraft.block.BlockState ls =
+                        com.maohi.fakeplayer.ai.PathfindingNavigation.safeGetBlockState(world, lp);
+                    if (ls == null) continue;
+                    if (!ls.isIn(net.minecraft.registry.tag.BlockTags.LEAVES)) continue;
+                    // 玩家手放的叶子 PERSISTENT=true,保留
+                    Boolean persistent = null;
+                    try {
+                        persistent = ls.get(net.minecraft.state.property.Properties.PERSISTENT);
+                    } catch (Throwable ignored) {}
+                    if (persistent != null && persistent) continue;
+                    // flag=2: NOTIFY_LISTENERS only,跳过 neighbor update propagation
+                    try {
+                        world.setBlockState(lp, net.minecraft.block.Blocks.AIR.getDefaultState(), 2);
+                        cleaned++;
+                    } catch (Throwable ignored) {}
+                }
+            }
+        }
+    }
+
+    /**
      * V5.30 任务失败计数兜底:连续 ≥4 次失败时调用,把假人甩到远征 EXPLORING 目标,
      * 切断"反复撞同一棵够不到的树/挖同一块够不到的石头"的卡死循环。
      * 朝当前 yaw ±60° 扇形采样,贴合 PhaseStoneAge.setExplore 的"定向跋涉"观感,而不是回头跑。
@@ -3180,6 +3228,15 @@ prepareAndSpawnVirtualPlayer();
                         com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().report(
                             landmarkType, finalMinePos, p.getUuid());
                     }
+                }
+
+                // V5.63: 砍 log 后立即清理同树孤立叶子,消灭 vanilla 叶子随机刻衰减 + 邻居更新
+                //   (实测 stall_dump 反复 226ms 在 class_2397 random tick → NeighborUpdater)。
+                //   flag=2 = NOTIFY_LISTENERS only,跳过 neighbor update propagation;叶子是装饰方块,
+                //   跨方块依赖弱可以安全跳过。仅清理 PERSISTENT=false (自然生成,非玩家手放) 的叶子,
+                //   保护玩家树屋/造景。单次最多 32 块,防巨型橡树一帧 setBlock burst。
+                if (minedType != null && (minedType.endsWith("_log") || minedType.endsWith("_wood"))) {
+                    cleanupOrphanLeavesAround((net.minecraft.server.world.ServerWorld) p.getEntityWorld(), finalMinePos);
                 }
 
                 personality.isMining = false;
