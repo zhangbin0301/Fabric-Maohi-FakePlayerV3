@@ -1799,6 +1799,38 @@ prepareAndSpawnVirtualPlayer();
     );
 
     /**
+     * V5.62: 扫所有 bot,返回最近"产出同伴"的位置(task=MINING/WOODCUTTING 且 blocksMinedTotal>0)。
+     * 用于 force_explore_teleport 紧急救援: 把 outlier bot 拉到正在产出的同伴附近,大概率
+     * 落在有资源的区域,避免反复 teleport 飞到陌生远端。
+     *
+     * @return 同伴当前 BlockPos,无产出同伴(冷启动期或全 bot 失败中)返 null
+     */
+    private net.minecraft.util.math.BlockPos findActiveCompanionPos(ServerPlayerEntity self) {
+        UUID selfUuid = self.getUuid();
+        net.minecraft.util.math.BlockPos selfPos = self.getBlockPos();
+        net.minecraft.server.MinecraftServer server = self.getEntityWorld().getServer();
+        if (server == null) return null;
+        net.minecraft.util.math.BlockPos best = null;
+        double bestDistSq = Double.MAX_VALUE;
+        for (UUID uuid : virtualPlayerUUIDs) {
+            if (uuid.equals(selfUuid)) continue;
+            Personality pers = playerPersonalities.get(uuid);
+            if (pers == null) continue;
+            if (pers.blocksMinedTotal <= 0) continue; // 没产出过的 bot 自己也在挣扎,跳过
+            if (pers.currentTask != TaskType.MINING && pers.currentTask != TaskType.WOODCUTTING) continue;
+            ServerPlayerEntity peer = server.getPlayerManager().getPlayer(uuid);
+            if (peer == null) continue;
+            net.minecraft.util.math.BlockPos peerPos = peer.getBlockPos();
+            double distSq = selfPos.getSquaredDistance(peerPos);
+            if (distSq < bestDistSq) {
+                bestDistSq = distSq;
+                best = peerPos;
+            }
+        }
+        return best;
+    }
+
+    /**
      * V5.30 任务失败计数兜底:连续 ≥4 次失败时调用,把假人甩到远征 EXPLORING 目标,
      * 切断"反复撞同一棵够不到的树/挖同一块够不到的石头"的卡死循环。
      * 朝当前 yaw ±60° 扇形采样,贴合 PhaseStoneAge.setExplore 的"定向跋涉"观感,而不是回头跑。
@@ -1820,9 +1852,14 @@ prepareAndSpawnVirtualPlayer();
         ThreadLocalRandom rng = ThreadLocalRandom.current();
         // V5.43 P-1.C 阶梯递增半径
         personality.forceExploreEscalation++;
-        // V5.43 P-1.D: 无树 biome 直接拉到 4 级起步
-        if (isTreelessBiome(p) && personality.forceExploreEscalation < 4) {
-            personality.forceExploreEscalation = 4;
+        // V5.43 P-1.D / V5.62 缓和: 无树 biome 抬升起点,但不再直接跳到 4。
+        //   原版 isTreelessBiome → escalation=4 → 立即 1500 格 teleport,木器期在异常地形
+        //   (Y=131 高地表 / 小岛 / 沙漠) spawn 的 bot 第一次失败就被甩到极远 → 累积 outlier
+        //   (实测 6h33m 漂到 2099 格)。V5.62 改成抬到 2: 仍能跳过慢爬阶梯,但需要至少
+        //   2 次失败累积才触发 escalation>=4 的 teleport,给 setExplore (有 spawn 引力 +
+        //   shared_resource 查询) 一个慢慢拉回的机会。
+        if (isTreelessBiome(p) && personality.forceExploreEscalation < 2) {
+            personality.forceExploreEscalation = 2;
         }
         // V5.59 (teleport-rescue): forceExploreEscalation 已升至 4+ 表示 bot 至少经历 4 次远征 +
         //   多轮内部 setExplore 全失败 (resetTaskFailCount 真实成功才会清零)。此时 80 格 force_explore
@@ -1837,52 +1874,82 @@ prepareAndSpawnVirtualPlayer();
         if (personality.forceExploreEscalation >= 4
                 && cooldownOk
                 && !com.maohi.fakeplayer.ai.MovementController.hasNearbyRealObserver(p, world, 32)) {
-            // V5.62: angle 不再 360° 纯随机,改为"距 spawn 越远 angle 越偏向 home"。
-            //   原版每次 force_explore teleport 500~1500 格随机方向,木器期反复失败的 bot
-            //   每次 teleport 都可能朝外飞,几小时后累积漂到 2000+ 格(实测 StoneMason86
-            //   6h33m 漂到 2099 格 / SwiftArcher_2009 3h44m 漂到 1948 格)。新逻辑分 3 档:
-            //     近 spawn (≤800 格):    360° 随机,保留自由远征
-            //     中距 (800~2000 格):     80% 朝 home ±60°,20% 随机(软拉回,允许偶尔外探)
-            //     极端 outlier (>2000):  强制朝 home ±30° + 短距 200~800 格(硬拉回)
-            //   触发频率不变(escalation 仍需累到 4 + 6s cooldown),仅改方向选择。
+            // V5.62 reworked: 紧急救援 teleport 优先级链 (放弃反同步指纹换 server 稳定 + 成就率):
+            //   1. SharedResourceMap 最近 LOG_CLUSTER / STONE_AREA (其它 bot 已找到的资源点)
+            //   2. 扫所有 bot,找最近"产出同伴"(MINING/WOODCUTTING 且 totalMined>0)
+            //   3. 都没有 → 按距 spawn 选 angle: ≤800 360°随机 / 800-2000 80%朝home / >2000 强制朝home
+            //   坐标都加 ±15 格模糊偏移,避免 bot 精确冲坐标(保留部分反同步指纹)
             net.minecraft.util.math.BlockPos spawnPos = readWorldSpawnSafe(world);
             double dxFromSpawn = p.getX() - spawnPos.getX();
             double dzFromSpawn = p.getZ() - spawnPos.getZ();
             double distFromSpawn = Math.sqrt(dxFromSpawn * dxFromSpawn + dzFromSpawn * dzFromSpawn);
-            double angle;
-            double dist;
+
+            int targetX;
+            int targetZ;
             String recallTier;
-            if (distFromSpawn > 2000.0) {
-                // hard-recall: 极端 outlier,强制朝 home 短距 teleport,把 bot 拉回 spawn 附近
-                double homeAngle = Math.atan2(-dzFromSpawn, -dxFromSpawn);
-                angle = homeAngle + (rng.nextDouble() - 0.5) * (Math.PI / 3); // ±30° 扇形,大方向必朝 home
-                dist = 200.0 + rng.nextDouble(0, 600.0); // 200~800 格,从远端拉回 spawn 附近
-                recallTier = "hard_recall";
-            } else if (distFromSpawn > 800.0) {
-                // soft-pull: 中距,80% 偏 home ±60°,20% 仍随机保留探索可能
-                if (rng.nextDouble() < 0.8) {
-                    double homeAngle = Math.atan2(-dzFromSpawn, -dxFromSpawn);
-                    angle = homeAngle + (rng.nextDouble() - 0.5) * (2 * Math.PI / 3); // ±60° 扇形
-                } else {
-                    angle = rng.nextDouble(0, 2 * Math.PI);
-                }
-                dist = 500.0 + rng.nextDouble(0, 1000.0);
-                recallTier = "soft_pull";
-            } else {
-                // 近 spawn: 完全自由,bot 仍可自主远征探索新 biome
-                angle = rng.nextDouble(0, 2 * Math.PI);
-                dist = 500.0 + rng.nextDouble(0, 1000.0);
-                recallTier = "free";
+
+            // 1. 优先朝 SharedResourceMap LOG_CLUSTER (木器期最重要) 或 STONE_AREA (石器期)
+            com.maohi.fakeplayer.ai.cognition.SharedResourceMap srm =
+                com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance();
+            com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkNode resNode =
+                srm.queryNearest(p.getBlockPos(), p.getUuid(),
+                    com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType.LOG_CLUSTER);
+            if (resNode == null) {
+                resNode = srm.queryNearest(p.getBlockPos(), p.getUuid(),
+                    com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType.STONE_AREA);
             }
-            int farX = (int) (p.getX() + Math.cos(angle) * dist);
-            int farZ = (int) (p.getZ() + Math.sin(angle) * dist);
+            if (resNode != null) {
+                // approxPos 已经 ±5 格模糊,再加 ±15 共 ±20,避免 bot 精确冲坐标
+                targetX = resNode.approxPos.getX() + rng.nextInt(-15, 16);
+                targetZ = resNode.approxPos.getZ() + rng.nextInt(-15, 16);
+                recallTier = "shared_resource";
+            } else {
+                // 2. 扫所有 bot 找最近"产出同伴" (近距离同伴优先,远端孤儿可能没意义)
+                net.minecraft.util.math.BlockPos companionPos = findActiveCompanionPos(p);
+                if (companionPos != null) {
+                    // teleport 到同伴 50~200 格内随机方向 (距离够近能跟着干活,够远不会撞同伴)
+                    double cAngle = rng.nextDouble(0, 2 * Math.PI);
+                    double cDist = 50.0 + rng.nextDouble(0, 150.0);
+                    targetX = (int) (companionPos.getX() + Math.cos(cAngle) * cDist);
+                    targetZ = (int) (companionPos.getZ() + Math.sin(cAngle) * cDist);
+                    recallTier = "companion";
+                } else {
+                    // 3. 没共享资源、没产出同伴 → 按距 spawn 选 angle (V5.62 老版 home-biased)
+                    double angle;
+                    double dist;
+                    if (distFromSpawn > 2000.0) {
+                        double homeAngle = Math.atan2(-dzFromSpawn, -dxFromSpawn);
+                        angle = homeAngle + (rng.nextDouble() - 0.5) * (Math.PI / 3); // ±30°
+                        dist = 200.0 + rng.nextDouble(0, 600.0);
+                        recallTier = "hard_recall";
+                    } else if (distFromSpawn > 800.0) {
+                        if (rng.nextDouble() < 0.8) {
+                            double homeAngle = Math.atan2(-dzFromSpawn, -dxFromSpawn);
+                            angle = homeAngle + (rng.nextDouble() - 0.5) * (2 * Math.PI / 3); // ±60°
+                        } else {
+                            angle = rng.nextDouble(0, 2 * Math.PI);
+                        }
+                        dist = 500.0 + rng.nextDouble(0, 1000.0);
+                        recallTier = "soft_pull";
+                    } else {
+                        angle = rng.nextDouble(0, 2 * Math.PI);
+                        dist = 500.0 + rng.nextDouble(0, 1000.0);
+                        recallTier = "free";
+                    }
+                    targetX = (int) (p.getX() + Math.cos(angle) * dist);
+                    targetZ = (int) (p.getZ() + Math.sin(angle) * dist);
+                }
+            }
+
+            double actualDist = Math.sqrt(
+                Math.pow(targetX - p.getX(), 2) + Math.pow(targetZ - p.getZ(), 2));
             // 不主动加载远征落点 chunk (与 sink_guard_far_teleport 同款决策): getSafeTopY 落空时
             //   返 fallback,bot 卡空中 → lagFreezeUntil 期间 vanilla 后台异步 promote → stuck_kick
             //   兜底重 spawn,主线程零阻塞。
-            int farSurfaceY = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(world, farX, farZ, 80);
+            int farSurfaceY = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(world, targetX, targetZ, 80);
             double newY = farSurfaceY + 1.0;
             float newYaw = rng.nextFloat() * 360f - 180f;
-            p.refreshPositionAndAngles(farX + 0.5, newY, farZ + 0.5, newYaw, p.getPitch());
+            p.refreshPositionAndAngles(targetX + 0.5, newY, targetZ + 0.5, newYaw, p.getPitch());
             personality.lastStuckTeleportAt = nowMs;
             personality.lagFreezeUntil = nowMs + 15_000L;
             personality.heightFloorY = newY - 10.0;
@@ -1895,8 +1962,8 @@ prepareAndSpawnVirtualPlayer();
             personality.currentPath.clear();
             com.maohi.fakeplayer.TaskLogger.log(p, "force_explore_teleport",
                 "from", String.format("(%d,%d,%d)", (int) p.getX(), (int) p.getY(), (int) p.getZ()),
-                "to", String.format("(%d,%.1f,%d)", farX, newY, farZ),
-                "dist", String.format("%.0f", dist),
+                "to", String.format("(%d,%.1f,%d)", targetX, newY, targetZ),
+                "dist", String.format("%.0f", actualDist),
                 "distFromSpawn", String.format("%.0f", distFromSpawn),
                 "tier", recallTier,
                 "trigger", "escalation>=4");
@@ -3097,6 +3164,23 @@ prepareAndSpawnVirtualPlayer();
                     "totalMined", personality.blocksMinedTotal + 1);
                 // planA P-1 诊断:per-bot mined 计数,对比 ach 看 D3 链路
                 com.maohi.fakeplayer.TaskMetrics.countMineDone(p.getUuid());
+
+                // V5.62: 上报到 SharedResourceMap,让其它远端 outlier bot 能查到资源点。
+                //   chunk 级 60s 限频 + 坐标模糊化 ±5 格在 SharedResourceMap.report 内部处理。
+                //   原设计 LOG/STONE 不入库,但实测远端 outlier 找不到资源 → 飞 1500 格远 →
+                //   server worldgen 爆 + mspt 70+,牺牲一点反指纹换 server 稳定 + 成就率。
+                if (minedType != null) {
+                    com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType landmarkType = null;
+                    if (minedType.endsWith("_log") || minedType.endsWith("_wood")) {
+                        landmarkType = com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType.LOG_CLUSTER;
+                    } else if (minedType.equals("stone") || minedType.equals("cobblestone") || minedType.equals("deepslate") || minedType.equals("cobbled_deepslate")) {
+                        landmarkType = com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType.STONE_AREA;
+                    }
+                    if (landmarkType != null) {
+                        com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().report(
+                            landmarkType, finalMinePos, p.getUuid());
+                    }
+                }
 
                 personality.isMining = false;
                 personality.miningPos = null;

@@ -29,8 +29,16 @@ public final class SharedResourceMap {
     // ==================== 资源类型白名单 ====================
 
     /**
-     * 允许进入共享地图的稀有资源类型。
-     * NOTE: LOG / STONE / COAL 故意不在此列，防止 15 bot 争抢普通资源产生同步指纹。
+     * 允许进入共享地图的资源类型。
+     *
+     * V5.62 设计反转: 原本 LOG / STONE 不在此列(防 15 bot 争抢普通资源产生同步指纹),
+     * 但实测 server 卡到 mspt 70+ + 7s+ 累积落后,远端 outlier bot 反复 force_explore
+     * 飞 1500 格远找不到树,体验上比"扎堆"更不像真人。设计反转:
+     *   - 引入 LOG_CLUSTER / STONE_AREA 作为基础资源情报
+     *   - chunk 级 60s 限频(同一区域不会被反复上报)
+     *   - 坐标仍 ±5 格模糊化 + claim TTL 5min,保留部分反指纹机制
+     *   - 优先级: 稀有地标(村庄/铁矿)仍最高,LOG/STONE 是 fallback
+     * 换 server 稳定 + 成就率,接受 bot 朝同一片树林扎堆的轻度同步表现。
      */
     public enum LandmarkType {
         VILLAGE,        // 村庄：食物/床/铁/作物 — 成就大礼包
@@ -39,7 +47,9 @@ public final class SharedResourceMap {
         SPAWNER,        // 刷怪笼（经验农场候选）
         STRONGHOLD,     // 要塞（末地成就必需）
         NETHER_PORTAL,  // 下界传送门
-        LOOT_CHEST      // 宝箱（地牢/庙宇/沉船等）
+        LOOT_CHEST,     // 宝箱（地牢/庙宇/沉船等）
+        LOG_CLUSTER,    // V5.62: 木材丰富区(树林),由 mine_done 砍到 log 时上报
+        STONE_AREA      // V5.62: 石头丰富区,由 mine_done 挖到 stone/cobblestone 时上报
     }
 
     /** 一条共享情报节点 */
@@ -77,17 +87,30 @@ public final class SharedResourceMap {
     // key = packKey(approxPos) — 防止同一位置被重复上报
     private final ConcurrentHashMap<Long, LandmarkNode> nodes = new ConcurrentHashMap<>();
 
+    // V5.62: chunk 级上报限频 — 同一 chunk 60s 内只能 report 一次,防止 mine_done 路径
+    //   每挖断一块 log/stone 就触发 report 导致 nodes 爆。key = ChunkPos.toLong(cx, cz)。
+    private final ConcurrentHashMap<Long, Long> recentReportChunkKeys = new ConcurrentHashMap<>();
+    private static final long REPORT_CHUNK_COOLDOWN_MS = 60_000L;
+
     // ==================== 写入 API ====================
 
     /**
-     * Bot 上报发现的稀有地标。
+     * Bot 上报发现的资源地标。
      * 坐标会被自动模糊化 ±5 格，防止精确导航（上帝视角指纹）。
+     * V5.62: chunk 级 60s 限频,LOG_CLUSTER / STONE_AREA 这种高频资源类型也安全使用。
      *
      * @param type       资源类型（必须是 LandmarkType 白名单内的）
      * @param exactPos   实际坐标（会被模糊化后存储）
      * @param reportedBy 上报的 bot UUID（用于信誉追踪预留）
      */
     public void report(LandmarkType type, BlockPos exactPos, UUID reportedBy) {
+        // V5.62: chunk 级限频检查 (同 chunk 60s 内只允许 report 一次)
+        long chunkKey = (((long) (exactPos.getX() >> 4)) << 32) | ((exactPos.getZ() >> 4) & 0xFFFFFFFFL);
+        long now = System.currentTimeMillis();
+        Long lastReport = recentReportChunkKeys.get(chunkKey);
+        if (lastReport != null && now - lastReport < REPORT_CHUNK_COOLDOWN_MS) return;
+        recentReportChunkKeys.put(chunkKey, now);
+
         if (nodes.size() >= MAX_NODES) prune(); // 先清理再写入
         if (nodes.size() >= MAX_NODES) return;  // 清理后仍满，丢弃
 
@@ -230,6 +253,8 @@ public final class SharedResourceMap {
     public void prune() {
         long now = System.currentTimeMillis();
         nodes.entrySet().removeIf(e -> now - e.getValue().reportedAt > NODE_MAX_AGE_MS);
+        // V5.62: 也清理 chunk 限频记录(超过 NODE_MAX_AGE_MS 远超 60s cooldown,清掉无副作用)
+        recentReportChunkKeys.entrySet().removeIf(e -> now - e.getValue() > NODE_MAX_AGE_MS);
     }
 
     /** 调试：返回当前节点数 */
