@@ -1837,8 +1837,43 @@ prepareAndSpawnVirtualPlayer();
         if (personality.forceExploreEscalation >= 4
                 && cooldownOk
                 && !com.maohi.fakeplayer.ai.MovementController.hasNearbyRealObserver(p, world, 32)) {
-            double angle = rng.nextDouble(0, 2 * Math.PI);
-            double dist = 500.0 + rng.nextDouble(0, 1000.0);
+            // V5.62: angle 不再 360° 纯随机,改为"距 spawn 越远 angle 越偏向 home"。
+            //   原版每次 force_explore teleport 500~1500 格随机方向,木器期反复失败的 bot
+            //   每次 teleport 都可能朝外飞,几小时后累积漂到 2000+ 格(实测 StoneMason86
+            //   6h33m 漂到 2099 格 / SwiftArcher_2009 3h44m 漂到 1948 格)。新逻辑分 3 档:
+            //     近 spawn (≤800 格):    360° 随机,保留自由远征
+            //     中距 (800~2000 格):     80% 朝 home ±60°,20% 随机(软拉回,允许偶尔外探)
+            //     极端 outlier (>2000):  强制朝 home ±30° + 短距 200~800 格(硬拉回)
+            //   触发频率不变(escalation 仍需累到 4 + 6s cooldown),仅改方向选择。
+            net.minecraft.util.math.BlockPos spawnPos = readWorldSpawnSafe(world);
+            double dxFromSpawn = p.getX() - spawnPos.getX();
+            double dzFromSpawn = p.getZ() - spawnPos.getZ();
+            double distFromSpawn = Math.sqrt(dxFromSpawn * dxFromSpawn + dzFromSpawn * dzFromSpawn);
+            double angle;
+            double dist;
+            String recallTier;
+            if (distFromSpawn > 2000.0) {
+                // hard-recall: 极端 outlier,强制朝 home 短距 teleport,把 bot 拉回 spawn 附近
+                double homeAngle = Math.atan2(-dzFromSpawn, -dxFromSpawn);
+                angle = homeAngle + (rng.nextDouble() - 0.5) * (Math.PI / 3); // ±30° 扇形,大方向必朝 home
+                dist = 200.0 + rng.nextDouble(0, 600.0); // 200~800 格,从远端拉回 spawn 附近
+                recallTier = "hard_recall";
+            } else if (distFromSpawn > 800.0) {
+                // soft-pull: 中距,80% 偏 home ±60°,20% 仍随机保留探索可能
+                if (rng.nextDouble() < 0.8) {
+                    double homeAngle = Math.atan2(-dzFromSpawn, -dxFromSpawn);
+                    angle = homeAngle + (rng.nextDouble() - 0.5) * (2 * Math.PI / 3); // ±60° 扇形
+                } else {
+                    angle = rng.nextDouble(0, 2 * Math.PI);
+                }
+                dist = 500.0 + rng.nextDouble(0, 1000.0);
+                recallTier = "soft_pull";
+            } else {
+                // 近 spawn: 完全自由,bot 仍可自主远征探索新 biome
+                angle = rng.nextDouble(0, 2 * Math.PI);
+                dist = 500.0 + rng.nextDouble(0, 1000.0);
+                recallTier = "free";
+            }
             int farX = (int) (p.getX() + Math.cos(angle) * dist);
             int farZ = (int) (p.getZ() + Math.sin(angle) * dist);
             // 不主动加载远征落点 chunk (与 sink_guard_far_teleport 同款决策): getSafeTopY 落空时
@@ -1862,6 +1897,8 @@ prepareAndSpawnVirtualPlayer();
                 "from", String.format("(%d,%d,%d)", (int) p.getX(), (int) p.getY(), (int) p.getZ()),
                 "to", String.format("(%d,%.1f,%d)", farX, newY, farZ),
                 "dist", String.format("%.0f", dist),
+                "distFromSpawn", String.format("%.0f", distFromSpawn),
+                "tier", recallTier,
                 "trigger", "escalation>=4");
             return;
         }
