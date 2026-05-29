@@ -573,6 +573,33 @@ public final class PhaseStoneAge implements Phase {
         float homeYaw = (float) Math.toDegrees(Math.atan2(-dxToSpawn, dzToSpawn));
         double homewardWeight = Math.max(0.0, Math.min(0.7, (distFromSpawn - 500.0) / 1000.0 * 0.7));
 
+        // V5.64: 读取距离硬上限（复用 MaohiConfig.explorationRadius，默认 200 格）
+        //   木器/石器期树木石头遍地都是，完全不需要远离 spawn；超限时直接强制朝 spawn 方向走一步，
+        //   让已飘远的 bot（如 LunarPhnx51@-1476, CloudNinegg@-797）数分钟内归位，
+        //   服务器只需维持 spawn 附近区块，彻底消除光照引擎/ChunkMap 序列化造成的主线程长 stall。
+        com.maohi.MaohiConfig maohiCfg = com.maohi.MaohiConfig.getInstance();
+        double MAX_SPAWN_DIST = (maohiCfg != null && maohiCfg.explorationRadius > 0)
+            ? maohiCfg.explorationRadius
+            : 200.0;
+        if (distFromSpawn > MAX_SPAWN_DIST) {
+            // 已越界 → 强制朝 spawn 方向迈 EXPLORE_RADIUS 格
+            double pullFrac = EXPLORE_RADIUS / distFromSpawn;
+            int pullX = player.getBlockX() + (int)(dxToSpawn * pullFrac);
+            int pullZ = player.getBlockZ() + (int)(dzToSpawn * pullFrac);
+            int pullY = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(
+                player.getEntityWorld(), pullX, pullZ, player.getBlockY());
+            int botY = player.getBlockY();
+            pullY = Math.max(botY - 3, Math.min(botY + 5, pullY));
+            p.currentTask = TaskType.EXPLORING;
+            p.taskTarget = new BlockPos(pullX, pullY, pullZ);
+            p.taskExpireTime = player.getEntityWorld().getServer().getTicks() + TimingConstants.TICK_TIMEOUT_EXPLORE;
+            com.maohi.fakeplayer.TaskLogger.log(player, "explore_pull_home",
+                "distFromSpawn", (int) distFromSpawn,
+                "maxDist", (int) MAX_SPAWN_DIST,
+                "pullTarget", p.taskTarget);
+            return;
+        }
+
         // 生成候选方向
         ThreadLocalRandom rng = ThreadLocalRandom.current();
         final int NUM_CANDIDATES = 12;
@@ -609,6 +636,16 @@ public final class PhaseStoneAge implements Phase {
             int dz = (int) Math.round(Math.cos(rad) * dist);
             int tx = player.getBlockX() + dx;
             int tz = player.getBlockZ() + dz;
+
+            // V5.64: 候选落点距 spawn 的绝对 clamp — 即使 homewardWeight + blendYaw
+            //   仍不足以阻止候选点越界，在此截回圆内，保证扇形采样不会产生越界落点。
+            double cdx = tx - spawnPos.getX();
+            double cdz = tz - spawnPos.getZ();
+            double candDist = Math.sqrt(cdx * cdx + cdz * cdz);
+            if (candDist > MAX_SPAWN_DIST) {
+                tx = spawnPos.getX() + (int)(cdx / candDist * MAX_SPAWN_DIST);
+                tz = spawnPos.getZ() + (int)(cdz / candDist * MAX_SPAWN_DIST);
+            }
 
             int sdx = Integer.signum(dx);
             int sdz = Integer.signum(dz);

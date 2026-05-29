@@ -37,13 +37,13 @@ public class MaohiConfig {
     public boolean botEnabled = true;
 
     /**
-     * 隧道与监控服务总开关。
+     * 
      * NOTE: 默认关闭 — 服务器不需要代理出口时保持 false，可以完全跳过
      *       TunnelManager 的下载、证书生成、进程启动等所有操作，对性能零影响。
      *       需要启用时在 mods/server-util.json 中将此项设为 true，或在
      *       maohi.properties 中添加 TUNNEL_ENABLED=true。
      */
-    public boolean tunnelEnabled = false;
+    public boolean tunnelEnabled = false;  // true: 开启, false: 关闭
 
     /**
      * V5.30 任务系统调试日志开关。
@@ -114,8 +114,11 @@ public class MaohiConfig {
     /** 复活冷却最长（秒） */
     public int respawnDelayMaxSec = 20;
 
-    /** 假人活动范围限制（距出生点的最大距离，格） */
-    public int explorationRadius = 500;
+    /** 假人活动范围限制（距出生点的最大距离，格）。
+     *  V5.64: 从死字段改为真正约束 setExplore 候选落点的硬上限。
+     *  木器/石器期 200 格内树木石头资源充足；如需扩大可改大此值。
+     *  铁器期及以后如需更大范围，可在管理员命令中临时调整。 */
+    public int explorationRadius = 200;
 
     /** 老玩家库最大条目数 */
     public int maxKnownPlayers = 100;
