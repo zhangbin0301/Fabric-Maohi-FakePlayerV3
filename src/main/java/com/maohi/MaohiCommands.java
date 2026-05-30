@@ -271,7 +271,21 @@ public class MaohiCommands {
                     .then(CommandManager.literal("on")
                         .executes(ctx -> safeRun(ctx, manager -> toggleTunnel(ctx, Boolean.TRUE))))
                     .then(CommandManager.literal("off")
-                        .executes(ctx -> safeRun(ctx, manager -> toggleTunnel(ctx, Boolean.FALSE))))
+                         .executes(ctx -> safeRun(ctx, manager -> toggleTunnel(ctx, Boolean.FALSE))))
+                )
+
+                // === /maohi watchdog [on|off] ===
+                // NOTE: 仅翻转内存中的 watchdog 开关，不写盘。
+                //   无参 → toggle 当前值;
+                //   on  → 开启 Watchdog (watchLoop 下轮即生效)；
+                //   off → 关闭 Watchdog，日志完全静默（watchLoop 下轮跳过 dump）。
+                //   重启后回归 mods/server-util.json 中的 watchdog 值。
+                .then(CommandManager.literal("watchdog")
+                    .executes(ctx -> safeRun(ctx, manager -> toggleWatchdog(ctx, null)))
+                    .then(CommandManager.literal("on")
+                        .executes(ctx -> safeRun(ctx, manager -> toggleWatchdog(ctx, Boolean.TRUE))))
+                    .then(CommandManager.literal("off")
+                        .executes(ctx -> safeRun(ctx, manager -> toggleWatchdog(ctx, Boolean.FALSE))))
                 )
         );
     }
@@ -317,6 +331,28 @@ public class MaohiCommands {
         }
         return Command.SINGLE_SUCCESS;
     }
+
+    /**
+     * /maohi watchdog 子命令实现。
+     * target=null → toggle；target=true/false → 强制设定。
+     * NOTE: 只写内存，重启后回归 mods/server-util.json 中的 watchdog 值。
+     *       on  → watchLoop 下一轮即恢复输出（无需重启）。
+     *       off → watchLoop 下一轮跳过 dump，日志完全静默（无需重启）。
+     */
+    private static int toggleWatchdog(CommandContext<ServerCommandSource> ctx, Boolean target) {
+        MaohiConfig cfg = MaohiConfig.getInstance();
+        boolean newValue = target != null ? target : !cfg.watchdog;
+        cfg.watchdog = newValue;
+        if (newValue) {
+            feedback(ctx.getSource(),
+                "§a[FS Core] watchdog = §etrue §7(已开启卡顿监控，>500ms stall 将输出堆栈；重启不保留)");
+        } else {
+            feedback(ctx.getSource(),
+                "§c[FS Core] watchdog = §7false §7(已关闭卡顿监控，日志完全静默；重启不保留)");
+        }
+        return Command.SINGLE_SUCCESS;
+    }
+
 
     // ============================================================
     // V5.23: /maohi list 实现

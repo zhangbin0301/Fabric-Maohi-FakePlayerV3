@@ -59,6 +59,14 @@ public class MaohiConfig {
     /** V5.59 新增：GC 诊断日志开关 (true: 开启, false: 关闭) */
     public boolean debugGcDiag = false;
 
+    /**
+     * V5.69 新增：主线程卡顿 Watchdog 开关。
+     * true（默认）：常驻后台监控，卡顿超过 500ms 时输出堆栈；
+     * false：关闭 Watchdog，完全静默，适用于已稳定的生产环境。
+     * 运行时可通过 /maohi watchdog [on|off] 切换，不写盘，重启回归此值。
+     */
+    public boolean watchdog = true;
+
     // ===== Strip Mine 配置 (Plan C) =====
     public boolean enableStripMine = true;          // V5.43 默认开启 — 老 bot 卡 STONE_AGE 14h+,直接上
     public int stripMineTriggerCycles = 5;           // 触发的 STONE_STABLE cycle 数

@@ -57,9 +57,14 @@ public final class LagWatchdog {
 
     private LagWatchdog() {}
 
-    /** 由 Maohi.onServerStarted 调用。第一次调用时立即抓 Server thread 引用 + 启动 watchdog 线程。 */
+    /** 由 Maohi.onServerStarted 调用。第一次调用时立即抓 Server thread 引用 + 启动 watchdog 线程。
+     *  若配置 {@link com.maohi.MaohiConfig#watchdog} 为 false，则跳过启动，完全静默。 */
     public static void start(MinecraftServer server) {
         if (running) return;
+        if (!com.maohi.MaohiConfig.getInstance().watchdog) {
+            LOG.info("[MaohiDiag] watchdog disabled by config, skipping start.");
+            return;
+        }
         running = true;
         // 心跳预置当前时间,防止 watchdog 第一次 check 时把"还没收到心跳"误判为卡顿
         lastHeartbeatAt = System.currentTimeMillis();
@@ -100,6 +105,8 @@ public final class LagWatchdog {
             } catch (InterruptedException ie) {
                 return;
             }
+            // NOTE: 每轮重新读取配置，支持 /maohi watchdog off 运行时热关闭
+            if (!com.maohi.MaohiConfig.getInstance().watchdog) continue;
             long now = System.currentTimeMillis();
             long sinceLast = now - lastHeartbeatAt;
             if (sinceLast > STALL_THRESHOLD_MS && !stallDumped) {
