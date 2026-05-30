@@ -39,11 +39,12 @@ public final class LagWatchdog {
     private static final Logger LOG = LoggerFactory.getLogger("Server thread");
     private static final long CHECK_INTERVAL_MS = 100L;
     /** 主线程心跳过期阈值,超过此值认定卡顿。
-     *  V5.62: 1000ms → 200ms。200ms 能抓到亚秒级问题,但也会误报原版区块加载、Lithium
+     *  V5.62: 1000ms → 200ms。200ms能抓到亚秒级问题,但也会误报原版区块加载、Lithium
      *  光照哈希扩容、PlayerTicketManager 清理等正常底噪(200~300ms 级别),导致日志频繁刷屏。
      *  V5.69: 200ms → 500ms。过滤掉原版引擎底噪,只保留真正的服务器卡顿报警(>500ms = 10 tick)。
+     *  V5.71: 500ms → 1000ms。将阈值提高到 1000ms，只记录超过 1 秒的严重卡顿，进一步过滤自动保存等底噪。
      *  误报防护靠 stallDumped 节流(单次 stall 只 dump 一次) + dump 后必须等心跳刷新才能再 dump。 */
-    private static final long STALL_THRESHOLD_MS = 500L;
+    private static final long STALL_THRESHOLD_MS = 1000L;
 
     /** 主线程心跳时间戳,由 onServerTick 末尾刷新。volatile 保证 watchdog 线程能立即看到最新值。 */
     private static volatile long lastHeartbeatAt = 0L;
