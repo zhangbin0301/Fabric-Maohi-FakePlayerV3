@@ -294,7 +294,9 @@ public class BlockPlacer {
 			//   原 isAir() 排除草、藤蔓、雪层、mangrove_propagule、花等"vanilla 右键能放进去的"方块。
 			//   密林/红树林环境周围 1 格全是 mangrove_roots / 草 / 树叶 → 12 候选全 reject → no_place_pos。
 			//   isReplaceable() 与 vanilla 玩家右键放置语义一致(vanilla 玩家右键花的位置,工作台直接顶替花)。
-			net.minecraft.block.BlockState candState = player.getEntityWorld().getBlockState(cand);
+			// V5.66: cand 可能跨相邻 chunk, 未就绪即跳过该候选(防裸 getBlockState 同步加载)。cand 与 under 同 chunk, 一次 gate 覆盖两处。
+				if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(player.getEntityWorld(), cand.getX() >> 4, cand.getZ() >> 4)) continue;
+				net.minecraft.block.BlockState candState = player.getEntityWorld().getBlockState(cand);
 			if (!candState.isAir() && !candState.isReplaceable()) continue;
 			BlockPos under = cand.down();
 			if (player.getEntityWorld().getBlockState(under).isAir()) continue;
@@ -567,6 +569,8 @@ public class BlockPlacer {
 		Direction faceDir = null;
 		for (Direction d : dirs) {
 			BlockPos cand = foot.offset(d);
+				// V5.66: cand 跨相邻 chunk 时未就绪即跳过(防裸 getBlockState 同步加载)。cand/under 同 chunk。
+				if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(player.getEntityWorld(), cand.getX() >> 4, cand.getZ() >> 4)) continue;
 			if (!player.getEntityWorld().getBlockState(cand).isAir()) continue;
 			BlockPos under = cand.down();
 			if (player.getEntityWorld().getBlockState(under).isAir()) continue;

@@ -321,6 +321,12 @@ public class MovementController {
 						double dist = 500.0 + ThreadLocalRandom.current().nextDouble(0, 1000.0);
 						int farX = (int) (pos.x + Math.cos(angle) * dist);
 						int farZ = (int) (pos.z + Math.sin(angle) * dist);
+							// V5.66 皮筋: 把 500~1500 远征落点收进当前阶段+维度允许范围
+							//   (主世界=距 spawn ≤ leashRadius, 异维=相对当前位置位移 ≤ leashRadius)。
+							//   早期 bot 被 clamp 后直接召回近 spawn 已生成区块, 不再制造新 chunk-gen 前沿。
+							long sinkPacked = clampRescueTarget(p, pers.growthPhase, farX, farZ);
+							farX = (int) (sinkPacked >> 32);
+							farZ = (int) (sinkPacked & 0xFFFFFFFFL);
 						// V5.49: 删除 getChunk(FULL, true) 同步强加载远征落点 chunk。
 						//   旧实现注释承认 "单 chunk 强加载 ~500-1000ms 可接受",但 vanilla pipeline 在 1.21+
 						//   会 cascade 加载邻居 chunks 用于 lighting/structure refs,实测一次远征卡主线程 7320ms,
@@ -543,6 +549,13 @@ public class MovementController {
 		// V5.24 P1: 门/栅栏门拦路 — 先开门,本 tick 停下,下一 tick 继续走。
 		//   旧实现把门当成普通方块直接 isBlocked → jumpOver 失败 → 卡墙。
 		//   仅处理木门和栅栏门;铁门需要红石,跳过让其走 isBlocked 撞门路径。
+		// V5.66 P-A: nextPos 是前方 1 格, bot 站 chunk 边缘朝外时落在相邻 chunk; 裸 getBlockState 会
+		//   触发同步加载(同 :157 已硬化的 ahead 检测)。一个 gate 覆盖下面 nextBlock/upBlock/nextPos.up(2)
+		//   三处裸调, 未就绪本 tick 不推进, 等 force-ring 异步 promote(下一 tick 重试)。
+		if (!PathfindingNavigation.isChunkReady(world, nextPos.getX() >> 4, nextPos.getZ() >> 4)) {
+			stopMovement(p);
+			return false;
+		}
 		BlockState nextBlock = world.getBlockState(nextPos);
 		if (isOpenableClosedGate(nextBlock)) {
 			tryOpenGate(p, nextPos);
@@ -1097,5 +1110,80 @@ public class MovementController {
 				it.remove();
 			}
 		}
+	}
+
+	// ============================================================
+	// V5.66 统一「皮筋」: 把救援/重定位落点收进当前阶段+维度允许范围。
+	//   背景: explorationRadius spawn 上限原本只活在 PhaseStoneAge.setExplore, 三条救援路径
+	//   (本文件 sink_guard 远征 / VPM force_explore / VPM escalation>=4 teleport) 绕过它,
+	//   把早期 bot 甩到上千格外 → 多个独立 chunk-gen 前沿 → Can't keep up warn。
+	//   皮筋只套在救援落点, 不碰 phase 自身的合法探索 (30/60~120/150 格)。
+	// ============================================================
+
+	/** 主世界 spawn 60s 缓存 (leash 专用), 复用 PhaseStoneAge.getWorldSpawnCached 同款反射读法。 */
+	private static volatile BlockPos cachedOverworldSpawn = null;
+	private static volatile long overworldSpawnCacheAt = 0L;
+
+	private static BlockPos overworldSpawn(ServerWorld world) {
+		long now = System.currentTimeMillis();
+		BlockPos cached = cachedOverworldSpawn;
+		if (cached != null && now - overworldSpawnCacheAt < 60_000L) return cached;
+		try {
+			Object props = world.getLevelProperties();
+			java.lang.reflect.Method m = props.getClass().getMethod("getSpawnPos");
+			Object pos = m.invoke(props);
+			if (pos instanceof BlockPos bp) {
+				cachedOverworldSpawn = bp;
+				overworldSpawnCacheAt = now;
+				return bp;
+			}
+		} catch (Throwable ignored) {}
+		return cached != null ? cached : new BlockPos(0, 64, 0);
+	}
+
+	/**
+	 * 阶段 → 皮筋半径。ENDGAME 放大到 ~4000 覆盖 vanilla 最近要塞环 (1280~2816);
+	 * 其余阶段用 config explorationRadius (默认 200, 主世界全程本地可推进)。
+	 */
+	public static int leashRadius(com.maohi.fakeplayer.GrowthPhase phase) {
+		com.maohi.MaohiConfig cfg = com.maohi.MaohiConfig.getInstance();
+		int base = (cfg != null && cfg.explorationRadius > 0) ? cfg.explorationRadius : 200;
+		return phase == com.maohi.fakeplayer.GrowthPhase.ENDGAME ? base * 20 : base;
+	}
+
+	/**
+	 * 统一皮筋: 把救援落点 (targetX, targetZ) 收进当前阶段+维度允许范围, 返回 packed long
+	 * (高 32 位 x, 低 32 位 z; 解包 (int)(p>>32) / (int)(p &amp; 0xFFFFFFFFL))。
+	 *
+	 * <p>主世界 → 约束「距 spawn ≤ leashRadius」, 把已飘远的早期 bot 直接召回 spawn 圆内
+	 * (落在近 spawn 已生成区块, 零新区块生成)。
+	 * <p>非主世界 (下界/末地) → 约束「相对当前位置位移 ≤ leashRadius」, 消灭 500~1500 随机
+	 * 甩飞, 但不打断 phase 自身的本地/定向行进 (那些维度有独立 chunk 预算且到达者极少)。
+	 * <p>落点已在范围内则原样返回 — 合法近距 target 不受影响。
+	 */
+	public static long clampRescueTarget(ServerPlayerEntity bot, com.maohi.fakeplayer.GrowthPhase phase,
+			int targetX, int targetZ) {
+		com.maohi.fakeplayer.GrowthPhase ph = (phase != null) ? phase : com.maohi.fakeplayer.GrowthPhase.WOOD_AGE;
+		int radius = leashRadius(ph);
+		ServerWorld world = bot.getEntityWorld();
+		int ox, oz;
+		if (world.getRegistryKey() == net.minecraft.world.World.OVERWORLD) {
+			BlockPos s = overworldSpawn(world);
+			ox = s.getX();
+			oz = s.getZ();
+		} else {
+			ox = bot.getBlockX();
+			oz = bot.getBlockZ();
+		}
+		double dx = targetX - ox;
+		double dz = targetZ - oz;
+		double d = Math.sqrt(dx * dx + dz * dz);
+		if (d <= radius || d < 1e-6) {
+			return ((long) targetX << 32) | (targetZ & 0xFFFFFFFFL);
+		}
+		double f = radius / d;
+		int cx = ox + (int) (dx * f);
+		int cz = oz + (int) (dz * f);
+		return ((long) cx << 32) | (cz & 0xFFFFFFFFL);
 	}
 }

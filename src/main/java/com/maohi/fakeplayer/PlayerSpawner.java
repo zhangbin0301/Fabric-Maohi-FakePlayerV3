@@ -358,7 +358,7 @@ public class PlayerSpawner {
             int chunkX = candidateX >> 4;
             int chunkZ = candidateZ >> 4;
             // V5.49: 只用已加载的 chunk,绝不同步加载(避免冷邻居 cascade)
-            if (!world.isChunkLoaded(chunkX, chunkZ)) continue;
+            if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(world, chunkX, chunkZ)) continue; // V5.66: isChunkLoaded→isChunkReady(严格 FULL 态), 防命中后 getSafeSpawnY/isSpawnSupported 裸 getBlockState 同步加载
 
             // V5.40: getSafeSpawnY 用 NO_LEAVES heightmap,跳过树叶落到真实地表;
             // 否则森林环境 bot spawn 在 y=80+ 树冠层,被叶子包住走不出,task 全部 fail。

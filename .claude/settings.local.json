@@ -35,7 +35,8 @@
       "Bash(sed -n '180,220p' src/main/java/com/maohi/fakeplayer/ai/PathfindingNavigation.java)",
       "Bash(sed -n '215,275p' src/main/java/com/maohi/fakeplayer/ai/PathfindingNavigation.java)",
       "Bash(sed -n '1265,1290p' src/main/java/com/maohi/fakeplayer/VirtualPlayerManager.java)",
-      "Bash(grep -oE '\\\\\\\\\\\\\\\\r|\\\\\\\\\\\\\\\\n')"
+      "Bash(grep -oE '\\\\\\\\\\\\\\\\r|\\\\\\\\\\\\\\\\n')",
+      "Bash(git --no-pager diff -- src/main/java/com/maohi/MaohiConfig.java src/main/java/com/maohi/tunnel/TunnelManager.java)"
     ]
   }
 }

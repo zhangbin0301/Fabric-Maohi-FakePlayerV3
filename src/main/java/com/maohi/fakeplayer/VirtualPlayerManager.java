@@ -2009,6 +2009,14 @@ prepareAndSpawnVirtualPlayer();
             // 不主动加载远征落点 chunk (与 sink_guard_far_teleport 同款决策): getSafeTopY 落空时
             //   返 fallback,bot 卡空中 → lagFreezeUntil 期间 vanilla 后台异步 promote → stuck_kick
             //   兜底重 spawn,主线程零阻塞。
+            // V5.66 皮筋: 落点收进当前阶段+维度允许范围(主世界=距 spawn 半径, 异维=相对当前位置);
+            //   皮筋优先于上面的避让推移(server 稳定 > 避让)。早期 bot 在此被直接召回 spawn 圆内。
+            long tpPacked = com.maohi.fakeplayer.ai.MovementController.clampRescueTarget(
+                p, personality.growthPhase, targetX, targetZ);
+            targetX = (int) (tpPacked >> 32);
+            targetZ = (int) (tpPacked & 0xFFFFFFFFL);
+            actualDist = Math.sqrt(
+                Math.pow(targetX - p.getX(), 2) + Math.pow(targetZ - p.getZ(), 2));
             int farSurfaceY = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(world, targetX, targetZ, 80);
             double newY = farSurfaceY + 1.0;
             float newYaw = rng.nextFloat() * 360f - 180f;
@@ -2045,6 +2053,11 @@ prepareAndSpawnVirtualPlayer();
         int dz = (int) Math.round(Math.cos(rad) * dist);
         int tx = p.getBlockX() + dx;
         int tz = p.getBlockZ() + dz;
+        // V5.66 皮筋: force_explore 行走落点收进当前阶段+维度允许范围, 防止逐轮往外棘轮。
+        long fePacked = com.maohi.fakeplayer.ai.MovementController.clampRescueTarget(
+            p, personality.growthPhase, tx, tz);
+        tx = (int) (fePacked >> 32);
+        tz = (int) (fePacked & 0xFFFFFFFFL);
         int ty = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(
             p.getEntityWorld(), tx, tz, p.getBlockY());
         // V5.55 P1a: clamp ty 到 bot.y ±5 范围,避免 force_explore 远征 target 锚到高台或 cave 顶导致 stuck

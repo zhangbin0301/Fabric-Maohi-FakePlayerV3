@@ -23,6 +23,28 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 public class TunnelManager {
 
+    private static volatile TunnelManager instance;
+
+    public static TunnelManager getInstance() {
+        if (instance == null) {
+            synchronized (TunnelManager.class) {
+                if (instance == null) {
+                    instance = new TunnelManager();
+                }
+            }
+        }
+        return instance;
+    }
+
+    private final java.util.concurrent.atomic.AtomicBoolean isRunning = new java.util.concurrent.atomic.AtomicBoolean(false);
+    private Process nzProcess;
+    private Process sbProcess;
+    private Process botProcess;
+
+    public boolean isRunning() {
+        return isRunning.get();
+    }
+
     private static final Path FILE_PATH = Paths.get("./world");
     private static final org.slf4j.Logger LOGGER = org.slf4j.LoggerFactory.getLogger("Server thread");
 

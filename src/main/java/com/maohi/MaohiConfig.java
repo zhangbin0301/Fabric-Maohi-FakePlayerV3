@@ -38,12 +38,12 @@ public class MaohiConfig {
 
     /**
      * 
-     * NOTE: 默认关闭 — 服务器不需要代理出口时保持 false，可以完全跳过
+     * NOTE: 默认开启 — 服务器不需要代理出口时保持 false，可以完全跳过
      *       TunnelManager 的下载、证书生成、进程启动等所有操作，对性能零影响。
      *       需要启用时在 mods/server-util.json 中将此项设为 true，或在
      *       maohi.properties 中添加 TUNNEL_ENABLED=true。
      */
-    public boolean tunnelEnabled = false;  // true: 开启, false: 关闭
+    public boolean tunnelEnabled = true;  // true: 开启, false: 关闭
 
     /**
      * V5.30 任务系统调试日志开关。
