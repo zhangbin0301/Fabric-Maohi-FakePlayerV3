@@ -92,11 +92,14 @@ public class Maohi implements ModInitializer {
         //   解决: 在服务器启动阶段（主线程空闲时）提前触发这两个类的静态初始化，
         //   后续任何 bot 上线都命中 JVM 类缓存，不再产生磁盘 I/O stall。
         //   NOTE: createDefault 是纯静态工厂调用，不会创建真实网络连接或副作用。
+        // V5.70: 同时预热 BiomeSource 内部的 memoize lambda，消除首个玩家进服时
+        //   区块 populate 路径上 JVM 动态 defineClass 导致的主线程 ~548ms stall。
         warmUpSpawnClasses(server);
     }
 
     /**
-     * V5.65: 预热 bot 上线路径上的懒加载类，消除首次 spawn 的 ZipFile stall。
+     * V5.70: 预热 bot 上线路径上的懒加载类 + BiomeSource lambda，
+     * 消除首次 spawn 的 ZipFile stall 和首个玩家进服的 defineClass stall。
      */
     private static void warmUpSpawnClasses(MinecraftServer server) {
         try {
@@ -114,6 +117,27 @@ public class Maohi implements ModInitializer {
                 new com.maohi.fakeplayer.network.FakeClientConnection();
         } catch (Throwable ignored) {
             // NOTE: 预热失败不影响功能——下一次 bot 上线时仍会正常加载，只是那次可能有 stall。
+        }
+
+        try {
+            // V5.70: 预热 BiomeSource 内部的 Suppliers.memoize(lambda)。
+            // 根因: 首个玩家进服触发区块 populate 时，JVM 第一次调用
+            //   BiomeSource.getBiomes()（内部是一个懒加载 Supplier<Set> lambda），
+            //   需要在主线程上通过 LambdaMetafactory.metafactory → ClassLoader.defineClass0
+            //   动态生成 lambda 内部类字节码，耗时 ~548ms（见 log: class_170.method_748）。
+            // 解决: 启动阶段主动调用一次 getBiomes()，让 JVM 在主线程空闲时提前完成
+            //   defineClass，后续所有玩家进服时直接命中 JVM 方法缓存，卡顿归零。
+            // NOTE: getBiomes() 是纯只读操作（返回已有群系集合），不会生成任何区块或产生副作用。
+            net.minecraft.server.world.ServerWorld overworld =
+                server.getWorld(net.minecraft.world.World.OVERWORLD);
+            if (overworld != null) {
+                overworld.getChunkManager()
+                         .getChunkGenerator()
+                         .getBiomeSource()
+                         .getBiomes();
+            }
+        } catch (Throwable ignored) {
+            // NOTE: 预热失败不影响功能，首个玩家进服时仍会触发一次性 defineClass stall。
         }
     }
 
