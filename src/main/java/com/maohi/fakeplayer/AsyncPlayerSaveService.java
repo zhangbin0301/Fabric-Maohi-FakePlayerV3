@@ -47,7 +47,6 @@ public class AsyncPlayerSaveService {
             return t;
         };
         this.executor = Executors.newSingleThreadExecutor(tf);
-        LOGGER.info("[MaohiAsyncSave] 异步写盘服务已启动");
     }
 
     /**
