@@ -79,6 +79,8 @@ public class Maohi implements ModInitializer {
      * 服务器启动完成回调 (由 MinecraftServerMixin 调用)
      */
     public static void onServerStarted(MinecraftServer server) {
+        // V5.67: 先于 VirtualPlayerManager 初始化异步写盘服务，确保假人首次存档时已就绪。
+        com.maohi.fakeplayer.AsyncPlayerSaveService.init();
         virtualPlayerManager = new com.maohi.fakeplayer.VirtualPlayerManager(server);
         virtualPlayerManager.start();
         // V5.59: 主线程 lag watchdog 启动。常驻 daemon 线程,无 stall 时 0 输出。
@@ -123,6 +125,8 @@ public class Maohi implements ModInitializer {
         if (virtualPlayerManager != null) {
             virtualPlayerManager.stop();
         }
+        // V5.67: 等待后台写盘队列清空后再退出，避免关服时假人数据未写完。
+        com.maohi.fakeplayer.AsyncPlayerSaveService.shutdown();
         // V5.59: 关停 watchdog 线程,避免 daemon 在 jvm 关停时仍输出日志
         com.maohi.fakeplayer.diag.LagWatchdog.stop();
         // V5.23: 关停皮肤抓取线程池,避免 daemon 线程在 jvm 关停时仍跑 HTTP
