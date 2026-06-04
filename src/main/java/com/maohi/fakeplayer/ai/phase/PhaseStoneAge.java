@@ -255,7 +255,7 @@ public final class PhaseStoneAge implements Phase {
                         if (personality.stoneStableCyclesNoIron >= cfg.stripMineTriggerCycles
                                 && player.getHealth() > 14.0f
                                 && d.hasStonePickaxe
-                                && d.maxStonePickaxeRemainingDurability >= 100) {
+                                && d.maxStonePickaxeRemainingDurability >= 60) {
                             personality.stripMineState = SubPhase.STRIP_MINE_DESCEND;
                             personality.stripMineStartPos = player.getBlockPos().toImmutable();
                             personality.stripMineStartY = player.getBlockY();

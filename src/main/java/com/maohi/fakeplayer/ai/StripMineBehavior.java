@@ -37,9 +37,15 @@ public class StripMineBehavior {
         if (!"got_iron".equals(reason)) {
             pers.stripMineState = PhaseStoneAge.SubPhase.STRIP_MINE_ASCEND;
             pers.currentTask = TaskType.STRIP_MINE;
-            // 失败惩罚冷却
+            // V5.72: 冷却分级 — 无害退出(没找到铁 max_len / 被挡 blocked_layer / 配置关闭)快速重试,
+            //   真危险(血量低 / 岩浆 / 触底 / 无耐久镐)才长冷却。
+            //   旧行为:任何非 got_iron 一律 30min 冷却,卡住的 bot 约 40min 才重试一次 → strip-mine
+            //   几乎不工作。无害退出后 bot 会 ASCEND 回地表、移动到新位置,短冷却让它很快换地方再下矿。
             MaohiConfig cfg = MaohiConfig.getInstance();
-            int cooldownMin = cfg != null ? cfg.stripMineCooldownMinutes : 30;
+            boolean benign = "max_len".equals(reason) || "blocked_layer".equals(reason) || "disabled".equals(reason);
+            int cooldownMin = benign
+                ? (cfg != null ? cfg.stripMineBenignCooldownMinutes : 2)
+                : (cfg != null ? cfg.stripMineCooldownMinutes : 10);
             pers.stripMineCooldownUntil = System.currentTimeMillis() + cooldownMin * 60_000L;
         } else {
             pers.stripMineState = null;
@@ -60,6 +66,19 @@ public class StripMineBehavior {
         if (cfg == null || !cfg.enableStripMine) {
             abort(pers, player, "disabled");
             return;
+        }
+
+        // V5.72: strip-mine 期间主动拾取掉落物(决定性卡点修复)。
+        //   根因:VPM.tickWorldInteraction 在 strip-mine 激活时提前 return(~line 2663),
+        //   导致每 20 tick 的 simulateEntityInteraction 拾取完全不跑;而 tickLayer 用 breakBlock
+        //   隔空挖最远 4 格(甚至下方)的矿石,raw_iron 掉在原地,只有正面穿矿时才被 vanilla ~1 格
+        //   碰撞拾起。偏轴/下方矿石掉落物从不回收 → hasIronInInventory 长期 false → tunnel 到
+        //   max_len → abort → 30min 冷却 → STONE_AGE 永久卡死。
+        //   复用 PICKUP_DROP 同款 12 格全量拾取兜底(同线程同上下文,strip-mine tick 本就由
+        //   tickWorldInteraction 调度)。每 5 tick 一次,开销可忽略。
+        int picked = ActionSimulator.pickupAllNearbyDrops(player);
+        if (picked > 0) {
+            TaskLogger.log(player, "stripmine_pickup", "count", picked, "y", player.getBlockY());
         }
 
         switch (pers.stripMineState) {
