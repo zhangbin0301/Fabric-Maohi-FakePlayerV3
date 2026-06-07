@@ -139,6 +139,34 @@ public class Maohi implements ModInitializer {
         } catch (Throwable ignored) {
             // NOTE: 预热失败不影响功能，首个玩家进服时仍会触发一次性 defineClass stall。
         }
+
+        try {
+            // V5.89: 预热「实体追踪器」构造路径，消除首个 bot spawn 的冷类加载 stall。
+            // 根因: PlayerSpawner.spawn:165 → onPlayerConnect 把假人实体加入世界时，
+            //   ServerChunkLoadingManager.loadEntity 首次 new EntityTracker(class_3898$class_3208)，
+            //   其构造体首次引用 EntityTrackerEntry，触发 Fabric KnotClassDelegate.getCodeSource
+            //   (URL→URI→Path) 冷加载，实测首个 bot spawn 主线程 ~1111ms stall
+            //   （见 thread_stall_dump：栈顶 UrlUtil.asPath ← class_3898$class_3208.<init>:1391）。
+            // 解决: 启动阶段往主世界出生点丢一个一次性 XP orb 再立即 discard，同步走完
+            //   spawnEntity → startTracking → loadEntity → new EntityTracker → EntityTrackerEntry 全链，
+            //   让这些类在主线程空闲时提前加载；后续真实 bot spawn 命中 JVM 类缓存，stall 归零。
+            // NOTE: 实体在 spawn 后同一同步调用内立即 discard，存活 < 1 tick、此时无真人在线/不发包，无副作用。
+            //   出生点经 PlayerSpawner.readWorldSpawnPos 解析，保证落在已加载 spawn chunk 内——
+            //   否则实体落到未加载 section 不会同步建 tracker，预热会落空。
+            net.minecraft.server.world.ServerWorld overworld =
+                server.getWorld(net.minecraft.world.World.OVERWORLD);
+            if (overworld != null) {
+                net.minecraft.util.math.BlockPos sp =
+                    com.maohi.fakeplayer.PlayerSpawner.readWorldSpawnPos(overworld);
+                net.minecraft.entity.ExperienceOrbEntity warmOrb =
+                    new net.minecraft.entity.ExperienceOrbEntity(
+                        overworld, sp.getX() + 0.5, sp.getY(), sp.getZ() + 0.5, 0);
+                overworld.spawnEntity(warmOrb);
+                warmOrb.discard();
+            }
+        } catch (Throwable ignored) {
+            // NOTE: 预热失败不影响功能，首个 bot spawn 时仍会触发一次性冷加载 stall。
+        }
     }
 
 

@@ -256,7 +256,8 @@ public class PlayerSpawner {
      *   2) overworld.getSpawnPos() / getSpawnX-Y-Z
      *   3) Heightmap MOTION_BLOCKING 在 (0,0) 找地表 Y(最后兜底,绝不返回 (0,0,0))
      */
-    private static net.minecraft.util.math.BlockPos readWorldSpawnPos(net.minecraft.server.world.ServerWorld world) {
+    // V5.89: public 供 Maohi.warmUpSpawnClasses 复用——预热实体追踪器路径需要一个「已加载 spawn chunk」内的落点。
+    public static net.minecraft.util.math.BlockPos readWorldSpawnPos(net.minecraft.server.world.ServerWorld world) {
         net.minecraft.util.math.BlockPos cached = cachedWorldSpawn;
         if (cached != null) return cached;
         net.minecraft.util.math.BlockPos resolved = doReadWorldSpawnPos(world);
