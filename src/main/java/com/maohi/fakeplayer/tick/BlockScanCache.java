@@ -189,7 +189,7 @@ public final class BlockScanCache {
 							if (skip) continue;
 						}
 						m.set(x, y, z);
-						if (net.minecraft.registry.Registries.BLOCK.getId(world.getBlockState(m).getBlock()).getPath().contains(type)) {
+						if (matchesType(net.minecraft.registry.Registries.BLOCK.getId(world.getBlockState(m).getBlock()).getPath(), type)) {
 							return m.toImmutable();
 						}
 					}
@@ -197,6 +197,22 @@ public final class BlockScanCache {
 			}
 		}
 		return null;
+	}
+
+	/**
+	 * V5.95: scanShells 的方块类型匹配。"stone" 专用精确白名单 —— 子串匹配会让 findStone(type="stone")
+	 *   误命中 cobblestone_stairs / stone_bricks / sandstone / mossy_cobblestone / redstone_ore / stonecutter
+	 *   等含 "stone" 的装饰/结构块(村庄、结构附近就在地表,比埋着的自然石更近 → 假人专挑它们挖,
+	 *   掉的不是圆石 → cobble 永远 0 → 卡石器;且常因够不到这些块原地 moved30s=0)。实测 Zoe123
+	 *   mine_start block=cobblestone_stairs 即此坑。只认真正掉圆石/深板岩、能合石器的自然石,
+	 *   与 PhaseStoneAge.scanDownForStone 白名单一致。其余类型(log / *_ore / ...)保持子串匹配不变。
+	 */
+	private static boolean matchesType(String path, String type) {
+		if ("stone".equals(type)) {
+			return path.equals("stone") || path.equals("cobblestone")
+				|| path.equals("deepslate") || path.equals("cobbled_deepslate");
+		}
+		return path.contains(type);
 	}
 
 	/**
