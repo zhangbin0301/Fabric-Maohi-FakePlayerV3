@@ -374,7 +374,7 @@ public class MaohiCommands {
         boolean isPlayer = ctx.getSource().getEntity() instanceof ServerPlayerEntity;
         if (isPlayer) {
             StringBuilder sb = new StringBuilder();
-            sb.append("§6[FS Core] 在线假人 §f").append(uuids.size()).append(" §6名:\n");
+            sb.append("§6[FS Core ").append(Maohi.VERSION).append("] 在线假人 §f").append(uuids.size()).append(" §6名:\n");
             for (UUID uuid : new java.util.ArrayList<>(uuids)) {
                 sb.append(formatBotLine(manager, uuid)).append('\n');
             }
@@ -383,7 +383,7 @@ public class MaohiCommands {
         } else {
             // 控制台/RCON/面板路径：每个 bot 独立 feedback（标准终端自动分行）。
             // 每行加 ▶ 前缀，即使面板把多行挤成一行也能靠 ▶ 区分各假人。
-            feedback(ctx.getSource(), "§6[FS Core] 在线假人 §f" + uuids.size() + " §6名:");
+            feedback(ctx.getSource(), "§6[FS Core " + Maohi.VERSION + "] 在线假人 §f" + uuids.size() + " §6名:");
             for (UUID uuid : new java.util.ArrayList<>(uuids)) {
                 feedback(ctx.getSource(), "▶" + formatBotLine(manager, uuid));
             }
