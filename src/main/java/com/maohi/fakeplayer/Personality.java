@@ -39,6 +39,12 @@ public class Personality {
 	public transient int stripMineTunnelLen = 0;
 	public transient Direction stripMineFacing = Direction.NORTH;
 	public transient int stripMineConsecutiveFails = 0;
+	// V5.97: STONE_START 卡圆石计数。地表乱地形里 assignMineStone 的楼梯走 MINING 任务、假人导航不到
+	//   够不着的目标 → 空转超时、几小时挖不到圆石。累计"无圆石进展"周期到 stripMineTriggerCycles 后,
+	//   改用 strip-mine 的可靠 breakBlock+teleport 下降取圆石。stoneStartLastCobble 记上周期圆石数,
+	//   涨了就重置 stuck(正常挖到圆石时不误触发);初值 -1 让首个周期只 init 不计数。
+	public transient int stoneStartStuckCycles = 0;
+	public transient int stoneStartLastCobble = -1;
 	
 	public GrowthPhase growthPhase = GrowthPhase.WOOD_AGE; // V5.44: 新生 bot 从木器时代起步(无镐),vanilla 玩家自然入门档
 	public long phaseEnteredAt = 0L;

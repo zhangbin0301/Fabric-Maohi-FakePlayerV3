@@ -233,7 +233,40 @@ public final class PhaseStoneAge implements Phase {
         }
 
         switch (sub) {
-            case STONE_START -> assignMineStone(player, personality, ctx);
+            case STONE_START -> {
+                // V5.97: 卡石器根治 —— STONE_START 在地表乱地形里反复挖不到圆石(assignMineStone 的楼梯走
+                //   MINING 任务,假人导航不到够不着的目标 → 空转到 ~120s 超时,实测 3h42m 才 2 圆石)。累计
+                //   stripMineTriggerCycles 个「无圆石进展」周期后,改用 strip-mine 的可靠 breakBlock+teleport
+                //   下降:木镐挖石头照掉圆石(StripMineBehavior 非钻石目标接受木镐),~14 级后镐挖断 →
+                //   low_durability abort → ascend 回地表 → 下轮 STONE_TOOL 合石镐。整套复用已验证的 strip-mine。
+                //   有圆石进展(cobble 涨)就重置计数,绝不打断正常能挖到圆石的假人。
+                com.maohi.MaohiConfig saCfg = com.maohi.MaohiConfig.getInstance();
+                if (saCfg != null && saCfg.enableStripMine
+                        && personality.stripMineCooldownUntil <= System.currentTimeMillis()
+                        && player.getHealth() > 14.0f
+                        && d.hasAnyPickaxe) {
+                    if (d.cobbleCount > personality.stoneStartLastCobble) {
+                        personality.stoneStartStuckCycles = 0;   // 有圆石进展 → 重置,不打断正常挖矿
+                    } else {
+                        personality.stoneStartStuckCycles++;
+                    }
+                    personality.stoneStartLastCobble = d.cobbleCount;
+                    if (personality.stoneStartStuckCycles >= saCfg.stripMineTriggerCycles) {
+                        personality.stripMineForDiamond = false;   // 石器 strip-mine 非钻石目标,木镐即可挖石取圆石
+                        personality.stripMineState = SubPhase.STRIP_MINE_DESCEND;
+                        personality.stripMineStartPos = player.getBlockPos().toImmutable();
+                        personality.stripMineStartY = player.getBlockY();
+                        personality.stripMineTunnelLen = 0;
+                        personality.stoneStartStuckCycles = 0;
+                        personality.currentTask = TaskType.STRIP_MINE;
+                        com.maohi.fakeplayer.TaskLogger.log(player, "stripmine_enter",
+                            "goal", "cobble", "startY", personality.stripMineStartY,
+                            "cobble", d.cobbleCount, "cycles", saCfg.stripMineTriggerCycles);
+                        return;
+                    }
+                }
+                assignMineStone(player, personality, ctx);
+            }
 
             case STONE_TOOL -> {
                 // V5.42 死锁 #1 修复:cobble 够了但 bot 远离工作台时主动走过去。
