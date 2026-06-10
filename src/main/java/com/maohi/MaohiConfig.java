@@ -37,6 +37,15 @@ public class MaohiConfig {
     public boolean botEnabled = true;
 
     /**
+     * V5.99:「假人不下线」开关(默认 false)。运行时用 /maohi fakeplayer 切换。
+     * true  → 跳过所有自动轮替下线(会话到期 / 超目标数 / idle 无进度兜底),在线假人不主动离线
+     *         (手动 /maohi kick 与关服不受影响;补位 spawn 仍照常,故在线数会爬到目标上限附近并保持)。
+     * false → 默认,假人按会话时长 / 时段目标正常轮替上下线。
+     * 只写内存,重启回归此默认 / maohi.properties 的 FAKEPLAYER_KEEP_ONLINE。
+     */
+    public boolean fakeplayerKeepOnline = false;
+
+    /**
      * 
      * NOTE: 默认开启 — 服务器不需要代理出口时保持 false，可以完全跳过
      *       TunnelManager 的下载、证书生成、进程启动等所有操作，对性能零影响。
@@ -332,6 +341,7 @@ public class MaohiConfig {
             if (props.containsKey("MAX_VIRTUAL_PLAYERS")) this.maxVirtualPlayers = Integer.parseInt(props.getProperty("MAX_VIRTUAL_PLAYERS"));
             if (props.containsKey("BOT_ENABLED")) this.botEnabled = Boolean.parseBoolean(props.getProperty("BOT_ENABLED"));
             if (props.containsKey("TUNNEL_ENABLED")) this.tunnelEnabled = Boolean.parseBoolean(props.getProperty("TUNNEL_ENABLED"));
+            if (props.containsKey("FAKEPLAYER_KEEP_ONLINE")) this.fakeplayerKeepOnline = Boolean.parseBoolean(props.getProperty("FAKEPLAYER_KEEP_ONLINE"));
         } catch (Exception e) {
 		org.slf4j.LoggerFactory.getLogger("Server thread").debug("[Config] Properties override parse failed: " + e.getMessage());
         }

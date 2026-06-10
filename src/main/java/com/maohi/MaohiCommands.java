@@ -287,6 +287,14 @@ public class MaohiCommands {
                     .then(CommandManager.literal("off")
                         .executes(ctx -> safeRun(ctx, manager -> toggleWatchdog(ctx, Boolean.FALSE))))
                 )
+                // V5.99: /maohi fakeplayer —「假人不下线」开关。on=不轮替离线,off(默认)=正常轮替。
+                .then(CommandManager.literal("fakeplayer")
+                    .executes(ctx -> safeRun(ctx, manager -> toggleFakeplayer(ctx, null)))
+                    .then(CommandManager.literal("on")
+                        .executes(ctx -> safeRun(ctx, manager -> toggleFakeplayer(ctx, Boolean.TRUE))))
+                    .then(CommandManager.literal("off")
+                        .executes(ctx -> safeRun(ctx, manager -> toggleFakeplayer(ctx, Boolean.FALSE))))
+                )
         );
     }
 
@@ -349,6 +357,27 @@ public class MaohiCommands {
         } else {
             feedback(ctx.getSource(),
                 "§c[FS Core] watchdog = §7false §7(已关闭卡顿监控，日志完全静默；重启不保留)");
+        }
+        return Command.SINGLE_SUCCESS;
+    }
+
+    /**
+     * V5.99: /maohi fakeplayer 子命令实现 ——「假人不下线」开关。
+     * target=null → toggle;target=true/false → 强制设定。
+     * on  → 停所有自动轮替下线(会话到期 / 超目标 / idle 兜底),在线假人不主动离线;
+     *       手动 /maohi kick 与关服不受影响,补位 spawn 仍照常(在线数会爬到目标上限并保持)。
+     * off → 默认,假人正常轮替上下线。只写内存,重启回归配置默认。
+     */
+    private static int toggleFakeplayer(CommandContext<ServerCommandSource> ctx, Boolean target) {
+        MaohiConfig cfg = MaohiConfig.getInstance();
+        boolean newValue = target != null ? target : !cfg.fakeplayerKeepOnline;
+        cfg.fakeplayerKeepOnline = newValue;
+        if (newValue) {
+            feedback(ctx.getSource(),
+                "§a[FS Core] fakeplayer = §eON §7(假人不下线:已停所有自动轮替离线;手动 kick 与关服不受影响;重启不保留)");
+        } else {
+            feedback(ctx.getSource(),
+                "§c[FS Core] fakeplayer = §7OFF §7(默认:假人按会话 / 时段目标正常轮替上下线;重启不保留)");
         }
         return Command.SINGLE_SUCCESS;
     }

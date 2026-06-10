@@ -820,6 +820,7 @@ prepareAndSpawnVirtualPlayer();
                         //   注:kickRandomVirtualPlayer 路径不会跌破 min,因为它由 size > currentTargetCount
                         //   触发,而 currentTargetCount 永远 ≥ configMin(updateTargetCount 已保证)。
                         for (UUID uuid : virtualPlayerUUIDs) {
+                            if (config().fakeplayerKeepOnline) break;   // V5.99: keepOnline(/maohi fakeplayer on)→ 不按会话到期下线
                             if (nowMs > sessionDurations.getOrDefault(uuid, Long.MAX_VALUE)) {
                                 if (virtualPlayerUUIDs.size() - logoutScheduledTime.size() <= config().minVirtualPlayers) {
                                     long bufferMs = (5 + ThreadLocalRandom.current().nextInt(11)) * 60_000L;
@@ -836,7 +837,8 @@ prepareAndSpawnVirtualPlayer();
                         //   pendingLogoutQueue 路径 ≥1s)。原公式只减 logoutScheduledTime,
                         //   导致同 lambda 内 removeIf 触发的 logout 在本行看到虚高 1 → 随机踢人。
                         int effectiveOnline = virtualPlayerUUIDs.size() - logoutScheduledTime.size() - inFlightLogouts.size();
-                        if (effectiveOnline > currentTargetCount) {
+                        // V5.99: keepOnline → 不按超目标数踢人(假人不主动离线;补位 spawn 仍照常)
+                        if (effectiveOnline > currentTargetCount && !config().fakeplayerKeepOnline) {
                             int toKick = effectiveOnline - currentTargetCount;
                             List<UUID> candidates = new ArrayList<>(virtualPlayerUUIDs);
                             candidates.removeAll(logoutScheduledTime.keySet());
@@ -1620,6 +1622,8 @@ prepareAndSpawnVirtualPlayer();
      * 大概率落到与上次完全不同的 chunk,避开同地形陷阱。
      */
     private void scanIdleNoProgressBots() {
+        // V5.99: keepOnline(/maohi fakeplayer on)→ 跳过 idle 无进度兜底踢人,假人不主动离线。
+        if (config().fakeplayerKeepOnline) return;
         long now = System.currentTimeMillis();
         if (now - lastIdleProgressScanAt < IDLE_PROGRESS_SCAN_INTERVAL_MS) return;
         lastIdleProgressScanAt = now;
