@@ -32,6 +32,9 @@ public class Personality {
 	//   同一套 StripMineBehavior 状态机据此切换目标 Y / 收手条件(got_iron vs got_diamond) / 镐前置(任意镐 vs 铁镐+)。
 	//   transient:每次发起 strip-mine 时由发起方(PhaseStoneAge=false / PhaseIronAge=true)显式置位。
 	public transient boolean stripMineForDiamond = false;
+	// V5.98: strip-mine「圆石目标」—— STONE_START 木镐采不了铁,只为取圆石下挖;够数即 abort got_cobble 上爬
+	//   回地表台合石镐,不再奔 Y15(深陷无台 → 几十圆石也合不出石镐)。仅 STONE_START 入口置 true,铁/钻入口 false。
+	public transient boolean stripMineForCobble = false;
 	public transient BlockPos stripMineStartPos = null;
 	public transient int stripMineStartY = 64;
 	public int stoneStableCyclesNoIron = 0;

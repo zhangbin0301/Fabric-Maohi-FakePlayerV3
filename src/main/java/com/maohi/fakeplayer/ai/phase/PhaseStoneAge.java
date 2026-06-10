@@ -253,6 +253,7 @@ public final class PhaseStoneAge implements Phase {
                     personality.stoneStartLastCobble = d.cobbleCount;
                     if (personality.stoneStartStuckCycles >= saCfg.stripMineTriggerCycles) {
                         personality.stripMineForDiamond = false;   // 石器 strip-mine 非钻石目标,木镐即可挖石取圆石
+                        personality.stripMineForCobble = true;     // V5.98: 圆石目标 — 够圆石即上爬回地表台合石镐,不奔 Y15
                         personality.stripMineState = SubPhase.STRIP_MINE_DESCEND;
                         personality.stripMineStartPos = player.getBlockPos().toImmutable();
                         personality.stripMineStartY = player.getBlockY();
@@ -422,6 +423,7 @@ public final class PhaseStoneAge implements Phase {
                                 && d.hasStonePickaxe
                                 && d.maxStonePickaxeRemainingDurability >= 60) {
                             personality.stripMineForDiamond = false; // V5.84: 石器时代 strip-mine 始终为 IRON goal(挖到 Y15 拿铁)
+                            personality.stripMineForCobble = false;  // V5.98: 铁目标,挖到 Y15,不走圆石早退
                             personality.stripMineState = SubPhase.STRIP_MINE_DESCEND;
                             personality.stripMineStartPos = player.getBlockPos().toImmutable();
                             personality.stripMineStartY = player.getBlockY();

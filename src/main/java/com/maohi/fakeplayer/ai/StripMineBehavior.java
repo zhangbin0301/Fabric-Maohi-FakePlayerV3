@@ -25,6 +25,11 @@ import java.util.concurrent.ThreadLocalRandom;
  */
 public class StripMineBehavior {
 
+    /** V5.98: 圆石目标 strip-mine 的早退阈值 —— 够合石镐(3)+石斧/石剑+留余;到数即 abort got_cobble 上爬,
+     *  避免 STONE_START 木镐被拖到 Y15(stripMineTargetY,铁目标)深陷无台
+     *  (实测 DiamondDig79 Y15 囤 53 圆石却合不出石镐,STONE_TOOL 永远空闲)。 */
+    private static final int COBBLE_STRIPMINE_TARGET = 16;
+
     public static boolean isActive(Personality pers) {
         return pers != null && pers.stripMineState != null;
     }
@@ -43,7 +48,8 @@ public class StripMineBehavior {
             //   主动补铁镐，不再死锁），断镐后假人 ascend → 回工作台补镐 → 应尽快重试下挖，10min 太久。
             MaohiConfig cfg = MaohiConfig.getInstance();
             boolean benign = "max_len".equals(reason) || "blocked_layer".equals(reason)
-                || "disabled".equals(reason) || "low_durability".equals(reason);
+                || "disabled".equals(reason) || "low_durability".equals(reason)
+                || "got_cobble".equals(reason);  // V5.98: 圆石目标达成属成功,短冷却(合出石镐转 STONE_STABLE 后不再走圆石 strip-mine)
             int cooldownMin = benign
                 ? (cfg != null ? cfg.stripMineBenignCooldownMinutes : 2)
                 : (cfg != null ? cfg.stripMineCooldownMinutes : 10);
@@ -114,6 +120,13 @@ public class StripMineBehavior {
             return;
         }
 
+        // V5.98: 圆石目标早退 —— STONE_START 木镐采不了铁,只为取圆石下挖;够数即上爬回地表台合石镐,
+        //   不再被拖到 Y15 深陷无台(实测 DiamondDig79 Y15 囤 53 圆石却合不出石镐 → STONE_TOOL 永远空闲)。
+        if (pers.stripMineForCobble && countCobble(player) >= COBBLE_STRIPMINE_TARGET) {
+            abort(pers, player, "got_cobble");
+            return;
+        }
+
         // 到达目标层(V5.84: 钻石 goal 用更深的 stripMineDiamondTargetY)
         int targetY = pers.stripMineForDiamond ? cfg.stripMineDiamondTargetY : cfg.stripMineTargetY;
         if (pos.getY() <= targetY) {
@@ -167,6 +180,12 @@ public class StripMineBehavior {
         boolean forDiamond = pers.stripMineForDiamond;
         if (forDiamond ? hasDiamondInInventory(player) : hasIronInInventory(player)) {
             abort(pers, player, forDiamond ? "got_diamond" : "got_iron");
+            return;
+        }
+
+        // V5.98: 圆石目标兜底 —— 一般已在 DESCEND 早退;若到了层仍够圆石即上爬(木镐采不了铁,别在层里空耗)。
+        if (pers.stripMineForCobble && countCobble(player) >= COBBLE_STRIPMINE_TARGET) {
+            abort(pers, player, "got_cobble");
             return;
         }
 
@@ -325,6 +344,18 @@ public class StripMineBehavior {
         
         PacketHelper.swingHand(player, net.minecraft.util.Hand.MAIN_HAND);
         return true;
+    }
+
+    /** V5.98: 数背包圆石 + 圆石深板岩(能合石器的)总量,供圆石目标 strip-mine 早退判定。 */
+    private static int countCobble(ServerPlayerEntity player) {
+        int n = 0;
+        for (int i = 0; i < player.getInventory().size(); i++) {
+            ItemStack stack = player.getInventory().getStack(i);
+            if (stack.getItem() == Items.COBBLESTONE || stack.getItem() == Items.COBBLED_DEEPSLATE) {
+                n += stack.getCount();
+            }
+        }
+        return n;
     }
 
     private static boolean hasSufficientPickaxe(ServerPlayerEntity player, int minDurability, boolean requireIron) {

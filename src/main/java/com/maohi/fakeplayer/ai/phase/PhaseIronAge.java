@@ -236,6 +236,7 @@ public final class PhaseIronAge implements Phase {
                 && hasIronSword
                 && healthyPicks >= 1) {
             personality.stripMineForDiamond = true;
+            personality.stripMineForCobble = false;  // V5.98: 钻石目标,不走圆石早退
             personality.stripMineState = PhaseStoneAge.SubPhase.STRIP_MINE_DESCEND;
             personality.stripMineStartPos = player.getBlockPos().toImmutable();
             personality.stripMineStartY = player.getBlockY();
