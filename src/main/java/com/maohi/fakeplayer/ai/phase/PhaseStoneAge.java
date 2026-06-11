@@ -104,6 +104,10 @@ public final class PhaseStoneAge implements Phase {
      *  (深井+地表跨距寻路不可靠),改就地自建。96 格 ≈ 还值得走一趟的半径。 */
     static final double SMELT_TRAVEL_MAX_SQ = 96.0 * 96.0;
 
+    /** V5.104 strip-mine 触发的最低石镐耐久门(单把最佳镐剩余耐久)。低于此不下挖,避免半路镐断被困。
+     *  同时作为「主动补镐」的触发线:磨秃到此值以下就去工作台补镐,防 strip-mine 因耐久门哑火 → 不再主动找铁。 */
+    static final int STRIP_MINE_MIN_PICK_DUR = 60;
+
     /**
      * V5.30 STONE_AGE 内部细分子状态。
      * V5.44: 拆出 PhaseWoodAge 后,WOOD_START/WOOD_CRAFT 迁出本枚举(由 PhaseWoodAge.SubPhase 独立定义)。
@@ -456,6 +460,45 @@ public final class PhaseStoneAge implements Phase {
                 }
 
                 com.maohi.MaohiConfig cfg = com.maohi.MaohiConfig.getInstance();
+
+                // ── V5.104 Task1: 主动补镐 —— 石镐磨秃到 strip-mine 触发门以下、料齐(cobble+木)只差贴台时,
+                //   主动去/建工作台补镐。否则 strip-mine 因下面的耐久门哑火,而 autoCraftStoneTools 步9 只在
+                //   贴台时补镐 → 远离台就永远不补 → 不再主动找铁(石器死循环)。镜像冶炼的设施获取阶梯。
+                if (cfg != null && cfg.enableStripMine
+                        && d.hasStonePickaxe
+                        && d.maxStonePickaxeRemainingDurability < STRIP_MINE_MIN_PICK_DUR
+                        && d.cobbleCount >= COBBLE_FOR_STONE_PICK
+                        && (d.stickCount >= 2 || d.plankCount >= 2 || d.logCount >= 1)) {
+                    ServerWorld pmWorld = (ServerWorld) player.getEntityWorld();
+                    BlockPos pmBench = personality.knownWorkbenchPos;
+                    boolean pmNear = pmBench != null
+                        && player.getBlockPos().getSquaredDistance(pmBench) <= WORKBENCH_NEARBY_SQ;
+                    if (!pmNear) {
+                        BlockPos scan = PhaseIronAge.findCraftingTable(pmWorld, player.getBlockPos(), 6);
+                        if (scan != null) { pmBench = scan; pmNear = true; }
+                    }
+                    if (pmNear) {
+                        setIdle(personality, player, 100); // autoCraftStoneTools 步9 贴台补镐
+                        com.maohi.fakeplayer.TaskLogger.log(player, "stone_pick_maintain",
+                            "action", "park", "pickDur", d.maxStonePickaxeRemainingDurability);
+                        return;
+                    }
+                    if (pmBench != null
+                            && player.getBlockPos().getSquaredDistance(pmBench) <= SMELT_TRAVEL_MAX_SQ) {
+                        set(personality, player, TaskType.RETURN_TO_BASE, pmBench);
+                        com.maohi.fakeplayer.TaskLogger.log(player, "stone_pick_maintain",
+                            "action", "return", "pickDur", d.maxStonePickaxeRemainingDurability);
+                        return;
+                    }
+                    if (d.hasTable || d.plankCount >= 4 || d.logCount >= 1) {
+                        setIdle(personality, player, 100); // 就地建台 → 下周期贴台补镐
+                        com.maohi.fakeplayer.TaskLogger.log(player, "stone_pick_maintain",
+                            "action", "build_bench", "pickDur", d.maxStonePickaxeRemainingDurability);
+                        return;
+                    }
+                    // 有 cobble+stick 但无台料、无可达台 → 不强求,fall-through 60/40(砍树补木,下周期再补镐)
+                }
+
                 if (cfg != null && cfg.enableStripMine) {
                     long now = System.currentTimeMillis();
                     boolean cooldownActive = personality.stripMineCooldownUntil > now;
@@ -464,7 +507,7 @@ public final class PhaseStoneAge implements Phase {
                         if (personality.stoneStableCyclesNoIron >= cfg.stripMineTriggerCycles
                                 && player.getHealth() > 14.0f
                                 && d.hasStonePickaxe
-                                && d.maxStonePickaxeRemainingDurability >= 60) {
+                                && d.maxStonePickaxeRemainingDurability >= STRIP_MINE_MIN_PICK_DUR) {
                             personality.stripMineForDiamond = false; // V5.84: 石器时代 strip-mine 始终为 IRON goal(挖到 Y15 拿铁)
                             personality.stripMineForCobble = false;  // V5.98: 铁目标,挖到 Y15,不走圆石早退
                             personality.stripMineState = SubPhase.STRIP_MINE_DESCEND;
@@ -486,7 +529,23 @@ public final class PhaseStoneAge implements Phase {
                 if (ThreadLocalRandom.current().nextInt(100) < 60) {
                     assignChopTree(player, personality, ctx);
                 } else {
-                    assignMineStone(player, personality, ctx);
+                    // V5.104 Task2: 挖矿先找暴露矿石(findOre:铁/煤等,促进铁器达成 —— 不必非得 strip-mine 深挖),
+                    //   降低 STONE_AGE 拿铁门槛;附近没暴露矿石才退回挖石头攒圆石。dy≤12 守卫避免追够不到的高/深矿。
+                    BlockPos ore = ctx.findOre != null
+                        ? ctx.findOre.apply((ServerWorld) player.getEntityWorld(), player.getBlockPos())
+                        : null;
+                    if (ore != null && Math.abs(ore.getY() - player.getBlockY()) <= 12) {
+                        double oreDistSq = player.getBlockPos().getSquaredDistance(ore);
+                        if (oreDistSq > 144.0) {
+                            setMoveTo(personality, player, ore);
+                        } else {
+                            set(personality, player, TaskType.MINING, ore);
+                        }
+                        com.maohi.fakeplayer.TaskLogger.log(player, "stone_mine_ore",
+                            "ore", ore, "distSq", (int) oreDistSq);
+                    } else {
+                        assignMineStone(player, personality, ctx);
+                    }
                 }
             }
 

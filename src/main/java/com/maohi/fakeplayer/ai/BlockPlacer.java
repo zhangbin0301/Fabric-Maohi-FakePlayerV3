@@ -267,7 +267,16 @@ public class BlockPlacer {
 		// 真人在放工作台前也会先把它从背包拖到快捷栏，这里完全模拟该动作序列。
 		if (tableSlot > 8) {
 			int screenSlot = InventoryActionHelper.playerInvSlotToScreenSlot(player.playerScreenHandler, tableSlot);
-			if (screenSlot >= 0) InventoryActionHelper.quickMove(player, screenSlot);
+			if (screenSlot >= 0) {
+				// V5.104 FIX: 旧 quickMove(shift-click)在快捷栏占满时无空位可移 → 静默失败 → 工作台永远卡背包
+				//   → knownWorkbenchPos 永不记录 → 连基础台都建不起 → 整条 3×3 合成链(镐/炉)瘫。改 SWAP(交换不需
+				//   空位):优先换进空快捷栏槽(无副作用),满栏才换手持槽(被挤物品进背包,按需重选)。同 furnace 修法。
+				int hotbar = -1;
+				for (int h = 0; h <= 8; h++) { if (inv.getStack(h).isEmpty()) { hotbar = h; break; } }
+				if (hotbar < 0) hotbar = ((PlayerInventoryAccessor) inv).getSelectedSlot();
+				InventoryActionHelper.clickSlot(player, screenSlot, hotbar,
+					net.minecraft.screen.slot.SlotActionType.SWAP);
+			}
 			logTablePlaceDiag(player, personality, now, "slot_in_main_inv=" + tableSlot);
 			return; // 本 tick 只做移动，下一次 tick 检测到 hotbar 有工作台后再放置
 		}
@@ -574,12 +583,19 @@ public class BlockPlacer {
 		}
 		if (furnaceSlot == -1) return;
 		if (furnaceSlot > 8) {
-			// V5.87 FIX: furnace 在背包(slot>8)时镜像 tryPlaceCraftingTable 的挪槽逻辑 —— quickMove
-			//   到快捷栏,下一 tick 再放。原来直接 return 导致 furnace 合出来落进背包就永不放置 →
-			//   炼不了铁 → 卡 STONE_AGE(table 早有此逻辑,furnace 漏了,是"假人不搭炉"的实锤根因)。
+			// V5.104 FIX: furnace 在背包(slot>8)→ SWAP 到一个快捷栏槽,下一 tick 再放置。
+			//   原 V5.87 用 quickMove(shift-click):快捷栏占满时无空位可移 → 移动静默失败 → furnace 永远卡
+			//   背包 → 炉建不出 → knownFurnacePos 永不记录 → 卡 STONE_AGE。SWAP 是「交换」不需空位,根治此漏:
+			//   优先换进空快捷栏槽(无副作用),满栏才换当前手持槽(被挤的物品进背包,工具按需重选无碍)。
 			int screenSlot = InventoryActionHelper.playerInvSlotToScreenSlot(player.playerScreenHandler, furnaceSlot);
-			if (screenSlot >= 0) InventoryActionHelper.quickMove(player, screenSlot);
-			return; // 本 tick 只做移动,下一 tick hotbar 有 furnace 再放置
+			if (screenSlot >= 0) {
+				int hotbar = -1;
+				for (int h = 0; h <= 8; h++) { if (inv.getStack(h).isEmpty()) { hotbar = h; break; } }
+				if (hotbar < 0) hotbar = ((PlayerInventoryAccessor) inv).getSelectedSlot();
+				InventoryActionHelper.clickSlot(player, screenSlot, hotbar,
+					net.minecraft.screen.slot.SlotActionType.SWAP);
+			}
+			return; // 本 tick 只做交换,下一 tick furnace 已在快捷栏再放置
 		}
 
 		BlockPos foot = player.getBlockPos();
