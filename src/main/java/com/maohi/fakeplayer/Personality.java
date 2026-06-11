@@ -401,6 +401,15 @@ public class Personality {
 	public transient double lastStuckSampleX = Double.NaN;
 	public transient double lastStuckSampleZ = Double.NaN;
 	public transient double lastStuckSampleY = Double.NaN;
+	// V5.102 净位移卡死采样:补每-tick movedSq 判据的漏洞 —— bot 撞墙时沿碰撞面微滑 + 视角抖动/漂移
+	//   让每 tick 位移 >0.01 → stuckTicks 永不累加,但 ~15s 净位移≈0(EXPLORING 干耗整个探索超时零进展)。
+	//   独立窗口采样,只在 EXPLORING 且离目标仍远时评估,净位移≈0 即拉黑换向。transient,重连/重 spawn 经 NaN 重锚。
+	public transient double lastStuckNetSampleX = Double.NaN;
+	public transient double lastStuckNetSampleZ = Double.NaN;
+	public transient long lastStuckNetSampleAt = 0L;
+	// 净位移采样当前跟踪的目标。目标一变就重锚窗口,保证每个新探索点都拿到完整 15s 再评估,
+	//   避免沿用上个停滞目标的采样把刚分配的新目标瞬间误杀。
+	public transient BlockPos lastStuckNetTarget = null;
 	// stuck 阶梯进度:0=正常,1=已拉黑当前 target,2=已 teleport,3=已 kick。
 	//   每次 stuckTicks 归零(bot 重新动起来)时也归零。
 	public transient int stuckEscalation = 0;

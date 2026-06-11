@@ -37,6 +37,12 @@ public class MovementController {
 	 */
 	private static final int PATHFIND_FAIL_COOLDOWN_TICKS = 100;
 
+	// V5.102 净位移卡死判据:EXPLORING 时每 NET_STUCK_WINDOW_MS 评估一次窗口净位移,
+	//   < NET_STUCK_MIN_MOVE_SQ(格²)且离目标仍 >3 格 → 视为够不到,拉黑换向。
+	//   阈值 1.0 格/15s 区分干净:零位移 bot 必中,缓慢逼近(>1 格/15s)的 bot 不误伤。
+	private static final long NET_STUCK_WINDOW_MS = 15_000L;
+	private static final double NET_STUCK_MIN_MOVE_SQ = 1.0;
+
 	/**
 	 * 噪声采样时间步进。每 tick 递增,但用 mod 防止 double 进入退化区间。
 	 * 周期 = 1_000_000 tick ≈ 13.9 小时,远超单 session 时长,且周期内不会重复抖动模式。
@@ -747,6 +753,47 @@ public class MovementController {
 			pers.stuckTicks = 0;
 			pers.stuckEscalation = 0;
 			return false;
+		}
+
+		// V5.102 净位移卡死判据 —— 必须在下面的每-tick movedSq 早退之前评估,否则撞墙微滑的 bot
+		//   每 tick movedSq>=0.0001 直接 return,永远走不到这里。只对 EXPLORING、离目标仍远时生效:
+		//   ~15s 窗口净位移 <1 格 = 够不到当前探索点(A* 失败后退化为朝远目标走直线 → 撞障碍原地蹭),
+		//   立即拉黑换向,把"干耗整个探索超时(~60s)零进展"压到 ~15s。MINING/CRAFTING/放置已在上方豁免返回。
+		if (pers.currentTask == com.maohi.fakeplayer.TaskType.EXPLORING && target != null) {
+			long netNowMs = System.currentTimeMillis();
+			if (!target.equals(pers.lastStuckNetTarget)) {
+				// 新目标 → 重锚窗口,给它完整 NET_STUCK_WINDOW_MS 再评估
+				pers.lastStuckNetTarget = target;
+				pers.lastStuckNetSampleX = pos.x;
+				pers.lastStuckNetSampleZ = pos.z;
+				pers.lastStuckNetSampleAt = netNowMs;
+			} else if (netNowMs - pers.lastStuckNetSampleAt >= NET_STUCK_WINDOW_MS) {
+				double netDx = pos.x - pers.lastStuckNetSampleX;
+				double netDz = pos.z - pers.lastStuckNetSampleZ;
+				double netSq = netDx * netDx + netDz * netDz;
+				pers.lastStuckNetSampleX = pos.x;
+				pers.lastStuckNetSampleZ = pos.z;
+				pers.lastStuckNetSampleAt = netNowMs;
+				double tDx = target.getX() + 0.5 - pos.x;
+				double tDz = target.getZ() + 0.5 - pos.z;
+				double tDistSq = tDx * tDx + tDz * tDz;
+				if (netSq < NET_STUCK_MIN_MOVE_SQ && tDistSq > 9.0) {
+					pers.failedTargets.put(target, netNowMs + 60_000L);
+					com.maohi.fakeplayer.Personality.recordTaskFailure(pers, target);
+					com.maohi.fakeplayer.TaskLogger.log(p, "stuck_net_blacklist",
+						"target", target,
+						"netSq", String.format("%.2f", netSq),
+						"distSq", String.format("%.1f", tDistSq),
+						"y", String.format("%.1f", pos.y));
+					pers.currentTask = com.maohi.fakeplayer.TaskType.IDLE;
+					pers.taskTarget = null;
+					pers.currentPath.clear();
+					pers.stuckTicks = 0;
+					pers.lastStuckNetTarget = null;
+					stopMovement(p);
+					return true;
+				}
+			}
 		}
 
 		// P10 极度卡顿服容忍策略：0.01² = 0.0001;每 tick 实际位移 < 0.01 视为"未移动"。
