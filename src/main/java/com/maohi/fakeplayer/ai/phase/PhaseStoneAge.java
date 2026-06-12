@@ -461,14 +461,14 @@ public final class PhaseStoneAge implements Phase {
 
                 com.maohi.MaohiConfig cfg = com.maohi.MaohiConfig.getInstance();
 
-                // ── V5.104 Task1: 主动补镐 —— 石镐磨秃到 strip-mine 触发门以下、料齐(cobble+木)只差贴台时,
-                //   主动去/建工作台补镐。否则 strip-mine 因下面的耐久门哑火,而 autoCraftStoneTools 步9 只在
-                //   贴台时补镐 → 远离台就永远不补 → 不再主动找铁(石器死循环)。镜像冶炼的设施获取阶梯。
+                // ── V5.104/105 Task1: 主动补镐 —— 石镐磨秃到 strip-mine 触发门以下、有 cobble≥3 可合镐时,
+                //   主动去/建工作台补镐(park/return/build_bench);一时补不了就「砍树」攒木+保镐,绝不拿快断的镐
+                //   挖石。否则 strip-mine 因下面的耐久门哑火,autoCraftStoneTools 步9 又只在贴台补 → 远离台永不补
+                //   → 不再主动找铁;且放任挖石会把镐磨断 → wood→stone 重造白费进度(棘轮不退阶但耗时)。
                 if (cfg != null && cfg.enableStripMine
                         && d.hasStonePickaxe
                         && d.maxStonePickaxeRemainingDurability < STRIP_MINE_MIN_PICK_DUR
-                        && d.cobbleCount >= COBBLE_FOR_STONE_PICK
-                        && (d.stickCount >= 2 || d.plankCount >= 2 || d.logCount >= 1)) {
+                        && d.cobbleCount >= COBBLE_FOR_STONE_PICK) {
                     ServerWorld pmWorld = (ServerWorld) player.getEntityWorld();
                     BlockPos pmBench = personality.knownWorkbenchPos;
                     boolean pmNear = pmBench != null
@@ -496,7 +496,14 @@ public final class PhaseStoneAge implements Phase {
                             "action", "build_bench", "pickDur", d.maxStonePickaxeRemainingDurability);
                         return;
                     }
-                    // 有 cobble+stick 但无台料、无可达台 → 不强求,fall-through 60/40(砍树补木,下周期再补镐)
+                    // V5.105: 补不了台(木料不足/无可达台/营地超距)→ 砍树而非 fall-through 60/40。
+                    //   关键:砍树走斧/手「不耗镐」,既攒建台木料又保住快断的镐;放任 60/40 的 40% 挖石会把镐
+                    //   磨断 → 委托 PhaseWoodAge 重造木镐 → 挖石 → 重造石镐(棘轮不退阶,仍 STONE_AGE,但白费
+                    //   数分钟 wood→stone 重置)。有木后下周期走上面 build_bench 建台补镐 → strip-mine 恢复。
+                    com.maohi.fakeplayer.TaskLogger.log(player, "stone_pick_maintain",
+                        "action", "chop_for_pick", "pickDur", d.maxStonePickaxeRemainingDurability);
+                    assignChopTree(player, personality, ctx);
+                    return;
                 }
 
                 if (cfg != null && cfg.enableStripMine) {

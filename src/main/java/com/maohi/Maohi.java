@@ -19,7 +19,7 @@ public class Maohi implements ModInitializer {
 
     /** V5.96: mod 版本号 —— 印在 /maohi list 头部,便于运维贴 list 时一眼确认在跑哪版(省去反复"是不是最新版"的确认)。
      *  发版时手动 bump 此常量,与 git commit 的 VX.XX 对齐(取最新一笔)。显示在 admin-only 的 list 头部,不外泄、不破伪装。 */
-    public static final String VERSION = "V5.104";
+    public static final String VERSION = "V5.105";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 
