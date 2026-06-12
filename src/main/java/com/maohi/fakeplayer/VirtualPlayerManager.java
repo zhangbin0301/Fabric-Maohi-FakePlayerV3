@@ -1423,6 +1423,12 @@ prepareAndSpawnVirtualPlayer();
             return;
         }
 
+        // V5.107: 假人轮替关闭时，目标人数固定为配置的上限值（不再受时间段、周末和随机波动影响）
+        if (!config().fakeplayerRotation) {
+            currentTargetCount = config().maxVirtualPlayers;
+            return;
+        }
+
         long now = System.currentTimeMillis();
 	// 每 18~24 分钟重新计算一次活跃目标，浮动避免集体同步刷新
 	long targetUpdateInterval = TimingConstants.TARGET_UPDATE_MIN + ThreadLocalRandom.current().nextLong(TimingConstants.TARGET_UPDATE_JITTER);

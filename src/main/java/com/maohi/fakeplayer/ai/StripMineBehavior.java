@@ -459,13 +459,33 @@ public class StripMineBehavior {
         return false;
     }
 
+    /**
+     * V5.106: 上下文感知的铁判定 — 根据假人当前物资缺口决定是否继续挖铁。
+     *   没铁镐时: 攒够 3 铁(合铁镐配方 = 3 铁锭 + 2 木棍)才收手;
+     *   有铁镐时: 至少攒 4 铁(够合 1 件铁靴 — 最小铁甲部件)才值得回程,
+     *     避免 1-2 铁就 abort → 回地表 → 铁不够合任何装备 → 空跑一趟。
+     *   旧逻辑"有铁镐即 return true"的死锁: PhaseIronAge 派假人补铁时,
+     *     一下井就因身上有铁镐立刻 abort,永远攒不到铁甲所需的铁锭。
+     */
     private static boolean hasIronInInventory(ServerPlayerEntity player) {
+        int ironCount = 0;
+        boolean hasIronPick = false;
         for (int i = 0; i < player.getInventory().size(); i++) {
             ItemStack stack = player.getInventory().getStack(i);
-            String id = Registries.ITEM.getId(stack.getItem()).getPath();
-            if (id.startsWith("iron_") || id.equals("raw_iron")) return true;
+            if (stack.isEmpty()) continue;
+            Item item = stack.getItem();
+            if (item == Items.IRON_INGOT || item == Items.RAW_IRON) {
+                ironCount += stack.getCount();
+            }
+            if (item == Items.IRON_PICKAXE || item == Items.DIAMOND_PICKAXE || item == Items.NETHERITE_PICKAXE) {
+                hasIronPick = true;
+            }
         }
-        return false;
+        // 没铁镐: 凑够 3 铁合铁镐才收手
+        if (!hasIronPick) return ironCount >= 3;
+        // 有铁镐: 至少攒 4 铁(够合 1 件铁靴 — 最小铁甲部件)才值得回程;
+        //   全副武装后不会进铁目标 strip-mine,此分支只服务"有镐但缺甲"的补铁场景
+        return ironCount >= 4;
     }
 
     /**

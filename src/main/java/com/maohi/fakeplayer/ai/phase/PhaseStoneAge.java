@@ -514,7 +514,8 @@ public final class PhaseStoneAge implements Phase {
                         if (personality.stoneStableCyclesNoIron >= cfg.stripMineTriggerCycles
                                 && player.getHealth() > 14.0f
                                 && d.hasStonePickaxe
-                                && d.maxStonePickaxeRemainingDurability >= STRIP_MINE_MIN_PICK_DUR) {
+                                && d.maxStonePickaxeRemainingDurability >= STRIP_MINE_MIN_PICK_DUR
+                                && (d.rawIronCount + d.ironIngotCount) < 3) {
                             personality.stripMineForDiamond = false; // V5.84: 石器时代 strip-mine 始终为 IRON goal(挖到 Y15 拿铁)
                             personality.stripMineForCobble = false;  // V5.98: 铁目标,挖到 Y15,不走圆石早退
                             personality.stripMineState = SubPhase.STRIP_MINE_DESCEND;

@@ -69,6 +69,10 @@ public final class PhaseIronAge implements Phase {
         int rawIronCount  = 0;
         int ironIngotCount = 0;
         int cobbleCount   = 0;
+        int logCount = 0;
+        int plankCount = 0;
+        int stickCount = 0;
+        boolean hasTable = false;
 
         for (int i = 0; i < inv.size(); i++) {
             ItemStack s = inv.getStack(i);
@@ -83,6 +87,10 @@ public final class PhaseIronAge implements Phase {
             if (it == Items.IRON_INGOT) ironIngotCount += s.getCount();
             if (it == Items.COBBLESTONE || it == Items.COBBLED_DEEPSLATE)
                 cobbleCount += s.getCount();
+            if (s.isIn(net.minecraft.registry.tag.ItemTags.LOGS)) logCount += s.getCount();
+            if (s.isIn(net.minecraft.registry.tag.ItemTags.PLANKS)) plankCount += s.getCount();
+            if (it == Items.STICK) stickCount += s.getCount();
+            if (it == Items.CRAFTING_TABLE) hasTable = true;
         }
 
         // ── P1: 工具缺失回退 ──
@@ -168,35 +176,84 @@ public final class PhaseIronAge implements Phase {
             }
         }
 
-        // ── P4: 工具升级 —— 有铁锭但缺铁镐/铁剑 ──
-        // NOTE: autoUpgradeTools (1/500 概率) 的前提是附近有工作台。
-        //   这里直接让假人走向已知工作台，到达后 autoUpgradeTools 会自然触发。
+        // ── P4: 工具升级 —— 有铁锭但缺铁镐 ──
         if (ironIngotCount >= 3 && !hasIronPickaxe) {
+            // 1. 缺木头做木棍 → 主动砍树
+            if (stickCount < 2 && plankCount < 2 && logCount < 1) {
+                PhaseStoneAge.assignChopTree(player, personality, ctx);
+                com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_wood_starved_for_pickaxe",
+                    "ironIngots", ironIngotCount, "sticks", stickCount, "planks", plankCount);
+                return;
+            }
+
+            // 2. 寻找工作台
             BlockPos workbench = (personality.knownWorkbenchPos != null)
                     ? personality.knownWorkbenchPos
                     : findCraftingTable(world, player.getBlockPos(), FURNACE_SCAN_RADIUS);
-            if (workbench != null) {
+            if (workbench != null && player.getBlockPos().getSquaredDistance(workbench) <= 96.0 * 96.0) {
                 double distSq = player.getBlockPos().getSquaredDistance(workbench);
                 if (distSq > PhaseStoneAge.WORKBENCH_NEARBY_SQ) {
                     setReturnToBase(personality, player, workbench);
                     com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_return_for_upgrade",
                         "ironIngots", ironIngotCount, "workbench", workbench);
+                } else {
+                    // 贴台 → 短 IDLE 驻留，让合成链触发
+                    PhaseStoneAge.setIdle(personality, player, 100);
+                    com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_upgrade_park", "workbench", workbench);
+                }
+                return;
+            } else {
+                // 没有工作台记录 → 尝试就地建台
+                if (hasTable || plankCount >= 4 || logCount >= 1) {
+                    PhaseStoneAge.setIdle(personality, player, 100);
+                    com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_build_bench",
+                        "hasTable", hasTable, "planks", plankCount, "logs", logCount);
+                } else {
+                    // 连建台木料都没有 → 砍树补料
+                    PhaseStoneAge.assignChopTree(player, personality, ctx);
+                    com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_need_wood_for_bench",
+                        "planks", plankCount, "logs", logCount);
+                }
+                return;
+            }
+        }
+
+        // ── P4.1: 铁矿补给 — 没铁镐且铁锭不足,主动下矿补铁 ──
+        //   场景: 铁锭被 autoUpgradeTools 消耗(做了铁剑/盾牌等)后铁<3,或铁镐用断后身上无铁,
+        //   IRON_AGE 棘轮锁死无法降回 STONE_AGE 重新触发石器挖铁。
+        //   复用 stoneStableCyclesNoIron 计数: 连续 N 个 assignTask 周期未进展即触发 strip-mine。
+        //   用石镐下挖(stripMineForDiamond=false → requireIron=false → 石镐可用)。
+        if (!hasIronPickaxe && (ironIngotCount + rawIronCount) < 3 && hasStonePickaxe) {
+            com.maohi.MaohiConfig ironCfg = com.maohi.MaohiConfig.getInstance();
+            if (ironCfg != null && ironCfg.enableStripMine
+                    && personality.stripMineState == null
+                    && personality.stripMineCooldownUntil <= System.currentTimeMillis()
+                    && player.getHealth() > 14.0f) {
+                personality.stoneStableCyclesNoIron++;
+                if (personality.stoneStableCyclesNoIron >= ironCfg.stripMineTriggerCycles) {
+                    personality.stripMineForDiamond = false;
+                    personality.stripMineForCobble = false;
+                    personality.stripMineState = PhaseStoneAge.SubPhase.STRIP_MINE_DESCEND;
+                    personality.stripMineStartPos = player.getBlockPos().toImmutable();
+                    personality.stripMineStartY = player.getBlockY();
+                    personality.stripMineTunnelLen = 0;
+                    personality.stripMineConsecutiveFails = 0;
+                    personality.stoneStableCyclesNoIron = 0;
+                    personality.currentTask = TaskType.STRIP_MINE;
+                    com.maohi.fakeplayer.TaskLogger.log(player, "stripmine_enter",
+                        "goal", "iron_resupply", "startY", personality.stripMineStartY,
+                        "ironIngots", ironIngotCount, "phase", "IRON_AGE");
                     return;
                 }
             }
         }
 
-        // ── P4.5: 装备补全驱动（武器 / 盔甲 / 备用铁镐）—— V5.82 ──
-        //   武器和盔甲此前几乎从不生产：合成是被动机会主义（贴台 + 概率门 + 料刚好够），
-        //   而假人造完即走、长期远离工作台。这里像 P4 一样主动把假人钉回工作台，让
-        //   autoCraftStoneTools(石剑/石斧) / autoUpgradeTools(铁镐/铁剑) / autoCraftArmor(铁甲)
-        //   链式推进。hasPendingGearCraft 只在"料已就绪可合"时为真，料不够则落到 P5 采集补料，
-        //   避免空驻留死循环。镐耐久：autoUpgradeTools 已保 2 把铁镐（铁→钻过渡用）。
+        // ── P4.5: 装备补全驱动（武器 / 盔甲 / 备用铁镐 / 盾牌）──
         if (com.maohi.fakeplayer.ai.CraftingBehavior.hasPendingGearCraft(player)) {
             BlockPos gearBench = (personality.knownWorkbenchPos != null)
                     ? personality.knownWorkbenchPos
                     : findCraftingTable(world, player.getBlockPos(), FURNACE_SCAN_RADIUS);
-            if (gearBench != null) {
+            if (gearBench != null && player.getBlockPos().getSquaredDistance(gearBench) <= 96.0 * 96.0) {
                 double distSq = player.getBlockPos().getSquaredDistance(gearBench);
                 if (distSq > PhaseStoneAge.WORKBENCH_NEARBY_SQ) {
                     // 远 → 走回工作台
@@ -204,13 +261,25 @@ public final class PhaseIronAge implements Phase {
                     com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_gear_up",
                         "action", "return", "workbench", gearBench);
                 } else {
-                    // 贴台 → 短 IDLE 驻留，让合成链触发（照搬 STONE_TOOL 的 setIdle 范式）
+                    // 贴台 → 短 IDLE 驻留，让合成链触发
                     PhaseStoneAge.setIdle(personality, player, 100);
                     com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_gear_up", "action", "park");
                 }
                 return;
+            } else {
+                // 没有已知/附近工作台 → 尝试就地建台
+                if (hasTable || plankCount >= 4 || logCount >= 1) {
+                    PhaseStoneAge.setIdle(personality, player, 100);
+                    com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_gear_build_bench",
+                        "hasTable", hasTable, "planks", plankCount, "logs", logCount);
+                } else {
+                    // 连建台木料都没有 → 砍树补料
+                    PhaseStoneAge.assignChopTree(player, personality, ctx);
+                    com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_gear_need_wood",
+                        "planks", plankCount, "logs", logCount);
+                }
+                return;
             }
-            // 没有已知/附近工作台 → 不驻留，落到 P5 采集（autoCraftStoneTools 会在 plank≥4 时自建工作台）
         }
 
         // ── P4.6: 钻石下挖驱动（V5.84）—— 闭环的关键缺口修复 ──
