@@ -55,8 +55,13 @@ public class StripMineBehavior {
                 : (cfg != null ? cfg.stripMineCooldownMinutes : 10);
             pers.stripMineCooldownUntil = System.currentTimeMillis() + cooldownMin * 60_000L;
         } else {
-            pers.stripMineState = null;
-            pers.currentTask = TaskType.IDLE;
+            // V5.109: got_iron/got_diamond 也走 ASCEND 爬回地表,而非原地 IDLE(stays at depth)。
+            //   旧 IDLE-at-depth 让 PhaseStoneAge 冶炼驱动从 Y15 对地表 furnace 发 RETURN_TO_BASE,
+            //   深井→地表直线寻路不可靠 → 假人卡在 Y15 整夜带着 raw_iron 炼不出铁锭/铁镐(日志实测)。
+            //   改为先 pillar-up 爬回 stripMineStartY 附近(地表基地),到顶 IDLE 后冶炼驱动就近回炉 / 就地建炉。
+            //   tickAscend 用背包圆石(strip-mine 必有大量)向上搭柱,可靠;到达即转 IDLE 交还相位逻辑。
+            pers.stripMineState = PhaseStoneAge.SubPhase.STRIP_MINE_ASCEND;
+            pers.currentTask = TaskType.STRIP_MINE;
             pers.stripMineCooldownUntil = 0L; // 成功不需要冷却
         }
         pers.stripMineTunnelLen = 0;
