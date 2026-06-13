@@ -57,6 +57,10 @@ public class Personality {
 	//   这里一次降级让显示与背包真实状态对齐;降级后 PhaseWoodAge.SubPhase.WOOD_START 砍树合镐自然升回。
 	public transient boolean v544MigrationChecked = false;
 	public long firstJoinAt = 0L;
+	// V5.108: 累计在线时长的「上次采样墙钟时刻」(ms)。transient,仅会话内有效。
+	//   updatePlayerMetadata 用 now-本值 累加 SavedPlayer.totalPlaytime —— 自适应 loop 节奏,
+	//   修正旧 +50L 固定增量(processHeavyAILogic 实际 ~1Hz 调用 → 20× 低估在线时长)。
+	public transient long lastPlaytimeSampleAt = 0L;
 	public boolean hasMinedDiamondOre = false; // 是否真正挖到过钻石矿，用来限制 Diamonds! 成就
 	public long lastDiamondOreMinedAt = 0L;
 

@@ -1035,11 +1035,25 @@ prepareAndSpawnVirtualPlayer();
     }
 
     private void updatePlayerMetadata(ServerPlayerEntity p, UUID uuid) {
-        // V3.3 修复：每次 tick 累加在线时长（50ms/tick）
+        // V5.108: 累计在线时长按「真实墙钟增量」累加,而非固定 +50L。
+        //   旧实现假设本方法每 50ms 调一次;但它在 processHeavyAILogic 内、受 logicTickCounter>=20 门控,
+        //   实际约每 1s(20×currentSleepMs)才调一次 → 每秒只 +50ms → 累计在线时长 20× 低估
+        //   (在线 ~2h 只显示 ~6min)。改加「距上次采样真实耗时」,自适应 loop 节奏与卡顿。
+        //   首次采样(lastAt=0)只锚定不累加;单次增量封顶 5s,排除 spawn-freeze / 重连缺口被算进在线。
         SavedPlayer sp = knownPlayers.get(uuid);
-        if (sp != null) {
-            sp.totalPlaytime += 50L;
-            if (sp.totalPlaytime % 60_000L < 50L) storage.markDirty();
+        Personality pmPers = playerPersonalities.get(uuid);
+        if (sp != null && pmPers != null) {
+            long nowMs = System.currentTimeMillis();
+            long lastMs = pmPers.lastPlaytimeSampleAt;
+            if (lastMs > 0L) {
+                long delta = nowMs - lastMs;
+                if (delta > 0L && delta <= 5000L) {
+                    long before = sp.totalPlaytime;
+                    sp.totalPlaytime += delta;
+                    if (sp.totalPlaytime / 60_000L != before / 60_000L) storage.markDirty();
+                }
+            }
+            pmPers.lastPlaytimeSampleAt = nowMs;
         }
 
         // V3.5 fix: 处理蹲起问候延时（消费 sneakRemainingTicks）
