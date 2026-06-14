@@ -191,6 +191,17 @@ public final class CraftingBehavior {
 			ticks = 20;
 		}
 
+		// V5.114 诊断:石镐 + cobble≥8 + 背包无炉 item 时本该合炉(步8),若没选中 FURNACE,
+		//   打出 gate 各条件(furnaceNearby/workbenchNearby/hasFurnace)定位卡点。节流每 ~5s 一条防刷屏。
+		//   配合 BlockPlacer 的 furnace_place_forced,一次部署即可区分「没合出炉 item」vs「合了放不下」。
+		if (hasStonePickaxe && cobbleCount >= 8 && target != Items.FURNACE
+				&& player.getEntityWorld().getServer().getTicks() % 100 == 0) {
+			com.maohi.fakeplayer.TaskLogger.log(player, "furnace_craft_skip",
+				"hasFurnaceItem", hasFurnace, "furnaceNearby", furnaceNearby,
+				"workbenchNearby", workbenchNearby, "cobble", cobbleCount,
+				"picked", target == null ? "null" : net.minecraft.registry.Registries.ITEM.getId(target).getPath());
+		}
+
 		if (target == null) return;
 
 		// 进入合成状态机

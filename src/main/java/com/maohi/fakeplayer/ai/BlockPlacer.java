@@ -614,6 +614,20 @@ public class BlockPlacer {
 			faceDir = Direction.UP;
 			break;
 		}
+		// V5.114: 严格找不到(四邻 air + 下方固体)→ 放宽:任一 air 邻格即可(熔炉 vanilla 可悬空,无需支撑)。
+		//   破狭窄处 placeAt=null 直接 return 永不放 → 炉建不起 → 卡石器。配合下面 setBlockState 强放,必落地。
+		if (placeAt == null) {
+			for (Direction d : dirs) {
+				BlockPos cand = foot.offset(d);
+				if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(player.getEntityWorld(), cand.getX() >> 4, cand.getZ() >> 4)) continue;
+				if (player.getEntityWorld().getBlockState(cand).isAir()) {
+					placeAt = cand;
+					supportPos = cand.down();
+					faceDir = Direction.UP;
+					break;
+				}
+			}
+		}
 		if (placeAt == null) return;
 
 		int currentSlot = ((PlayerInventoryAccessor) inv).getSelectedSlot();
@@ -674,9 +688,34 @@ public class BlockPlacer {
 			if (!afterState.isOf(net.minecraft.block.Blocks.FURNACE)) {
 				ItemStack handStack = player.getStackInHand(Hand.MAIN_HAND);
 				player.interactionManager.interactBlock(player, player.getEntityWorld(), handStack, Hand.MAIN_HAND, hit);
+				afterState = player.getEntityWorld().getBlockState(placeAt);
 			}
 
 			PacketHelper.swingHand(player, Hand.MAIN_HAND);
+
+			// V5.114 终极兜底:发包 + 直调都没放上 → setBlockState 强放(镜像 tryPlaceCraftingTable)。
+			//   总根因:放炉原本只有「发包 + 直调」、无强放兜底(放台有 3 次失败强放),假人交互对放炉同样不稳
+			//   (同熔炉 GUI / 放台的丢包失败模式)→ 狭窄处/卡顿时炉永远建不起 → 世界无炉 → 粗铁永远熔不了
+			//   → 全员卡石器 8h+。这就是「台能建、炉建不起」不对称的根因。setBlockState 是 vanilla 客户端可见的
+			//   真方块,不破画像;inventory 同步扣 1 保持一致。炉链坏太久,这里第一次失败即强放、不再宽限。
+			if (afterState.isAir() || afterState.isReplaceable()) {
+				boolean forced = player.getEntityWorld().setBlockState(placeAt,
+					net.minecraft.block.Blocks.FURNACE.getDefaultState());
+				if (forced) {
+					net.minecraft.item.ItemStack slotStack = player.getInventory().getStack(personality.furnaceTargetSlot);
+					if (!slotStack.isEmpty() && slotStack.isOf(net.minecraft.item.Items.FURNACE)) {
+						slotStack.decrement(1);
+					}
+					player.getEntityWorld().playSound(null, placeAt,
+						net.minecraft.block.Blocks.FURNACE.getDefaultState().getSoundGroup().getPlaceSound(),
+						net.minecraft.sound.SoundCategory.BLOCKS, 1.0f, 1.0f);
+					com.maohi.fakeplayer.TaskLogger.log(player, "furnace_place_forced",
+						"reason", "interact_fail_fallback", "pos", placeAt);
+				} else {
+					com.maohi.fakeplayer.TaskLogger.log(player, "furnace_place_forced_fail",
+						"reason", "setBlockState_returned_false", "pos", placeAt);
+				}
+			}
 
 			personality.furnaceRestoreAtTick = now + RESTORE_DELAY_MIN
 				+ ThreadLocalRandom.current().nextInt(RESTORE_DELAY_MAX - RESTORE_DELAY_MIN + 1);
