@@ -131,6 +131,20 @@ public final class PhaseIronAge implements Phase {
                 }
             }
 
+            // V5.115: 同 PhaseStoneAge forget —— 忘掉够不到的炉(水平 >40格 / 深井下方>10格),清 knownFurnacePos
+            //   就地重建,绝不 RETURN_TO_BASE 死磕。否则远炉 moved30s=0 永走不到(石器期 Hunter/Tiny 实测同款,
+            //   铁器期同一段逻辑,Felix 进 IRON_AGE 后迟早撞)。清空后落到下面"无炉"分支 P2b 就地建新炉。
+            if (targetFurnace != null) {
+                double fDistSq = player.getBlockPos().getSquaredDistance(targetFurnace);
+                if (fDistSq > 1600.0
+                        || (targetFurnace.getY() < player.getBlockY() - 10 && fDistSq > 25.0)) {
+                    com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_forget_furnace",
+                        "furnace", targetFurnace, "distSq", (int) fDistSq);
+                    personality.knownFurnacePos = null;
+                    targetFurnace = null;
+                }
+            }
+
             if (targetFurnace != null) {
                 double distSq = player.getBlockPos().getSquaredDistance(targetFurnace);
                 if (distSq > FURNACE_NEAR_SQ) {
@@ -159,9 +173,12 @@ public final class PhaseIronAge implements Phase {
                     return;
                 }
 
-                // P2a: 有营地记录 → 回营
+                // P2a: 有营地记录 且 ≤40 格 → 回营建炉。V5.115 边界:超 40 格不死磕(否则 forget 远炉后
+                //   平移成「走远营」同样 moved30s=0 卡死),落到下面 P2c 朝 spawn 探索(移动而非卡死,
+                //   营地通常在 spawn 方向,探索途中靠近工作台即由 P2b 就地建炉)。
                 BlockPos baseTarget = personality.knownWorkbenchPos;
-                if (baseTarget != null) {
+                if (baseTarget != null
+                        && player.getBlockPos().getSquaredDistance(baseTarget) <= 1600.0) {
                     setReturnToBase(personality, player, baseTarget);
                     com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_return_to_base",
                         "reason", "need_furnace", "target", baseTarget);
@@ -190,7 +207,7 @@ public final class PhaseIronAge implements Phase {
             BlockPos workbench = (personality.knownWorkbenchPos != null)
                     ? personality.knownWorkbenchPos
                     : findCraftingTable(world, player.getBlockPos(), FURNACE_SCAN_RADIUS);
-            if (workbench != null && player.getBlockPos().getSquaredDistance(workbench) <= 96.0 * 96.0) {
+            if (workbench != null && player.getBlockPos().getSquaredDistance(workbench) <= 1600.0) {   // V5.115 边界:96→40 格,超距落到下面就地建台
                 double distSq = player.getBlockPos().getSquaredDistance(workbench);
                 if (distSq > PhaseStoneAge.WORKBENCH_NEARBY_SQ) {
                     setReturnToBase(personality, player, workbench);
@@ -253,7 +270,7 @@ public final class PhaseIronAge implements Phase {
             BlockPos gearBench = (personality.knownWorkbenchPos != null)
                     ? personality.knownWorkbenchPos
                     : findCraftingTable(world, player.getBlockPos(), FURNACE_SCAN_RADIUS);
-            if (gearBench != null && player.getBlockPos().getSquaredDistance(gearBench) <= 96.0 * 96.0) {
+            if (gearBench != null && player.getBlockPos().getSquaredDistance(gearBench) <= 1600.0) {   // V5.115 边界:96→40 格(装备可选,远台本周期跳过无害)
                 double distSq = player.getBlockPos().getSquaredDistance(gearBench);
                 if (distSq > PhaseStoneAge.WORKBENCH_NEARBY_SQ) {
                     // 远 → 走回工作台

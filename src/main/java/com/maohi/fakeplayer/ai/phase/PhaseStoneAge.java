@@ -101,8 +101,11 @@ public final class PhaseStoneAge implements Phase {
     static final double WORKBENCH_NEARBY_SQ = 36.0;
 
     /** V5.103 冶炼设施(炉/营地台)长途上限(格²)。超过此距离不长途回走/不去共享炉
-     *  (深井+地表跨距寻路不可靠),改就地自建。96 格 ≈ 还值得走一趟的半径。 */
-    static final double SMELT_TRAVEL_MAX_SQ = 96.0 * 96.0;
+     *  (深井+地表跨距寻路不可靠),改就地自建。
+     *  V5.115 边界统一:96→40 格。实测假人寻路对 ≥40 格目标极易 moved30s=0 卡死(Hunter/Tiny 炉在
+     *  58-60 格 RETURN_TO_BASE 永走不到);且与 forget 远炉阈值(40 格)一致,避免「forget 远炉后平移成
+     *  走 ≤96 格远营/共享炉」同样卡的窗口。超 40 格一律落到本地兜底(SA-P6 就地建台炉 / chop-for-pick)。 */
+    static final double SMELT_TRAVEL_MAX_SQ = 40.0 * 40.0;
 
     /** V5.104 strip-mine 触发的最低石镐耐久门(单把最佳镐剩余耐久)。低于此不下挖,避免半路镐断被困。
      *  同时作为「主动补镐」的触发线:磨秃到此值以下就去工作台补镐,防 strip-mine 因耐久门哑火 → 不再主动找铁。 */
