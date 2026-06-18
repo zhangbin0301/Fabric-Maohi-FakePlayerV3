@@ -44,8 +44,15 @@ public class Maohi implements ModInitializer {
      * V5.120: 代码一致性 —— ① 删 PhaseIronAge 私有 int SMELT_TRAVEL_MAX_SQ 副本(与 PhaseUtil double 版重复、
      *   会漂移),统一用 PhaseUtil.SMELT_TRAVEL_MAX_SQ;② tryPlaceFurnace 白名单补 SMELTING/FOLLOW_PLAYER/
      *   COMBAT,与 tryPlaceCraftingTable 对称(这三态目前 dead,纯防未来漂移)。无行为变化。
+     *
+     * V5.121: /maohi list 任务列全中文 —— 任务映射 switch 补齐全部 15 个 TaskType(原缺 RETURN_TO_BASE/
+     *   PICKUP_DROP/COLLECTING/AFK/RECONNECTING/SMELTING/FOLLOW_PLAYER/COMBAT,会露英文枚举名)。
+     *
+     * V5.122: 放台/建炉「换地重试」根治死循环 —— tablePlaceRetryCooldownUntil 此前声明+读取却从未武装,
+     *   故 bot 在放不下台的坏点(山顶/窄柱/树梢,如 QuietMiner99 y=84)会原地 IDLE 死循环、永远合不出石镐/熔炉。
+     *   现 no_place_pos 时武装冷却(100t),STONE_TOOL/SA-P6 的 build_bench 分支在冷却期改 EXPLORE 挪到平地重试。
      */
-    public static final String VERSION = "V5.120";
+    public static final String VERSION = "V5.122";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

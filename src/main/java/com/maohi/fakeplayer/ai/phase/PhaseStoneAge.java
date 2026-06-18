@@ -151,9 +151,17 @@ public final class PhaseStoneAge implements Phase {
                             "bench", workbench, "cobble", d.cobbleCount);
                     } else {
                         if (d.hasTable || d.plankCount >= 4 || d.logCount >= 1) {
-                            PhaseUtil.setIdle(personality, player, 100);
-                            com.maohi.fakeplayer.TaskLogger.log(player, "stone_tool_build_bench",
-                                "hasTable", d.hasTable, "planks", d.plankCount, "logs", d.logCount);
+                            // V5.122: 放台冷却中(刚 no_place_pos 失败)→ 当前点放不下台(山顶/窄柱),挪到平地重试,
+                            //   别原地 IDLE 死循环(QuietMiner99 y=84 卡 4h 根因)。冷却过后到新点再正常建台。
+                            if (player.getEntityWorld().getTime() < personality.tablePlaceRetryCooldownUntil) {
+                                PhaseUtil.setExplore(personality, player);
+                                com.maohi.fakeplayer.TaskLogger.log(player, "stone_tool_relocate_bench",
+                                    "reason", "no_place_pos");
+                            } else {
+                                PhaseUtil.setIdle(personality, player, 100);
+                                com.maohi.fakeplayer.TaskLogger.log(player, "stone_tool_build_bench",
+                                    "hasTable", d.hasTable, "planks", d.plankCount, "logs", d.logCount);
+                            }
                         } else {
                             com.maohi.fakeplayer.TaskLogger.log(player, "stone_tool_need_wood",
                                 "cobble", d.cobbleCount, "planks", d.plankCount, "logs", d.logCount);

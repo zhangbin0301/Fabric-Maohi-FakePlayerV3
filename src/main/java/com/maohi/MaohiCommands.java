@@ -528,7 +528,15 @@ public class MaohiCommands {
                 case "CRAFTING"    -> "合成";
                 case "HUNTING"     -> "狩猎";
                 case "IDLE"        -> "空闲";
-                case "STRIP_MINE" -> "条形挖矿";
+                case "STRIP_MINE"  -> "条形挖矿";
+                case "RETURN_TO_BASE" -> "回营";
+                case "PICKUP_DROP" -> "拾取";
+                case "COLLECTING"  -> "收集";
+                case "AFK"         -> "挂机";
+                case "RECONNECTING"-> "重连";
+                case "SMELTING"    -> "冶炼";
+                case "FOLLOW_PLAYER"-> "跟随";
+                case "COMBAT"      -> "战斗";
                 default            -> taskRaw;
             };
         }

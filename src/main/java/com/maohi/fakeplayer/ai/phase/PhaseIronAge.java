@@ -736,10 +736,16 @@ public final class PhaseIronAge implements Phase {
                 "cobble", d.cobbleCount);
             return false; // 落到默认 60/40,继续挖石产 cobble
         } else if (d.hasTable || d.plankCount >= 4 || d.logCount >= 1) {
-            PhaseUtil.setIdle(personality, player, 100);
-            com.maohi.fakeplayer.TaskLogger.log(player, "stone_smelt_build_bench",
-                "hasTable", d.hasTable, "planks", d.plankCount, "logs", d.logCount,
-                "cobble", d.cobbleCount);
+            // V5.122: 放台冷却中 → 当前点放不下台(山顶/窄柱/深井口悬空),挪到平地重试,别原地 IDLE 死循环。
+            if (player.getEntityWorld().getTime() < personality.tablePlaceRetryCooldownUntil) {
+                PhaseUtil.setExplore(personality, player);
+                com.maohi.fakeplayer.TaskLogger.log(player, "stone_smelt_relocate_bench", "reason", "no_place_pos");
+            } else {
+                PhaseUtil.setIdle(personality, player, 100);
+                com.maohi.fakeplayer.TaskLogger.log(player, "stone_smelt_build_bench",
+                    "hasTable", d.hasTable, "planks", d.plankCount, "logs", d.logCount,
+                    "cobble", d.cobbleCount);
+            }
             return true;
         } else {
             com.maohi.fakeplayer.TaskLogger.log(player, "stone_smelt_need_wood",

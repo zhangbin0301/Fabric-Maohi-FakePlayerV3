@@ -328,6 +328,10 @@ public class BlockPlacer {
 			break;
 		}
 		if (placeAt == null) {
+			// V5.122: 周围 12 候选都放不下台(脚边/头顶全是空气列或悬空,如山顶/窄柱/树梢)→ 武装放台冷却(100t≈5s),
+			//   让 phase 的 build_bench 分支在冷却期转去 EXPLORE 挪到平地重试,而非原地 IDLE 死循环
+			//   (QuietMiner99 y=84 卡 STONE_TOOL 4h 的根因)。冷却也让本方法这几秒不再每 tick 空跑找点。
+			personality.tablePlaceRetryCooldownUntil = now + 100L;
 			logTablePlaceDiag(player, personality, now, "no_place_pos");
 			return;
 		}
