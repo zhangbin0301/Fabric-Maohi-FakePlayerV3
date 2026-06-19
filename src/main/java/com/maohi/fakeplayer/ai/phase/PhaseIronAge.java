@@ -117,6 +117,29 @@ public final class PhaseIronAge implements Phase {
             return;
         }
 
+        // ── V5.123: 忘掉「深井下方」的营地设施记忆（工作台 + 熔炉）——
+        //   根因(FrostSky 卡死;原 V5.120 Fix-C 方向反了): bot 已在地表(table_place_skip pos y=64),
+        //   却把 RETURN_TO_BASE 目标设成井下旧营地(move_diag target y=45, dy=-18.5)。3D 距离 <40
+        //   通过下游各处 <=1600 距离闸,但地表 bot 无法寻路穿石下到埋藏点 → moved30s=0 永卡。
+        //   ascendToSurfaceIfDeep 只在「bot 自己深」时触发,对地表 bot 是 no-op,救不了本症。
+        //   正解 = 镜像下方 needsSmelting 块内 knownFurnacePos 深炉 forget(~line 177):提前清掉深处
+        //   设施记忆,让 P2a/P4/P4.5/Fix-9 全部落到「就地建台/建炉」分支,在地表新建可达设施,永久自愈。
+        //   阈值同深炉 forget:在 bot 下方 >10 格 且 水平/三维距 >5 格(平方>25)才算「埋藏够不到」。
+        if (personality.knownWorkbenchPos != null
+                && personality.knownWorkbenchPos.getY() < player.getBlockY() - 10
+                && player.getBlockPos().getSquaredDistance(personality.knownWorkbenchPos) > 25.0) {
+            com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_forget_deep_workbench",
+                "workbench", personality.knownWorkbenchPos, "botY", player.getBlockY());
+            personality.knownWorkbenchPos = null;
+        }
+        if (personality.knownFurnacePos != null
+                && personality.knownFurnacePos.getY() < player.getBlockY() - 10
+                && player.getBlockPos().getSquaredDistance(personality.knownFurnacePos) > 25.0) {
+            com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_forget_deep_furnace_early",
+                "furnace", personality.knownFurnacePos, "botY", player.getBlockY());
+            personality.knownFurnacePos = null;
+        }
+
         // ── P2 / P3: 熔炼驱动 —— 背包有 raw_iron 但铁锭不足时优先处理 ──
         // V5.83: 缺整套铁甲时把熔炼目标抬到 8 锭（够合胸甲），让假人在"未披甲"阶段持续炼铁攒料
         //   → 铁甲快速成型；备齐铁甲后回落到 4（只维持工具铁锭），释放假人去挖钻石不被熔炼拖住。
@@ -517,8 +540,38 @@ public final class PhaseIronAge implements Phase {
     /**
      * 设置 RETURN_TO_BASE 任务，目标为指定坐标。
      * NOTE: RETURN_TO_BASE 在 VPM 主 tick 里处理移动；到达后切 IDLE。
+     *
+     * V5.123: 两段方向分明的保护(取代 V5.120 Fix-C 反向的 deferred 方案)——
+     *   ① bot 自己在井下、目标在上方/地表 → 先柱式上爬(ascendToSurfaceIfDeep,自带 stripMineState==null
+     *      + cobble≥8 + surfaceY-botY>10 守卫;地表 bot 必返 false,不误触发)。上爬完成后 stripMineState=null,
+     *      下个 assignTask 周期 PhaseIronAge 会确定性重派本返航(bot 有 raw_iron 必再驱动熔炼/回炉),
+     *      故无需 deferred 记忆——这与 line 146(Fix-1 缺燃料上爬)/SA-P0 同款「先 ascend 后由 assignTask 自然重驱」。
+     *   ② bot 已在地表、目标却在井下方(原 FrostSky dy=-18.5 卡死症) → RETURN_TO_BASE 不会挖路穿石下行,
+     *      硬派只 moved30s=0 永卡。改 setExplore 挪窝;配合上面「深设施 forget」下周期清记忆 + 就地建新设施自愈,
+     *      绝不困在 doomed 返航里(本兜底覆盖 forget 之外的新鲜扫描深台,如 findCraftingTable/peer 炉)。
      */
     private static void setReturnToBase(Personality p, ServerPlayerEntity player, BlockPos target) {
+        int cobbleCount = 0;
+        PlayerInventory inv = player.getInventory();
+        for (int i = 0; i < inv.size(); i++) {
+            ItemStack s = inv.getStack(i);
+            if (s.getItem() == net.minecraft.item.Items.COBBLESTONE
+                    || s.getItem() == net.minecraft.item.Items.COBBLED_DEEPSLATE) {
+                cobbleCount += s.getCount();
+            }
+        }
+        // ① bot 在井下 → 上爬接管移动;上爬完毕由 assignTask 自然重派返航。
+        if (PhaseStoneAge.ascendToSurfaceIfDeep(player, p, cobbleCount)) {
+            return;
+        }
+        // ② 目标埋在地表 bot 下方 >10 格且够不到 → 别困在 RETURN_TO_BASE(永远走不到),改探索挪窝自愈。
+        if (target.getY() < player.getBlockY() - 10
+                && player.getBlockPos().getSquaredDistance(target) > 25.0) {
+            com.maohi.fakeplayer.TaskLogger.log(player, "return_skip_deep_target",
+                "target", target, "botY", player.getBlockY());
+            setExplore(p, player);
+            return;
+        }
         p.currentTask = TaskType.RETURN_TO_BASE;
         p.taskTarget  = target;
         p.taskExpireTime = player.getEntityWorld().getServer().getTicks()

@@ -51,8 +51,19 @@ public class Maohi implements ModInitializer {
      * V5.122: 放台/建炉「换地重试」根治死循环 —— tablePlaceRetryCooldownUntil 此前声明+读取却从未武装,
      *   故 bot 在放不下台的坏点(山顶/窄柱/树梢,如 QuietMiner99 y=84)会原地 IDLE 死循环、永远合不出石镐/熔炉。
      *   现 no_place_pos 时武装冷却(100t),STONE_TOOL/SA-P6 的 build_bench 分支在冷却期改 EXPLORE 挪到平地重试。
+     *
+     * V5.123: 「埋藏营地」返航死锁根治(修正 V5.120 Fix-C 的方向错误)——
+     *   症状: FrostSky 在地表(table_place_skip pos y=64)却 RETURN_TO_BASE 到井下旧营地(move_diag
+     *   target y=45, dy=-18.5, moved30s=0 持续 90s+)。原 Fix-C 以为 bot 在井下要「上爬」,但 dy=target-bot
+     *   (MovementController:246),dy=-18.5 = 目标在 bot 下方 → bot 其实在地表,ascendToSurfaceIfDeep 对地表
+     *   bot 恒 false,救不了。根因: 熔炉路径有「深炉 forget」(PhaseIronAge ~line 177)但工作台/营地路径
+     *   (P2a/P4/P4.5)没有,埋藏的 knownWorkbenchPos 漏过所有 ≤1600 距离闸 → 地表 bot 无法穿石下挖 → 永卡。
+     *   修复: ① PhaseIronAge.assignTask 顶部提前 forget「bot 下方>10格且够不到」的工作台+熔炉记忆 →
+     *   落到就地建台/建炉自愈; ② setReturnToBase 加兜底: 目标埋在地表 bot 下方够不到时改 setExplore 挪窝,
+     *   绝不锁 doomed 返航(覆盖 forget 之外的新鲜扫描深台); ③ 删掉 V5.120 Fix-C 冗余且会绕过兜底的
+     *   deferredReturnTarget 机制(上爬完成后 assignTask 本就确定性重派返航,同 Fix-1 缺燃料上爬路径)。
      */
-    public static final String VERSION = "V5.122";
+    public static final String VERSION = "V5.123";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

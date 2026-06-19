@@ -223,6 +223,11 @@ public class BlockPlacer {
 		//     `no_inv_table` 天然处理"放不下"场景 — gate 不会回压 tryPlaceCraftingTable。
 		//   守卫 (V5.117): 仅当 inv 有 table + 当前不在合成屏幕 + 不在吃饭/sparring 才继续。
 		//   COMBAT / FOLLOW_PLAYER / SMELTING 用同一白名单 (够用即可, 各自下游会因活动打断)。
+		// V5.120 修复: 加 RETURN_TO_BASE(对称 tryPlaceFurnace 表;原注释提的 MOVE_TO_HOME 枚举不存在,未加)。
+		//   背景(FrostSky 60s table_place_skip task_state=RETURN_TO_BASE): bot 在地下 RETURN_TO_BASE
+		//     需要把合新镐的工作台放在途中或回到地表后放下。原白名单缺这两态 → 整段返程 bot
+		//     永远带个无法落地的工作台。RETURN_TO_BASE = PhaseIronAge.setReturnToBase 赋值 +
+		//     任务 timeout 120s 之内允许放。
 		if (personality.currentTask != TaskType.IDLE
 			&& personality.currentTask != TaskType.MINING
 			&& personality.currentTask != TaskType.WOODCUTTING
@@ -231,7 +236,8 @@ public class BlockPlacer {
 			&& personality.currentTask != TaskType.STRIP_MINE
 			&& personality.currentTask != TaskType.SMELTING
 			&& personality.currentTask != TaskType.FOLLOW_PLAYER
-			&& personality.currentTask != TaskType.COMBAT) {
+			&& personality.currentTask != TaskType.COMBAT
+			&& personality.currentTask != TaskType.RETURN_TO_BASE) {
 			diagReason = "task_state=" + personality.currentTask;
 		}
 		// GUI 阻断:任何容器/合成界面打开时都跳过(避免和 CraftingBehavior 抢 ClickSlot 节拍)
@@ -583,6 +589,10 @@ public class BlockPlacer {
 		// V5.120: 补齐与 tryPlaceCraftingTable 白名单的对称 —— 加 SMELTING/FOLLOW_PLAYER/COMBAT。
 		//   注:这三态目前全代码无处赋值(dead),纯为一致性 + 将来这些任务实装时两个放置器行为同步,
 		//   避免一个能放、一个不能放的隐性漂移。
+		// V5.120: 加 RETURN_TO_BASE(对称 tryPlaceCraftingTable;原注释提的 MOVE_TO_HOME 枚举不存在,未加)。
+		//   背景(FrostSky 60s table_place_skip task_state=RETURN_TO_BASE): 返程路上 / 已经到营地
+		//     headline 着手放置熔炉才能开始烧 → 原表会让 PhaseIronAge 已 needFuel 跳进 RETURN_TO_BASE
+		//     transition 后,身边需要新建炉 一律卡住。
 		if (personality.currentTask != TaskType.IDLE
 			&& personality.currentTask != TaskType.MINING
 			&& personality.currentTask != TaskType.WOODCUTTING
@@ -591,7 +601,8 @@ public class BlockPlacer {
 			&& personality.currentTask != TaskType.STRIP_MINE
 			&& personality.currentTask != TaskType.SMELTING
 			&& personality.currentTask != TaskType.FOLLOW_PLAYER
-			&& personality.currentTask != TaskType.COMBAT) {
+			&& personality.currentTask != TaskType.COMBAT
+			&& personality.currentTask != TaskType.RETURN_TO_BASE) {
 			return;
 		}
 		if (player.currentScreenHandler != player.playerScreenHandler) return;

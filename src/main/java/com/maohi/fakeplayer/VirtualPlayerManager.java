@@ -3098,25 +3098,67 @@ prepareAndSpawnVirtualPlayer();
     public static void invokeCriteriaTrigger(ServerPlayerEntity p, String criteriaFieldName) {
         // V5.62: 单一 path 行不通(1.21.11 yarn 改了 package),改成多候选列表逐个尝试。
         //   只要任意一个 path 命中就用之;全部失败时 log 出尝试过的列表,便于未来 yarn 改名再加。
+        // V5.120 classloader fix: Loom 9.x (Fabric MC 1.21.11+) 用 Java module system,直接 Class.forName(name)
+        //   用调用方 class loader 解析 net.minecraft.* —— Loader 是 system loader,通过 platform class loader
+        //   走动态 module 不一定 net.minecraft.named module 里就装载。修复:用 MinecraftServer 的 class loader
+        //   加第二个参数 `false` (跳过 resolution / linkage) —— module gating 在 resolution 时生效,跳过它
+        //   直接反射拿 method handle / call site 是 casino 直接 invoke 即可。ClassNotFoundException 完全
+        //   多余 —— javap -p 在 1.21.11 minecraft-merged jar 显식이现 InventoryChangedCriterion 等。
+        //   测试 log (20:08 GrumpyBrave craft_done target=furnace 后 criteria_trigger_fail
+        //   err=class_not_found tried=[net.minecraft.advancement.criterion.Criteria, …] 猜原路径该过):
+        //   第一个 path name 实际存于 named module 里,需要 Minecraft-side classloader 去取。
+        // 优化(8)) 反射可有可无,但參考类·尝试可直接走 InventoryChangedCriterion 等已知类
+        //   本(direct class) path加到候选表头,不走 Criteria class 拿 static field 的反射 (Mojang 官方
+        //   设计上也不期望 mod 调用,提供 direct access path)。—— inventoryCriterion =
+        //   拿触发器本身(invClass.getField(name))后,字段型"另走 InventoryChangedCriterion.INVENTORY_CHANGED"
+        //   也是现成的。
+        //	上、下两类加入取不到时Available InventoryChangedCriterion.INVENTORY_CHANGED 作 fallback。
         final String[] candidateClassNames = {
             "net.minecraft.advancement.criterion.Criteria",  // yarn 1.20.x ~ 1.21.10
             "net.minecraft.advancement.Criteria",            // yarn 重整后(若有)
             "net.minecraft.criterion.Criteria",              // yarn 1.21.11+ 候选
             "net.minecraft.advancements.critereon.CriteriaTriggers", // Mojang/MCP 风格(极少 Fabric 用,兜底)
         };
+        // 优先: 直接拿 InventoryChangedCriterion 类,字段 INVENTORY_CHANGED 在 inventoryChangeCriterion 类本身上 ——
+        //   1.21 yarn 有“InventoryChangedCriterion"这个类静态字段名 INVENTORY_CHANGED"
+        //   (实际是 “InventoryChangedCriterion.INVENTORY_CHANGED”) 印证打点,获得触发器本身。
+        final String[] directCriterionClasses = {
+            "net.minecraft.advancement.criterion.InventoryChangedCriterion",
+            "net.minecraft.advancement.InventoryChangedCriterion",
+            "net.minecraft.criterion.InventoryChangedCriterion",
+        };
         Class<?> criteriaClass = null;
         String matchedClassName = null;
+        // V5.120 fix: 使用 Minecraft classloader + skip resolution (false)
+        ClassLoader mcLoader = pickMinecraftClassLoader();
         for (String name : candidateClassNames) {
             try {
-                criteriaClass = Class.forName(name);
+                criteriaClass = (mcLoader != null)
+                    ? Class.forName(name, false, mcLoader)
+                    : Class.forName(name);
                 matchedClassName = name;
                 break;
-            } catch (ClassNotFoundException ignored) {}
+            } catch (Throwable ignored) {
+                // 包含 ClassNotFoundException + LinkageError + IncompatibleClassChangeError
+            }
+        }
+        // 全部 classic path 失败 → 尝试 direct InventoryChangedCriterion 类
+        if (criteriaClass == null) {
+            for (String name : directCriterionClasses) {
+                try {
+                    criteriaClass = (mcLoader != null)
+                        ? Class.forName(name, false, mcLoader)
+                        : Class.forName(name);
+                    matchedClassName = name + "[direct]";
+                    break;
+                } catch (Throwable ignored) {}
+            }
         }
         if (criteriaClass == null) {
             com.maohi.fakeplayer.TaskLogger.log(p, "criteria_trigger_fail",
                 "criterion", criteriaFieldName, "err", "class_not_found",
-                "tried", java.util.Arrays.toString(candidateClassNames));
+                "tried", java.util.Arrays.toString(candidateClassNames)
+                    + ";" + java.util.Arrays.toString(directCriterionClasses));
             return;
         }
         try {
@@ -3134,6 +3176,7 @@ prepareAndSpawnVirtualPlayer();
                     "trigger",
                     net.minecraft.server.network.ServerPlayerEntity.class,
                     net.minecraft.entity.player.PlayerInventory.class);
+                m.setAccessible(true);
                 m.invoke(trigger, p, p.getInventory());
                 return;
             } catch (NoSuchMethodException ignored) {}
@@ -3144,6 +3187,7 @@ prepareAndSpawnVirtualPlayer();
                     net.minecraft.server.network.ServerPlayerEntity.class,
                     net.minecraft.entity.player.PlayerInventory.class,
                     net.minecraft.item.ItemStack.class);
+                m.setAccessible(true);
                 m.invoke(trigger, p, p.getInventory(), net.minecraft.item.ItemStack.EMPTY);
                 return;
             } catch (NoSuchMethodException ignored) {}
@@ -3170,6 +3214,31 @@ prepareAndSpawnVirtualPlayer();
             com.maohi.fakeplayer.TaskLogger.log(p, "criteria_trigger_fail",
                 "criterion", criteriaFieldName, "err", t.getClass().getSimpleName() + ":" + t.getMessage());
         }
+    }
+
+    /**
+     * V5.120: 拿 Minecraft 侧的 class loader。试试 entity package、server package 面。
+     *   返回 null 时调用方退到默认 Class.forName(name) 路径 —— 1.20.x 及以前完全够用,
+     *   1.21.x module 场景下取到后转拿 typed class。
+     */
+    private static ClassLoader pickMinecraftClassLoader() {
+        // 优先 Class.forName 不是初始化期地狱。Reflection.getCallerClass() 也是一种,但该用 PME(Kit)
+        //     的手段在 1.21++ 被 Deprecation;改用 Entity.class.getClassLoader() 拿 module loader。
+        String[] probes = {
+            "net.minecraft.server.MinecraftServer",
+            "net.minecraft.world.World",
+            "net.minecraft.entity.Entity",
+            "net.minecraft.block.Block",
+            "net.minecraft.item.ItemStack",
+        };
+        for (String name : probes) {
+            try {
+                Class<?> clz = Class.forName(name);
+                ClassLoader loader = clz.getClassLoader();
+                if (loader != null) return loader;
+            } catch (Throwable ignored) {}
+        }
+        return null;
     }
 
     private void handleMiningTask(ServerPlayerEntity p, Personality personality) {
