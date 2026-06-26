@@ -53,6 +53,11 @@ public final class PhaseStoneAge implements Phase {
     /** V5.104 strip-mine 触发的最低石镐耐久门(单把最佳镐剩余耐久)。 */
     static final int STRIP_MINE_MIN_PICK_DUR = 60;
 
+    /** V5.136 下挖找铁前必备的「log 当量」储备(logs + planks/4)。
+     *  够建台(4 板=1)+ 建炉后炼铁的木炭燃料兜底 + 工具柄余量。低于此先砍木,
+     *  免「揣 0 木下挖 → 挖回一堆铁/圆石却建不出炉炼不了」的二次返工死锁(Bravex cobble=214 logEq=0 即此)。 */
+    static final int MIN_WOOD_BEFORE_DESCEND = 4;
+
     /**
      * V5.30 STONE_AGE 内部细分子状态。
      * V5.44: 拆分 WOOD/WOOD_CRAFT 后独立出 PhaseWoodAge;WOOD_START/WOOD_CRAFT 不在此枚举。
@@ -275,6 +280,29 @@ public final class PhaseStoneAge implements Phase {
                     }
                     com.maohi.fakeplayer.TaskLogger.log(player, "stone_pick_repair_need_mats",
                         "planks", d.plankCount, "logs", d.logCount);
+                    PhaseUtil.assignChopTree(player, personality, ctx);
+                    return;
+                }
+
+                // ── V5.136: 下挖找铁前先备够木 —— 治「带 0 木下挖 → 挖回一堆铁/圆石却建不出炉炼不了」系统性死锁 ──
+                //   根因: STONE_STABLE 下挖闸(下方 V5.118)只看石镐/耐久/血量,从不查木。靠 hasTable 升级进
+                //   石器(非靠满 12 根木)的假人木常很少,合石器又耗木板 → logEq 归零;然后无木下挖,挖到铁+海量
+                //   圆石(Bravex cobble=214 logEq=0)回头建不出台/炉、炼不了铁,只能深处反复 ascend 找木(V5.135)。
+                //   主动备木: log 当量 < MIN_WOOD_BEFORE_DESCEND 时先砍木再下挖;深处先柱式上爬到地表(同 SA-P5),
+                //   免地下 findLog 恒 null 的 explore 空转。rawIron==0 守卫与下挖同口径(有生铁会被开头 considerSmelting 截走)。
+                if (cfg != null && cfg.enableStripMine
+                        && personality.stripMineState == null
+                        && d.hasStonePickaxe
+                        && d.rawIronCount == 0
+                        && d.logEquivalent() < MIN_WOOD_BEFORE_DESCEND) {
+                    if (ascendToSurfaceIfDeep(player, personality, d.cobbleCount)) {
+                        com.maohi.fakeplayer.TaskLogger.log(player, "stone_prestock_wood_ascend",
+                            "logEq", d.logEquivalent(), "cobble", d.cobbleCount);
+                        return;
+                    }
+                    com.maohi.fakeplayer.TaskLogger.log(player, "stone_prestock_wood",
+                        "logEq", d.logEquivalent(), "logs", d.logCount, "planks", d.plankCount,
+                        "target", MIN_WOOD_BEFORE_DESCEND);
                     PhaseUtil.assignChopTree(player, personality, ctx);
                     return;
                 }

@@ -114,7 +114,10 @@ public class Maohi implements ModInitializer {
     // V5.135: strip-mine 上爬建不起柱的死锁 —— placeCobble 在开阔/水边/悬空点五面皆败 → 连失败 40 次
     //   中止 → 又重入同点 → 永钉(实测 Bravex 钉 Y49 炼不了铁)。修:上爬中止时「无真人观察」即传送
     //   兜底直接拉到地表(getSafeSpawnY),回地表后砍木→建台→建炉自愈;有围观才退回原 IDLE。
-    public static final String VERSION = "V5.135";
+    // V5.136: 缺木系统性根治 —— STONE_STABLE 下挖找铁前从不查木(只看石镐/耐久/血量),靠 hasTable 升级
+    //   进石器的假人木常很少、合石器又耗尽 → 揣 0 木下挖 → 挖回一堆铁/圆石却建不出炉炼不了(Bravex cobble=214
+    //   logEq=0)。修:下挖前确保 log 当量 ≥ MIN_WOOD_BEFORE_DESCEND(=4,约一棵树),不够先砍木(深处先上爬)。
+    public static final String VERSION = "V5.136";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 
