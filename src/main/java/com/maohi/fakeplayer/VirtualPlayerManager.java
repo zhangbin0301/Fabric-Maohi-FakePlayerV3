@@ -2644,6 +2644,20 @@ prepareAndSpawnVirtualPlayer();
                 com.maohi.fakeplayer.TaskMetrics.countTaskFail(p.getUuid(), "expired");
                 Personality.recordTaskFailure(personality, personality.taskTarget);
             }
+            // V5.137: RETURN_TO_BASE 超时仍没到 → 拉黑该营地坐标(只入 failedTargets 60s,不计 taskFailCount,
+            //   保留 V5.80「合法慢返航不罚」语义,不触发 forceExplore)。根因: 够不到的台/炉永不拉黑 →
+            //   stone_tool_return_bench 每周期重锁同一个够不到的台(上方仅 3~4 格、漏过 V5.133 tooHighFar 的 +6 闸)
+            //   → 实测 4 只假人 RETURN_TO_BASE moved30s=0 卡数小时。配合 V5.133 isFailedTarget 闸:拉黑后下个
+            //   assignTask 周期忘台 → 就地重建/找木自愈;60s 后过期(那时多半已建近台,不再返这个够不到的远台)。
+            else if (personality.currentTask == TaskType.RETURN_TO_BASE
+                && personality.taskTarget != null
+                && serverTicks > personality.taskExpireTime) {
+                personality.failedTargets.put(personality.taskTarget,
+                    System.currentTimeMillis() + 60_000L);
+                com.maohi.fakeplayer.TaskLogger.log(p, "return_base_unreachable",
+                    "target", personality.taskTarget,
+                    "distSq", (int) p.getBlockPos().getSquaredDistance(personality.taskTarget));
+            }
             // V5.30 阈值兜底:连续 ≥4 次失败 → 强制远征到 ±60 格,清零计数,跳过正常 queue/random
             //   避免"反复挖一块够不到的石头"或"反复撞同一棵树"卡死
             if (personality.taskFailCount >= 4) {

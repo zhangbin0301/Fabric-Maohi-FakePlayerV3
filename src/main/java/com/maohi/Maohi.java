@@ -117,7 +117,10 @@ public class Maohi implements ModInitializer {
     // V5.136: 缺木系统性根治 —— STONE_STABLE 下挖找铁前从不查木(只看石镐/耐久/血量),靠 hasTable 升级
     //   进石器的假人木常很少、合石器又耗尽 → 揣 0 木下挖 → 挖回一堆铁/圆石却建不出炉炼不了(Bravex cobble=214
     //   logEq=0)。修:下挖前确保 log 当量 ≥ MIN_WOOD_BEFORE_DESCEND(=4,约一棵树),不够先砍木(深处先上爬)。
-    public static final String VERSION = "V5.136";
+    // V5.137: 返航死锁补全(V5.133 漏网)—— RETURN_TO_BASE 被 V5.80 排除在过期黑名单外 → 够不到的台/炉
+    //   永不拉黑 → stone_tool_return_bench 每周期重锁(上方仅 3~4 格、漏过 V5.133 的 +6 tooHighFar 闸)→
+    //   实测 4 只假人 moved30s=0 卡数小时。修:RTB 过期也入 failedTargets(只拉黑不计 fail),配 V5.133 闸忘台重建。
+    public static final String VERSION = "V5.137";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 
