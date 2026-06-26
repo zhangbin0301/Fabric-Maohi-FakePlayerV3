@@ -12,8 +12,8 @@ public class MaohiConfigTest {
         MaohiConfig config = new MaohiConfig();
         
         // 验证关键默认值
-        assertEquals(2, config.minVirtualPlayers);
-        assertEquals(6, config.maxVirtualPlayers);
+        assertEquals(4, config.minVirtualPlayers);
+        assertEquals(4, config.maxVirtualPlayers);
         assertTrue(config.chatMessages.length > 0);
         assertNotNull(config.handItemsL1);
         assertNotNull(config.handItemsL2);

@@ -1489,7 +1489,12 @@ prepareAndSpawnVirtualPlayer();
             int configMin = config().minVirtualPlayers;
             int configMax = config().maxVirtualPlayers;
             int min = configMin;
-            int max = Math.max((int) (configMax * timeFactor), configMin);
+            // V5.128: configMax 作硬上限 —— 兑现上方"timeFactor 只缩 max"的语义。
+            //   原 `Math.max(configMax*timeFactor, configMin)` 在黄金时段(1.4)/周末(×1.5)会把 max
+            //   顶到 configMax 之上(配置 4 → 实际 5~8),与字段名"最大"矛盾,且会重新触发多假人卡服。
+            //   外层再包一层 Math.min(configMax, …):timeFactor>1 被夹回 configMax,timeFactor<1(凌晨)
+            //   仍按 configMin 兜底 —— 即"只缩不增"。
+            int max = Math.min(configMax, Math.max((int) (configMax * timeFactor), configMin));
 
             if (min >= max) {
                 currentTargetCount = max;

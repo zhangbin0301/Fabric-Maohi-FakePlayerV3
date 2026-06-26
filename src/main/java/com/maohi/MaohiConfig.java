@@ -98,8 +98,11 @@ public class MaohiConfig {
     /** spawn 的 MSPT 门(ms):平均 tick 时间超过此值就暂停放行新假人,等主线程缓过来。从 80 收紧到 70。 */
     public double spawnMsptGateMs = 70.0;
 
-    /** 假人总容量 */
-    public int maxVirtualPlayers = 5;
+    /** 假人总容量。
+     *  V5.128: 5 → 4。配合 minVirtualPlayers=4 → 目标人数恒定 4 名(updateTargetCount 已把
+     *  configMax 作硬上限,黄金时段/周末不再顶破)。降一名以削减 C2ME 异步生成管线压力,
+     *  减少主线程偶发 getChunkBlocking 被放大成多秒 park 的概率。 */
+    public int maxVirtualPlayers = 4;
 
     /** 任何时刻最少保持在线的假人数 */
     public int minVirtualPlayers = 4;

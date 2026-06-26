@@ -59,6 +59,13 @@ public final class PhaseNether implements Phase {
 
     private PhaseNether() {}
 
+    public static final int[][] PORTAL_FRAME_COORDS = new int[][]{
+        {1, 0, 0}, {2, 0, 0},
+        {1, 4, 0}, {2, 4, 0},
+        {0, 1, 0}, {0, 2, 0}, {0, 3, 0},
+        {3, 1, 0}, {3, 2, 0}, {3, 3, 0}
+    };
+
     /** V5.23: portal/ancient_debris 扫描缓存 TTL */
     private static final long SCAN_CACHE_TTL_MS = 5_000L;
 

@@ -156,10 +156,13 @@ public final class PhaseIronAge implements Phase {
         //                              实际 chestplate 要 8,但 helmet/legs/boots 各 5/7/4 — 已超出可合范围,
         //                              退回 4 让 bot 立刻去合已有料,而非继续卡在炉边凑 8）
         //       ironIngot < 4 → 目标 4（避免目标永远是 8 反复 park 80s+）
-        //   简化：目标即为 4（反正 needsSmelting 第二帧就退出，不会越过 8 的边界）。
-        //   缺点：bot 不再攒到 8 才行动，半套铁甲后立刻 craft_done iron_helmet/legs/boots 而不是 chestplate。
-        //   实际更合理：分段够料立刻合，避免 park 卡顿。
-        int smeltTarget = hasFullIronArmor ? 4 : 4;
+        //   V5.130 (方案 A) 改正:上面「固定 4」其实把假人卡死在「只有靴子」—— 4 锭只够 boots(4),
+        //   再也炼不到 helmet(5)/legs(7)/chest(8) → hasFullIronArmor 永 false → P4.6 钻石下挖永不放行。
+        //   改为自适应「当前最缺那件甲所需铁锭」逐件凑满(无健康镐时 +PICK_IRON_RESERVE);满甲回落 4 维持工具。
+        //   park 权衡:合胸甲那阵要炼到 8 锭(~80s park),但 V5.83 knownFurnacePos 记忆已消掉当年每周期
+        //   24³ 扫炉的卡顿真凶 + 1/40 节流,park 本身不再 lag(这正是 V5.117 Fix-7 当年压到 4 的顾虑)。
+        int smeltTarget = com.maohi.fakeplayer.ai.CraftingBehavior.ironTargetForNextArmorPiece(player);
+        if (smeltTarget <= 0) smeltTarget = 4; // 满甲 → 只为工具(镐3/剑2)维持铁锭
         boolean needsSmelting = rawIronCount > 0 && ironIngotCount < smeltTarget;
         if (needsSmelting) {
             // V5.86: 冶炼前置 —— 同 PhaseStoneAge SA-P0。有 raw_iron 要炼但背包无任何可用燃料
@@ -391,12 +394,19 @@ public final class PhaseIronAge implements Phase {
             }
         }
 
-        // ── P4.1: 铁矿补给 — 没铁镐且铁锭不足,主动下矿补铁 ──
-        //   场景: 铁锭被 autoUpgradeTools 消耗(做了铁剑/盾牌等)后铁<3,或铁镐用断后身上无铁,
-        //   IRON_AGE 棘轮锁死无法降回 STONE_AGE 重新触发石器挖铁。
-        //   复用 stoneStableCyclesNoIron 计数: 连续 N 个 assignTask 周期未进展即触发 strip-mine。
-        //   用石镐下挖(stripMineForDiamond=false → requireIron=false → 石镐可用)。
-        if (!hasIronPickaxe && (ironIngotCount + rawIronCount) < 3 && hasStonePickaxe) {
+        // ── P4.1: 铁矿补给 — 主动下矿补铁(strip-mine),两种触发 ──
+        //   A. 没铁镐 + (铁锭+粗铁)<3 + 有石镐 → 补「合铁镐」的铁(收手于 3 粗铁)。
+        //   B. V5.132: 有铁镐 + 没满甲 + (铁锭+粗铁)不够下一件甲所需 → 补「凑甲」的铁(收手于 4 粗铁)。
+        //      根治断链:合铁镐后旧条件 !hasIronPickaxe 立即失效 → 补甲铁只剩 P5 随机挖矿,而 strip-mine
+        //      上爬回地表后 findOre 扫不到地下铁矿 → V5.130 自适应目标"愿炼 8 锭"却无铁可炼,半甲卡死。
+        //      armorNeed 用 ironTargetForNextArmorPiece(最便宜缺甲所需,口径同 V5.130);用「<」而非「<=」——
+        //      刚够下一件就不挖、落 P4.5 直接合,只在真不够时下矿。收手阈值由 hasMinedEnoughRawIron 按
+        //      "有无铁镐"自动选 3/4。复用 stoneStableCyclesNoIron 计数错峰,先给 P5 几拍再下矿。
+        int p41ArmorNeed = com.maohi.fakeplayer.ai.CraftingBehavior.ironTargetForNextArmorPiece(player);
+        boolean p41PickResupply = !hasIronPickaxe && (ironIngotCount + rawIronCount) < 3 && hasStonePickaxe;
+        boolean p41ArmorIronShort = hasIronPickaxe && !hasFullIronArmor && p41ArmorNeed > 0
+                && (ironIngotCount + rawIronCount) < p41ArmorNeed;
+        if (p41PickResupply || p41ArmorIronShort) {
             com.maohi.MaohiConfig ironCfg = com.maohi.MaohiConfig.getInstance();
             if (ironCfg != null && ironCfg.enableStripMine
                     && personality.stripMineState == null
@@ -414,8 +424,10 @@ public final class PhaseIronAge implements Phase {
                     personality.stoneStableCyclesNoIron = 0;
                     personality.currentTask = TaskType.STRIP_MINE;
                     com.maohi.fakeplayer.TaskLogger.log(player, "stripmine_enter",
-                        "goal", "iron_resupply", "startY", personality.stripMineStartY,
-                        "ironIngots", ironIngotCount, "phase", "IRON_AGE");
+                        "goal", p41PickResupply ? "iron_resupply" : "armor_iron",
+                        "startY", personality.stripMineStartY,
+                        "ironIngots", ironIngotCount, "rawIron", rawIronCount,
+                        "armorNeed", p41ArmorIronShort ? p41ArmorNeed : 0, "phase", "IRON_AGE");
                     return;
                 }
             }

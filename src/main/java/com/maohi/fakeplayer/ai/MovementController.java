@@ -658,6 +658,10 @@ public class MovementController {
 			//   本帧让 chunk 异步加载完(下一 tick 重试)。
 			if (areTravelChunksReady(p)) {
 				p.travel(new Vec3d(side, 0, fwd));
+			} else {
+				// V5.128: chunk 未就绪时回退本帧的移动输入，防止 vanilla 碰撞系统
+				// 基于移动意图产生微量位移，清零 stuckTicks 导致 stuck 检测失效。
+				stopMovement(p);
 			}
 		}
 
@@ -783,14 +787,29 @@ public class MovementController {
 		//   每 tick movedSq>=0.0001 直接 return,永远走不到这里。只对 EXPLORING、离目标仍远时生效:
 		//   ~15s 窗口净位移 <1 格 = 够不到当前探索点(A* 失败后退化为朝远目标走直线 → 撞障碍原地蹭),
 		//   立即拉黑换向,把"干耗整个探索超时(~60s)零进展"压到 ~15s。MINING/CRAFTING/放置已在上方豁免返回。
-		if (pers.currentTask == com.maohi.fakeplayer.TaskType.EXPLORING && target != null) {
+		// V5.128: 扩展净位移卡死检测到所有移动类任务。
+		// 原先只对 EXPLORING 生效，但 RETURN_TO_BASE/MINING/WOODCUTTING/CRAFTING（走向工作台时）
+		// 同样会因撞墙微弹清零 stuckTicks 而永远触发不了 stage 1。
+		// 静态任务（CRAFTING 站定合成、isMining 挖矿中、放置状态机中）已在上方豁免 return。
+		// V5.129 ①②③: 净位移卡死判据收口"到达死区" —— 到达(distSq≤4 → doSmartMove:252 return true)
+		//   与原净位移换向(distSq>9)之间的 2~3 格无人区(SeaBuilder distSq=6.48 即冻死在此)。
+		//   ③ 锚定稳定的 taskTarget,而非会在 pathWaypoint/真目标间跳变的 moveGoal 形参 target:否则
+		//     handleMoveBlocked 每次重算 A* 换 pathWaypoint,下面 !equals 重锚把 15s 窗口清零,"追 churn 路点"
+		//     的 bot 永远评估不完净位移而漏网。
+		//   ① 距离闸 9.0 → 4.0 补上死区:已到达的 bot 早在 :252 return,挖矿/合成/放置在 :776 已豁免 return,
+		//     都走不到这里,故放宽不会误伤。
+		//   ② 命中先 nudge 保留同目标重试(最多 2 次),换站位往往就够得到了;nudge 用尽/不可用才拉黑换向。
+		BlockPos netAnchorTarget = pers.taskTarget != null ? pers.taskTarget : target;
+		if (netAnchorTarget != null && pers.currentTask != null
+				&& pers.currentTask != com.maohi.fakeplayer.TaskType.IDLE) {
 			long netNowMs = System.currentTimeMillis();
-			if (!target.equals(pers.lastStuckNetTarget)) {
+			if (!netAnchorTarget.equals(pers.lastStuckNetTarget)) {
 				// 新目标 → 重锚窗口,给它完整 NET_STUCK_WINDOW_MS 再评估
-				pers.lastStuckNetTarget = target;
+				pers.lastStuckNetTarget = netAnchorTarget;
 				pers.lastStuckNetSampleX = pos.x;
 				pers.lastStuckNetSampleZ = pos.z;
 				pers.lastStuckNetSampleAt = netNowMs;
+				pers.stuckNetNudgeCount = 0;
 			} else if (netNowMs - pers.lastStuckNetSampleAt >= NET_STUCK_WINDOW_MS) {
 				double netDx = pos.x - pers.lastStuckNetSampleX;
 				double netDz = pos.z - pers.lastStuckNetSampleZ;
@@ -798,21 +817,53 @@ public class MovementController {
 				pers.lastStuckNetSampleX = pos.x;
 				pers.lastStuckNetSampleZ = pos.z;
 				pers.lastStuckNetSampleAt = netNowMs;
-				double tDx = target.getX() + 0.5 - pos.x;
-				double tDz = target.getZ() + 0.5 - pos.z;
+				double tDx = netAnchorTarget.getX() + 0.5 - pos.x;
+				double tDz = netAnchorTarget.getZ() + 0.5 - pos.z;
 				double tDistSq = tDx * tDx + tDz * tDz;
-				if (netSq < NET_STUCK_MIN_MOVE_SQ && tDistSq > 9.0) {
-					pers.failedTargets.put(target, netNowMs + 60_000L);
-					com.maohi.fakeplayer.Personality.recordTaskFailure(pers, target);
+				if (netSq >= NET_STUCK_MIN_MOVE_SQ) {
+					// 这一窗口真的挪动了 → 不算卡死,清 nudge 计数
+					pers.stuckNetNudgeCount = 0;
+				} else if (tDistSq > 4.0) {
+					// ② 先 nudge(最多 2 次)保留同目标重试:复用 stage-1 的 findNudgePosition + 传送,
+					//   把 bot 挪到旁边 2 格空位打破地形死锁,清掉够不到的中间路点,重锚窗口再给一次机会。
+					if (pers.stuckNetNudgeCount < 2) {
+						BlockPos nudge = findNudgePosition(world, p.getBlockPos(), 2);
+						if (nudge != null && !hasNearbyRealObserver(p, world, 32)) {
+							p.refreshPositionAndAngles(
+								nudge.getX() + 0.5, nudge.getY() + 1.0, nudge.getZ() + 0.5,
+								p.getYaw(), p.getPitch());
+							pers.lastStuckTeleportAt = netNowMs;
+							pers.pathWaypoint = null;   // 清够不到的中间路点,下 tick 从新位置朝 taskTarget 重算
+							pers.currentPath.clear();
+							pers.stuckTicks = 0;
+							pers.stuckNetNudgeCount++;
+							// 重锚:给挪位后的新站位一个完整窗口再评估
+							pers.lastStuckNetSampleX = nudge.getX() + 0.5;
+							pers.lastStuckNetSampleZ = nudge.getZ() + 0.5;
+							pers.lastStuckNetSampleAt = netNowMs;
+							com.maohi.fakeplayer.TaskLogger.log(p, "stuck_net_nudge",
+								"target", netAnchorTarget,
+								"to", nudge,
+								"tries", pers.stuckNetNudgeCount,
+								"distSq", String.format("%.1f", tDistSq));
+							stopMovement(p);
+							return true;
+						}
+					}
+					// nudge 用尽 / 无空位 / 有真人观察 → 拉黑换向
+					pers.failedTargets.put(netAnchorTarget, netNowMs + 60_000L);
+					com.maohi.fakeplayer.Personality.recordTaskFailure(pers, netAnchorTarget);
 					com.maohi.fakeplayer.TaskLogger.log(p, "stuck_net_blacklist",
-						"target", target,
+						"target", netAnchorTarget,
 						"netSq", String.format("%.2f", netSq),
 						"distSq", String.format("%.1f", tDistSq),
+						"tries", pers.stuckNetNudgeCount,
 						"y", String.format("%.1f", pos.y));
 					pers.currentTask = com.maohi.fakeplayer.TaskType.IDLE;
 					pers.taskTarget = null;
 					pers.currentPath.clear();
 					pers.stuckTicks = 0;
+					pers.stuckNetNudgeCount = 0;
 					pers.lastStuckNetTarget = null;
 					stopMovement(p);
 					return true;
@@ -832,9 +883,23 @@ public class MovementController {
 		// === stage 1: > 300 tick (15s) 未动 → 拉黑 target 触发 reassign ===
 		if (pers.stuckTicks > 300 && pers.stuckEscalation < 1) {
 			pers.stuckEscalation = 1;
+			long nowMs = System.currentTimeMillis();
 			if (target != null) {
-				pers.failedTargets.put(target, System.currentTimeMillis() + 60_000L);
+				pers.failedTargets.put(target, nowMs + 60_000L);
 				com.maohi.fakeplayer.Personality.recordTaskFailure(pers, target);
+			}
+			// V5.128: stage 1 时尝试 nudge teleport 脱困（半径 2 格）。
+			// 原 stage 1 只拉黑+IDLE，假人仍在原位，下次分配附近目标还是卡。
+			// nudge 成功 = 假人挪到旁边空位，后续移动不再撞同一面墙。
+			BlockPos nudge = findNudgePosition(world, p.getBlockPos(), 2);
+			if (nudge != null && !hasNearbyRealObserver(p, world, 32)) {
+				p.refreshPositionAndAngles(
+					nudge.getX() + 0.5, nudge.getY() + 1.0, nudge.getZ() + 0.5,
+					java.util.concurrent.ThreadLocalRandom.current().nextFloat() * 360f - 180f, p.getPitch());
+				pers.lastStuckTeleportAt = nowMs;
+				com.maohi.fakeplayer.TaskLogger.log(p, "stuck_nudge_stage1",
+					"from", String.format("(%.1f,%.1f,%.1f)", pos.x, pos.y, pos.z),
+					"to", nudge);
 			}
 			com.maohi.fakeplayer.TaskLogger.log(p, "stuck_blacklist",
 				"target", target, "stuckTicks", pers.stuckTicks,

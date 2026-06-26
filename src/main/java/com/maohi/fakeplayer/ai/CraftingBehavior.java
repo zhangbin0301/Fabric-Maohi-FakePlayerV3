@@ -549,6 +549,27 @@ public final class CraftingBehavior {
 			&& getArmorLevel(player.getEquippedStack(net.minecraft.entity.EquipmentSlot.FEET)) >= 2;
 	}
 
+	/**
+	 * V5.130 (方案 A): 当前还缺的「最便宜」那件铁甲所需的背包铁锭目标数,供 PhaseIronAge 驱动自适应
+	 *   smeltTarget —— 让假人逐件 boots(4)→helmet(5)→leggings(7)→chestplate(8) 凑满,根治旧的固定
+	 *   smeltTarget=4 把假人卡在「只有靴子」(4 锭够靴、再也炼不到 5/7/8 → hasFullIronArmor 永 false →
+	 *   P4.6 钻石下挖永不放行)。
+	 *
+	 * <p>口径与 {@link #autoCraftArmor} 的 ironForArmor 一致:无健康铁镐时先扣 PICK_IRON_RESERVE 给镐,
+	 *   故目标同步 +reserve —— 炼够后 autoUpgradeTools 本 tick 先补镐、下一周期再 smelt 到目标合甲,不死锁。
+	 *   检查顺序按铁数从小到大 = 总是先补最便宜的缺口,逐件成型 park 最短。
+	 *
+	 * @return 0 = 四甲已齐铁级(无需为造甲炼铁;PhaseIronAge 回落 4 锭只维持工具)。
+	 */
+	public static int ironTargetForNextArmorPiece(ServerPlayerEntity player) {
+		int reserve = countHealthyIronPickaxes(player) == 0 ? PICK_IRON_RESERVE : 0;
+		if (getArmorLevel(player.getEquippedStack(net.minecraft.entity.EquipmentSlot.FEET))  < 2) return 4 + reserve;
+		if (getArmorLevel(player.getEquippedStack(net.minecraft.entity.EquipmentSlot.HEAD))  < 2) return 5 + reserve;
+		if (getArmorLevel(player.getEquippedStack(net.minecraft.entity.EquipmentSlot.LEGS))  < 2) return 7 + reserve;
+		if (getArmorLevel(player.getEquippedStack(net.minecraft.entity.EquipmentSlot.CHEST)) < 2) return 8 + reserve;
+		return 0;
+	}
+
 	private static void autoCraftRangedGear(ServerPlayerEntity player, com.maohi.fakeplayer.Personality pers, PlayerInventory inv) {
 		int stick = 0, string = 0, flint = 0, feather = 0, arrow = 0;
 		boolean hasBow = false;

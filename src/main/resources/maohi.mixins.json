@@ -3,21 +3,22 @@
   "minVersion": "0.8",
   "package": "com.maohi.mixin",
   "compatibilityLevel": "JAVA_21",
-	"mixins": [
-		"CommandManagerMixin",
-		"EntityTrackerEntryMixin",
-		"MinecraftServerMixin",
-		"PlayerManagerMixin",
-		"PlayerSaveHandlerMixin",
-		"ServerChunkLoadingManagerMixin",
-		"ServerChunkManagerAccessor",
-		"ServerPlayerEntityMixin",
-		"ServerCommonNetworkHandlerLatencyAccessor",
-		"PlayerInventoryAccessor",
-		"SpawnRestrictionMixin",
-		"VillagerTaskListProviderMixin",
-		"WorldMixin"
-	],
+  "mixins": [
+    "BeehiveBlockEntityMixin",
+    "CommandManagerMixin",
+    "EntityTrackerEntryMixin",
+    "MinecraftServerMixin",
+    "PlayerManagerMixin",
+    "PlayerSaveHandlerMixin",
+    "ServerChunkLoadingManagerMixin",
+    "ServerChunkManagerAccessor",
+    "ServerPlayerEntityMixin",
+    "ServerCommonNetworkHandlerLatencyAccessor",
+    "PlayerInventoryAccessor",
+    "SpawnRestrictionMixin",
+    "VillagerTaskListProviderMixin",
+    "WorldMixin"
+  ],
   "injectors": {
     "defaultRequire": 1
   }

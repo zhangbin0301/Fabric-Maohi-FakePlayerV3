@@ -50,6 +50,8 @@ public class Personality {
 	public transient int stoneStartLastCobble = -1;
 	
 	public GrowthPhase growthPhase = GrowthPhase.WOOD_AGE; // V5.44: 新生 bot 从木器时代起步(无镐),vanilla 玩家自然入门档
+	public transient BlockPos smeltWalkAwayFurnacePos = null;
+	public transient long smeltWalkAwayExpiredAt = 0L;
 	public long phaseEnteredAt = 0L;
 	// V5.44 一次性迁移标志(transient,不持久化):每次会话首次 detectPhase 时检查一次。
 	//   若旧 NBT growthPhase=STONE_AGE 但背包实际无任何镐,本次破例允许降级到 WOOD_AGE,让棘轮重新评估。
@@ -93,6 +95,9 @@ public class Personality {
 	//   smeltingFurnacePos 记住阶段 1 用过的熔炉坐标,阶段 2 直接复用,失败(被破坏/走太远)就放弃
 	public int smeltingTicks = 0;
 	public BlockPos smeltingFurnacePos = null;
+	// V5.131: 本炉烧的是木炭(原木→木炭)而非铁锭。供 collectFromFurnace 区分 —— 木炭不发 story/smelt_iron。
+	//   与 smeltingTicks/smeltingFurnacePos 同步持久化,避免重连后误把木炭当铁记成就。
+	public boolean smeltingIsCharcoal = false;
 
 	/** 根据 ServerPlayerEntity 获取对应 Personality（供 CombatReflex 等外部模块调用） */
 	public static Personality get(ServerPlayerEntity player) {
@@ -414,6 +419,10 @@ public class Personality {
 	// 净位移采样当前跟踪的目标。目标一变就重锚窗口,保证每个新探索点都拿到完整 15s 再评估,
 	//   避免沿用上个停滞目标的采样把刚分配的新目标瞬间误杀。
 	public transient BlockPos lastStuckNetTarget = null;
+	// V5.129 ②: 净位移卡死命中后的连续 nudge 次数。先 nudge(保留同目标)最多 2 次让 bot 换站位重试,
+	//   仍卡死才拉黑换向 —— 避免对"可达但进近角度差"的目标过早放弃。窗口内真挪动(netSq≥NET_STUCK_MIN_MOVE_SQ)
+	//   或 taskTarget 变更即归零。transient,重连/重 spawn 自然重置。
+	public transient int stuckNetNudgeCount = 0;
 	// stuck 阶梯进度:0=正常,1=已拉黑当前 target,2=已 teleport,3=已 kick。
 	//   每次 stuckTicks 归零(bot 重新动起来)时也归零。
 	public transient int stuckEscalation = 0;
@@ -514,6 +523,14 @@ public class Personality {
 		}
 	}
 
+	/** V5.133: 该坐标是否仍在失败黑名单有效期内(failedTargets 记的是到期时间戳)。
+	 *   供 assignTask 路径主动避让够不到/超时的目标,不再反复重锁同一个 doomed 点。 */
+	public static boolean isFailedTarget(Personality p, BlockPos pos) {
+		if (p == null || pos == null) return false;
+		Long until = p.failedTargets.get(pos);
+		return until != null && until > System.currentTimeMillis();
+	}
+
 	public static void resetTaskFailCount(Personality p) {
 		if (p == null) return;
 		p.taskFailCount = 0;
@@ -568,5 +585,19 @@ public class Personality {
 		if (p == null || p.scannedEmptyRegions.isEmpty()) return;
 		long now = System.currentTimeMillis();
 		p.scannedEmptyRegions.entrySet().removeIf(e -> e.getValue() < now);
+	}
+
+	public static class ProgressionState {
+		private final GrowthPhase phase;
+		public ProgressionState(GrowthPhase phase) {
+			this.phase = phase;
+		}
+		public GrowthPhase phase() {
+			return phase;
+		}
+	}
+
+	public ProgressionState progression() {
+		return new ProgressionState(this.growthPhase != null ? this.growthPhase : GrowthPhase.WOOD_AGE);
 	}
 }

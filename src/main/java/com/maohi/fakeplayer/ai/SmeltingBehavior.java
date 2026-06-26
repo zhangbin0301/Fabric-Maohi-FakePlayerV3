@@ -61,6 +61,8 @@ public final class SmeltingBehavior {
 	private static final int FURNACE_SCAN_RADIUS = 24;
 	/** 阶段 2 重开熔炉的最大距离平方(5 格内,服务端 reach 5.5) */
 	private static final double COLLECT_DIST_SQ = 25.0;
+	/** V5.131: 木炭储备目标 —— 缺煤时把原木烧成木炭当燃料,攒到此数即停,留木料给合成。 */
+	private static final int CHARCOAL_FUEL_TARGET = 4;
 
 	/**
 	 * 阶段 1: 找熔炉 + 摆原料 + 燃料 + 关界面 + 设倒计时。
@@ -78,9 +80,19 @@ public final class SmeltingBehavior {
 		if (ThreadLocalRandom.current().nextInt(40) != 0) return;
 
 		PlayerInventory inv = player.getInventory();
-		int rawIronSlot = findItemSlot(inv, Items.RAW_IRON);
-		if (rawIronSlot < 0) return;
-		int fuelSlot = findFuelSlot(inv);
+		// V5.131: 缺煤且木炭储备不足时,先烧原木→木炭(自给高效燃料);否则正常炼铁。
+		//   消费端 findFuelSlot 已优先煤/木炭,故只需在此补上"生产"一环。
+		boolean makeCharcoal = shouldMakeCharcoal(inv);
+		int inputSlot;
+		int fuelSlot;
+		if (makeCharcoal) {
+			inputSlot = findLogSlot(inv);                              // 原木 → 木炭
+			fuelSlot  = findCharcoalBootstrapFuelSlot(inv, inputSlot); // 引子燃料:木板优先,不烧煤/木炭
+		} else {
+			inputSlot = findItemSlot(inv, Items.RAW_IRON);            // 生铁 → 铁锭
+			fuelSlot  = findFuelSlot(inv);                            // 优先煤/木炭(含刚烧出的)
+		}
+		if (inputSlot < 0) return;
 		if (fuelSlot < 0) return;
 
 		// V5.83: 优先用记忆熔炉坐标，避免现在 1/40 高频下每次都做 24³ 全量扫描（主线程开销）。
@@ -104,8 +116,8 @@ public final class SmeltingBehavior {
 		// 距离检查 — 只有真正贴炉(≤5格)才启动熔炼
 		if (player.squaredDistanceTo(Vec3d.ofCenter(furnace)) > COLLECT_DIST_SQ) return;
 
-		// 真协议化阶段 1: 开熔炉 → 摆 1 raw_iron + 1 fuel → 关
-		if (!placeIngredientsInFurnace(player, furnace, rawIronSlot, fuelSlot)) {
+		// 真协议化阶段 1: 开熔炉 → 摆 1 份输入(生铁/原木)+(按需)1 份燃料 → 关
+		if (!placeIngredientsInFurnace(player, furnace, inputSlot, fuelSlot)) {
 			com.maohi.fakeplayer.TaskLogger.log(player, "smelt_fail",
 				"reason", "place_ingredients_failed", "furnace", furnace);
 			return;
@@ -113,9 +125,10 @@ public final class SmeltingBehavior {
 
 		// 标记阶段 2 状态
 		pers.smeltingFurnacePos = furnace;
+		pers.smeltingIsCharcoal = makeCharcoal; // V5.131: 供 collect 区分(木炭不发 story/smelt_iron)
 		// vanilla 烧炼周期 200 tick;给点抖动避免与多假人同步
 		pers.smeltingTicks = 200 + ThreadLocalRandom.current().nextInt(40);
-		com.maohi.fakeplayer.TaskLogger.log(player, "smelt_start",
+		com.maohi.fakeplayer.TaskLogger.log(player, makeCharcoal ? "charcoal_start" : "smelt_start",
 			"furnace", furnace, "ticks", pers.smeltingTicks);
 	}
 
@@ -139,6 +152,8 @@ public final class SmeltingBehavior {
 			if (player.squaredDistanceTo(Vec3d.ofCenter(furnace)) > COLLECT_DIST_SQ) {
 				com.maohi.fakeplayer.TaskLogger.log(player, "smelt_fail",
 					"reason", "walked_away", "furnace", furnace, "botPos", player.getBlockPos());
+				pers.smeltWalkAwayFurnacePos = furnace;
+				pers.smeltWalkAwayExpiredAt = player.getEntityWorld().getServer().getTicks() + 60;
 				return;
 			}
 			// 熔炉可能被破坏
@@ -165,18 +180,28 @@ public final class SmeltingBehavior {
 			return false;
 		}
 
-		int rawIronScreenSlot = InventoryActionHelper.playerInvSlotToScreenSlot(handler, rawIronInvSlot);
-		int fuelScreenSlot = InventoryActionHelper.playerInvSlotToScreenSlot(handler, fuelInvSlot);
-		if (rawIronScreenSlot < 0 || fuelScreenSlot < 0) {
+		int inputScreenSlot = InventoryActionHelper.playerInvSlotToScreenSlot(handler, rawIronInvSlot);
+		if (inputScreenSlot < 0) {
 			InventoryActionHelper.closeScreen(player);
 			com.maohi.fakeplayer.TaskLogger.log(player, "smelt_fail",
-				"reason", "slot_map_failed", "rawSlot", rawIronScreenSlot, "fuelSlot", fuelScreenSlot);
+				"reason", "slot_map_failed", "inputSlot", inputScreenSlot);
 			return false;
 		}
 
-		// 摆 1 raw_iron → input slot 0,1 fuel → fuel slot 1
-		InventoryActionHelper.moveOneToHandlerSlot(player, rawIronScreenSlot, 0);
-		InventoryActionHelper.moveOneToHandlerSlot(player, fuelScreenSlot, 1);
+		// 摆 1 份输入(生铁/原木)→ input slot 0
+		InventoryActionHelper.moveOneToHandlerSlot(player, inputScreenSlot, 0);
+
+		// V5.131 燃料不过量: 仅当炉内燃料槽(slot 1)为空时才补 1 份燃料。
+		//   旧实现每熔一件都塞 1 份 → 1 份煤/木炭(可烧 8 件)被当 1 件用 → 严重过量,木炭毫无效率优势。
+		//   槽 1 仍有上次的燃料就不再塞 → 1 份真烧满它能烧的件数(煤/木炭 8、木料 1.5);
+		//   槽 1 空(刚被点燃消耗 / 冷炉)才补,绝不让炉缺料停烧 → 无 stall。
+		//   1.21.11 Yarn: getSlot(1).getStack().isEmpty() 与下方验证 getSlot(0) 同一 API,稳。
+		if (handler.getSlot(1).getStack().isEmpty()) {
+			int fuelScreenSlot = InventoryActionHelper.playerInvSlotToScreenSlot(handler, fuelInvSlot);
+			if (fuelScreenSlot >= 0) {
+				InventoryActionHelper.moveOneToHandlerSlot(player, fuelScreenSlot, 1);
+			}
+		}
 
 		// V5.112: 关界面前验证原料真进了炉输入槽(slot 0)。否则 moveOne 静默失败仍 return true →
 		//   pers.smeltingTicks 空等 200 tick → collect 空炉 → 永远 0 锭却看似"在熔"。
@@ -255,6 +280,10 @@ public final class SmeltingBehavior {
 		return null;
 	}
 
+	public static void tryCollectFromKnownFurnace(ServerPlayerEntity player, BlockPos furnace) {
+		collectFromFurnace(player, furnace);
+	}
+
 	private static void collectFromFurnace(ServerPlayerEntity player, BlockPos furnace) {
 		// V5.112: 复用 openFurnaceScreen 的完整开窗序列(切空手槽 + 发包 + 直调 + openHandledScreen 兜底)。
 		if (openFurnaceScreen(player, furnace) == null) {
@@ -274,12 +303,20 @@ public final class SmeltingBehavior {
 			net.minecraft.sound.SoundEvents.ENTITY_EXPERIENCE_ORB_PICKUP,
 			net.minecraft.sound.SoundCategory.PLAYERS, 0.5f, 0.8f);
 
+		// V5.131: 区分木炭/铁锭 —— 本炉若烧木炭(原木→木炭)只记 charcoal_done,绝不发 story/smelt_iron。
+		//   清标志,避免下一炉(可能是铁)误判。
+		com.maohi.fakeplayer.Personality pers = com.maohi.fakeplayer.Personality.get(player);
+		boolean wasCharcoal = pers != null && pers.smeltingIsCharcoal;
+		if (pers != null) pers.smeltingIsCharcoal = false;
+		if (wasCharcoal) {
+			com.maohi.fakeplayer.TaskLogger.log(player, "charcoal_done", "furnace", furnace);
+			return;
+		}
+
 		com.maohi.fakeplayer.TaskLogger.log(player, "smelt_done", "furnace", furnace);
 
-		// P23 direct_grant: 当前 SmeltingBehavior 只烧 raw_iron → iron_ingot,
-		//   所以 smelt_done 等同 story/smelt_iron 的实事求是观测。
+		// P23 direct_grant: raw_iron → iron_ingot,smelt_done 等同 story/smelt_iron 的实事求是观测。
 		//   Set.add 自带去重,多次烧只首次记账。
-		com.maohi.fakeplayer.Personality pers = com.maohi.fakeplayer.Personality.get(player);
 		if (pers != null && pers.unlockedAdvancements.add("story/smelt_iron")) {
 			pers.hasUnlockedThisSession = true;
 			pers.lastProgressAt = System.currentTimeMillis(); // V5.59 (idle-rescue)
@@ -326,6 +363,52 @@ public final class SmeltingBehavior {
 			if (woodSlot < 0 && (s.isIn(ItemTags.LOGS) || s.isIn(ItemTags.PLANKS))) woodSlot = i;
 		}
 		return woodSlot; // 无煤才退回木料(原木/木板)
+	}
+
+	/**
+	 * V5.131: 是否该把原木烧成木炭(自给高效燃料)。仅在「没煤 + 木炭储备不足 + 有富余木料」时为真。
+	 *   木炭/煤 1 份烧 8 件,远胜直烧木板(1.5 件),且把原木从"直接当燃料烧"省下来给合成。
+	 *   缺木料由 Phase 既有 hasSmeltFuel→assignChopTree 兜底(用户:缺木料就去挖)。
+	 */
+	private static boolean shouldMakeCharcoal(PlayerInventory inv) {
+		int coal = 0, charcoal = 0, logs = 0, planks = 0;
+		for (int i = 0; i < inv.size(); i++) {
+			ItemStack s = inv.getStack(i);
+			if (s.isEmpty()) continue;
+			if (s.isOf(Items.COAL)) coal += s.getCount();
+			else if (s.isOf(Items.CHARCOAL)) charcoal += s.getCount();
+			else if (s.isIn(ItemTags.LOGS)) logs += s.getCount();
+			else if (s.isIn(ItemTags.PLANKS)) planks += s.getCount();
+		}
+		if (coal > 0) return false;                         // 有煤 → 木炭多余
+		if (charcoal >= CHARCOAL_FUEL_TARGET) return false; // 储备够
+		if (logs < 1) return false;                         // 没原木可烧成炭
+		if (planks < 4) return false;                       // 引子燃料不足(留 ~3 木板给工作台/木棍)
+		return true;
+	}
+
+	/** V5.131: 找第一个原木槽(LOGS tag),作木炭熔炼的输入。无返 -1。 */
+	private static int findLogSlot(PlayerInventory inv) {
+		for (int i = 0; i < inv.size(); i++) {
+			if (inv.getStack(i).isIn(ItemTags.LOGS)) return i;
+		}
+		return -1;
+	}
+
+	/**
+	 * V5.131: 烧木炭的引子燃料槽 —— 木板优先(把原木留给转化),退而求其次用「非输入」的另一根原木。
+	 *   绝不返回煤/木炭(用木炭烧木炭净零、用煤则前提不成立),也排除正作输入的原木槽 excludeSlot。
+	 */
+	private static int findCharcoalBootstrapFuelSlot(PlayerInventory inv, int excludeSlot) {
+		int logSlot = -1;
+		for (int i = 0; i < inv.size(); i++) {
+			if (i == excludeSlot) continue;
+			ItemStack s = inv.getStack(i);
+			if (s.isEmpty()) continue;
+			if (s.isIn(ItemTags.PLANKS)) return i;            // 木板优先
+			if (logSlot < 0 && s.isIn(ItemTags.LOGS)) logSlot = i;
+		}
+		return logSlot;
 	}
 
 	/**

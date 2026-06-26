@@ -464,6 +464,14 @@ public final class PhaseUtil {
         BlockPos target = ctx.findLog.apply(player.getEntityWorld(), player.getBlockPos());
         if (target != null) {
             target = snapToTreeBase(player.getEntityWorld(), target);
+            // V5.133: 这棵树已在黑名单(上次够不到/超时拉黑)→ 别再重锁,改探索挪窝找可达的树。
+            //   根因(GhostDragon thrash): findLog 永远返回最近那棵树,即便它够不到、刚被超时拉黑,
+            //   下个周期又原样锁回 WOODCUTTING → 撞 11 格外平地的树反复超时(dy=0 过不了下面 dy 闸)。
+            if (com.maohi.fakeplayer.Personality.isFailedTarget(p, target)) {
+                com.maohi.fakeplayer.Personality.markRegionScanEmpty(p, player.getBlockPos());
+                setExplore(p, player);
+                return;
+            }
             if (Math.abs(target.getY() - player.getBlockY()) > 12) {
                 p.failedTargets.put(target, System.currentTimeMillis() + 60_000L);
                 com.maohi.fakeplayer.Personality.markRegionScanEmpty(p, player.getBlockPos());

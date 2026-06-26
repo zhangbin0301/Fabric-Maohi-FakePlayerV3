@@ -9,13 +9,11 @@ import static org.junit.jupiter.api.Assertions.*;
 import static org.mockito.Mockito.*;
 
 public class VirtualPlayerManagerTest {
-    private MinecraftServer server;
     private VirtualPlayerManager vpm;
 
     @BeforeEach
     public void setup() {
-        server = mock(MinecraftServer.class);
-        vpm = new VirtualPlayerManager(server);
+        vpm = new VirtualPlayerManager(null);
     }
 
     @Test

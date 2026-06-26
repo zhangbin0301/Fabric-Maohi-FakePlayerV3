@@ -99,7 +99,19 @@ public class Maohi implements ModInitializer {
      *   stopMovement 放弃、干等 ~30s stage-2 stuck_teleport。让 bot 能爬上矮坎够到坡/坎上的树/工作台
      *   (Chloe 树在坎上够不到即此)。搭块即重置 stuckTicks 防被 teleport 打断;搭不上则退回原位走原放弃逻辑。
      */
-    public static final String VERSION = "V5.127";
+    // V5.129: 净位移卡死「到达死区」收口(①闸 9→4 ②nudge 保留同目标重试 ③锚定 taskTarget)
+    //   + 激活 BeehiveBlockEntityMixin(蜂巢 releaseBee 主线程阻塞式 chunk 加载收口,补注册)。
+    // V5.130: 自适应 smeltTarget 逐件凑满铁甲(boots4→helmet5→legs7→chest8),根治固定 4 锭卡「只有靴子」→ P4.6 永不下钻石。
+    // V5.131: 燃料不过量(炉内燃料槽非空就不再塞,1 份煤/木炭真烧满 8 件)+ 缺煤时烧原木→木炭自给高效燃料。
+    // V5.132: 补甲挖铁断链 —— P4.1 strip-mine 扩一条触发(有铁镐+没满甲+铁不够下一件甲),给 V5.130 供料,免半甲卡死。
+    // V5.133: 返航/砍树死锁确定性闸 —— ① stone_tool 够不到的高台/远台/已拉黑台 → 当无台,就地重建/找木自愈
+    //   (镜像 V5.123 下方台 forget,补上方+远 case;治 CloudNine RETURN_TO_BASE moved30s=0 永卡);
+    //   ② assignChopTree 跳过已拉黑的树,不再反复锁同一棵够不到的树(治 GhostDragon assigns=313 thrash);
+    //   ③ Personality.isFailedTarget 助手(查 failedTargets 有效期)。根因:RETURN_TO_BASE 过期不入黑名单 + findLog/findCraftingTable 不查黑名单。
+    // V5.134: strip-mine 取镐死循环根治 —— hotbar 全满时 quickMove(insertItem)塞不进镐、镐留原背包 →
+    //   每 tick 重搬刷屏 stripmine_quickmove_pick(GhostDragon 实测刷 1 分钟+不挖)。改:hotbar 有空位才 quickMove,
+    //   满槽走 SWAP(数字键交换语义)把镐强制换进选中槽,一次到位。
+    public static final String VERSION = "V5.134";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

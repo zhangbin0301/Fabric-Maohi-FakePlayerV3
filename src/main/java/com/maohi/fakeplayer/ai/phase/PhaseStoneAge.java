@@ -162,6 +162,26 @@ public final class PhaseStoneAge implements Phase {
                             && player.getBlockPos().getSquaredDistance(personality.knownWorkbenchPos) <= 64.0 * 64.0) {
                         workbench = personality.knownWorkbenchPos;
                     }
+                    // V5.133: 够不到的台子 → 当无台处理,落到就地重建/找木自愈(治 RETURN_TO_BASE 死锁)。
+                    //   ① 上方+远:bot 挖进坑/洞(如 CloudNine y=56),台子在地表上方 7 格、水平 20 格外,
+                    //      爬不回去 → moved30s=0 永卡。这是 V5.123「下方台 forget」的镜像(那条管下方埋藏台)。
+                    //   ② 已拉黑:净位移救援/历史失败已把它记进 failedTargets → 别再重锁。
+                    //   命中即补记 60s 黑名单(findCraftingTable 物理扫描会反复扒到同一台子,黑名单确保下周期也跳过),
+                    //   并清掉指向它的 knownWorkbenchPos 记忆。
+                    if (workbench != null) {
+                        boolean tooHighFar = workbench.getY() > player.getBlockY() + 6
+                            && player.getBlockPos().getSquaredDistance(workbench) > 100.0;
+                        if (tooHighFar || com.maohi.fakeplayer.Personality.isFailedTarget(personality, workbench)) {
+                            com.maohi.fakeplayer.TaskLogger.log(player, "stone_tool_bench_unreachable",
+                                "bench", workbench, "botY", player.getBlockY(),
+                                "reason", tooHighFar ? "high_far" : "blacklist");
+                            personality.failedTargets.put(workbench, System.currentTimeMillis() + 60_000L);
+                            if (workbench.equals(personality.knownWorkbenchPos)) {
+                                personality.knownWorkbenchPos = null;
+                            }
+                            workbench = null;
+                        }
+                    }
                     boolean nearWorkbench = workbench != null
                         && player.getBlockPos().getSquaredDistance(workbench) <= PhaseUtil.WORKBENCH_NEARBY_SQ;
                     if (nearWorkbench) {

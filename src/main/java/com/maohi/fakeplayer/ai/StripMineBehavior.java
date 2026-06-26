@@ -518,11 +518,29 @@ public class StripMineBehavior {
         if (bestInvSlot >= 0) {
             int screenSlot = InventoryActionHelper.playerInvSlotToScreenSlot(player.playerScreenHandler, bestInvSlot);
             if (screenSlot >= 0) {
-                InventoryActionHelper.quickMove(player, screenSlot);
-                TaskLogger.log(player, "stripmine_quickmove_pick",
-                    "from", "inv_" + bestInvSlot, "to", "hotbar", "dur", bestInvDur);
+                // V5.134: hotbar 有空位 → quickMove(干净,不打乱原有热键);hotbar 全满 → SWAP 强制换进选中槽。
+                //   根因(GhostDragon 死循环 stripmine_quickmove_pick 刷屏 1 分钟+): quickMove 走 vanilla
+                //   insertItem,hotbar 9 格全被圆石/木料占满时 insert 失败、镐留在原背包 → 下 tick step1/2
+                //   仍找不到 hotbar 内的镐 → 又重搬,永不挪进去。SWAP(数字键交换语义)满槽也能把镐换进去
+                //   (被挤出的物品落回原背包槽),一次到位。
+                int emptyHotbar = -1;
+                for (int h = 0; h < 9; h++) {
+                    if (inv.getStack(h).isEmpty()) { emptyHotbar = h; break; }
+                }
+                if (emptyHotbar >= 0) {
+                    InventoryActionHelper.quickMove(player, screenSlot);
+                    TaskLogger.log(player, "stripmine_quickmove_pick",
+                        "from", "inv_" + bestInvSlot, "to", "hotbar", "dur", bestInvDur);
+                } else {
+                    int sel = ((com.maohi.mixin.PlayerInventoryAccessor) inv).getSelectedSlot();
+                    InventoryActionHelper.clickSlot(player, screenSlot, sel,
+                        net.minecraft.screen.slot.SlotActionType.SWAP);
+                    TaskLogger.log(player, "stripmine_swap_pick",
+                        "from", "inv_" + bestInvSlot, "to", "hotbar_" + sel,
+                        "dur", bestInvDur, "reason", "hotbar_full");
+                }
             }
-            return false;  // 本 tick 在搬运,下 tick 再来挖
+            return false;  // 本 tick 在搬运/交换,下 tick step1/2 确认镐已在手即开挖
         }
 
         // 4. 真没镐了
