@@ -332,9 +332,22 @@ public class StripMineBehavior {
         }
 
         if (pers.stripMineConsecutiveFails > 40) { // 200 ticks = 40 * 5 ticks
+            // V5.135: 柱式上爬在本点建不起来(开阔/水边/悬空,placeCobble 五面皆败 —— 实测 Bravex
+            //   钉 Y49 死循环 stripmine_ascend_fail、炼不了铁)。上爬的唯一目的是回地表砍木建炉,
+            //   柱式只是实现之一 —— 失败即用「无真人观察才传送」兜底直接拉到地表(同 MovementController
+            //   stage-2 rescue 不变式),到地表后 considerSmelting 落 SA-P6 砍木→建台→建炉自愈。
+            //   有真人围观传不了 → 退回原 IDLE 行为(如实记 stripmine_ascend_fail)。
+            int surfaceY = PathfindingNavigation.getSafeSpawnY(world, pos.getX(), pos.getZ(), pos.getY());
+            if (surfaceY - pos.getY() > 3
+                    && !MovementController.hasNearbyRealObserver(player, world, 32)) {
+                player.refreshPositionAndAngles(pos.getX() + 0.5, surfaceY, pos.getZ() + 0.5,
+                    player.getYaw(), player.getPitch());
+                TaskLogger.log(player, "stripmine_ascend_teleport", "fromY", pos.getY(), "toY", surfaceY);
+            } else {
+                TaskLogger.log(player, "stripmine_ascend_fail", "y", pos.getY());
+            }
             pers.stripMineState = null;
             pers.currentTask = TaskType.IDLE;
-            TaskLogger.log(player, "stripmine_ascend_fail", "y", pos.getY());
         }
     }
 

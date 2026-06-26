@@ -111,7 +111,10 @@ public class Maohi implements ModInitializer {
     // V5.134: strip-mine 取镐死循环根治 —— hotbar 全满时 quickMove(insertItem)塞不进镐、镐留原背包 →
     //   每 tick 重搬刷屏 stripmine_quickmove_pick(GhostDragon 实测刷 1 分钟+不挖)。改:hotbar 有空位才 quickMove,
     //   满槽走 SWAP(数字键交换语义)把镐强制换进选中槽,一次到位。
-    public static final String VERSION = "V5.134";
+    // V5.135: strip-mine 上爬建不起柱的死锁 —— placeCobble 在开阔/水边/悬空点五面皆败 → 连失败 40 次
+    //   中止 → 又重入同点 → 永钉(实测 Bravex 钉 Y49 炼不了铁)。修:上爬中止时「无真人观察」即传送
+    //   兜底直接拉到地表(getSafeSpawnY),回地表后砍木→建台→建炉自愈;有围观才退回原 IDLE。
+    public static final String VERSION = "V5.135";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 
