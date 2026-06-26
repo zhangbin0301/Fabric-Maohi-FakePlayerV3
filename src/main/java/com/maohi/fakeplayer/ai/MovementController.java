@@ -771,6 +771,18 @@ public class MovementController {
 		pers.lastStuckSampleZ = pos.z;
 		pers.lastStuckSampleY = pos.y;
 
+		// V5.138: isMining 残留防呆 —— isMining 只在 MINING/WOODCUTTING 执行期(handleMiningTask)置真,
+		//   清假也只在该函数内(挖断/不可破)。若 bot 挖到一半被推出 reach(reachSq>25 handleMiningTask 不再被调)
+		//   或被 reassign 切到别的任务(PhaseUtil.set 不清 isMining),isMining 会永久残留 true → 下面静态任务豁免
+		//   每 tick 在此早退并清 stuckTicks → net-stuck 与 stuckTicks stage-1 两套救援全哑火 → bot 冻死永不被救
+		//   (实测 4 只 RETURN_TO_BASE moved30s=0 卡数小时、一条 stuck_* 都没有,根因即此)。
+		//   对账:非挖掘类任务必清 isMining,豁免只在真挖矿/砍树时生效。
+		if (pers.isMining
+				&& pers.currentTask != com.maohi.fakeplayer.TaskType.MINING
+				&& pers.currentTask != com.maohi.fakeplayer.TaskType.WOODCUTTING) {
+			pers.isMining = false;
+		}
+
 		// P2 & P7: 静态任务豁免 stuck 判定。正在合成、挖矿、或执行方块摆放状态机时，物理位移必然为 0，
 		//     不应累加 stuckTicks，防止在极度卡顿环境下（挖一棵树耗时30秒以上）被误判卡死踢出。
 		if (pers.currentTask == com.maohi.fakeplayer.TaskType.CRAFTING

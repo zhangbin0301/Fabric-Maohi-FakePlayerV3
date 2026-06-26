@@ -120,7 +120,11 @@ public class Maohi implements ModInitializer {
     // V5.137: 返航死锁补全(V5.133 漏网)—— RETURN_TO_BASE 被 V5.80 排除在过期黑名单外 → 够不到的台/炉
     //   永不拉黑 → stone_tool_return_bench 每周期重锁(上方仅 3~4 格、漏过 V5.133 的 +6 tooHighFar 闸)→
     //   实测 4 只假人 moved30s=0 卡数小时。修:RTB 过期也入 failedTargets(只拉黑不计 fail),配 V5.133 闸忘台重建。
-    public static final String VERSION = "V5.137";
+    // V5.138: 卡死救援哑火根因(比 V5.137 更通用)—— isMining 只在 handleMiningTask 内清,bot 挖到一半被推出
+    //   reach 或被 reassign 切走时 isMining 永久残留 true → handleStuckDetection 每 tick 在静态任务豁免处早退并清
+    //   stuckTicks → net-stuck 与 stage-1 两套救援全哑火 → 冻死永不被救(4 只 RTB moved30s=0、零 stuck_* 即此)。
+    //   修:handleStuckDetection 顶部对账,非 MINING/WOODCUTTING 任务必清 isMining,豁免只在真挖矿/砍树时生效。
+    public static final String VERSION = "V5.138";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 
