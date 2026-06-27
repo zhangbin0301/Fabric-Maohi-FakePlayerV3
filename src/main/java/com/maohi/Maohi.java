@@ -136,7 +136,9 @@ public class Maohi implements ModInitializer {
     // V5.142: 钻石「指定地点挖」—— 钻石 strip-mine 专扫 diamond_ore(子串匹配命中 diamond/deepslate_diamond_ore,
     //   server 已知确切坐标直奔之),不再被深层遍地的煤/铁/铜诱走绕路。24 格无钻石则 orePos==null →
     //   V5.141 cave-steering 朝深洞拐(深洞/岩浆区常裸露钻石)。铁目标仍用通用 "ore"(顺路捡煤/铁不算绕路)。
-    public static final String VERSION = "V5.142";
+    // V5.143: 「专门挖煤」—— 铁已够、就差煤(炼铁缺燃料)时 strip-mine 专扫 coal_ore 直奔煤,不再朝用不到的
+    //   铁绕路 / 靠 V5.119 瞎转 90°。同 V5.142 钻石思路;煤够后回落通用 "ore",got_iron 更快达成上爬。
+    public static final String VERSION = "V5.143";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

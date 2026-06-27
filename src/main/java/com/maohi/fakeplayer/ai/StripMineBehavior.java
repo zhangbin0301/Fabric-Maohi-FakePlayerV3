@@ -236,8 +236,17 @@ public class StripMineBehavior {
         // V5.142: 钻石目标专扫 diamond_ore(matchesType 子串匹配命中 diamond_ore + deepslate_diamond_ore,
         //   cache key 含类型独立缓存)—— server 已知每块钻石矿确切坐标,直奔它(真「指定地点挖」),不再被
         //   深层遍地的煤/铁/铜诱走绕路。24 格内无钻石则 orePos==null → V5.141 cave-steering 朝深洞拐
-        //   (深洞/岩浆区常裸露钻石)。铁目标仍用通用 "ore"(它本就想顺路捡煤/铁,不算绕路)。
-        String oreScanType = pers.stripMineForDiamond ? "diamond_ore" : "ore";
+        //   (深洞/岩浆区常裸露钻石)。
+        // V5.143: 「专门挖煤」—— 铁已够、就差煤(炼铁缺燃料)时专扫 coal_ore 直奔煤,别再朝用不到的铁绕路
+        //   /靠 V5.119 瞎转。同钻石思路;煤短缺解除后回落通用 "ore"。其余铁阶段仍通用 "ore"(顺路捡铁+煤)。
+        String oreScanType;
+        if (pers.stripMineForDiamond) {
+            oreScanType = "diamond_ore";
+        } else if (hasMinedEnoughRawIron(player) && countCoal(player) < COAL_FUEL_TARGET) {
+            oreScanType = "coal_ore";
+        } else {
+            oreScanType = "ore";
+        }
         BlockPos orePos = mgr != null ? mgr.findNearestBlock(world, pos, 24, oreScanType, player.getUuid()) : null;
         if (orePos != null) {
             double dist = pos.getSquaredDistance(orePos);
