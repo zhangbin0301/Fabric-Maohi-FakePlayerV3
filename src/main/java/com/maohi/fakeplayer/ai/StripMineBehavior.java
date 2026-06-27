@@ -251,10 +251,28 @@ public class StripMineBehavior {
             }
         }
 
+        // V5.141: 钻洞穴找铁 —— 没探到矿时朝最近的洞穴拐。洞穴里铁矿大量裸露,走进去后 V5.140 的 24 格
+        //   ore-veer 自动锁裸矿、且空气段 mineBlock=no-op 几乎零圆石,比盲挖直线/随机转向高效得多。
+        //   每 4 格评估一次(findCaveDirection 限采样、走 safeGetBlockState O(1) 非阻塞,主线程安全);
+        //   探到矿时上面 ore-veer 已改向,本块 orePos==null 才进、不覆盖朝矿方向。钻石目标也受益(裸钻同理)。
+        boolean steeredToCave = false;
+        if (orePos == null && pers.stripMineTunnelLen > 0 && pers.stripMineTunnelLen % 4 == 0) {
+            Direction caveDir = findCaveDirection(world, pos, 16);
+            if (caveDir != null && caveDir != pers.stripMineFacing) {
+                pers.stripMineFacing = caveDir;
+                steeredToCave = true;
+                com.maohi.fakeplayer.TaskLogger.log(player, "stripmine_steer_cave",
+                    "dir", caveDir, "y", pos.getY());
+            } else if (caveDir != null) {
+                steeredToCave = true; // 已朝洞穴,别再被下面随机转向打乱
+            }
+        }
+
         // V5.119 换向找煤: 铁已够(≥IRON_HOARD_CAP)但煤不够、且这一 tick 没探到矿石 → 每 8 格随机转 90°,
         //   扫两侧新区域找煤层(直挖一条线易错过两侧煤矿)。用满 max_len(=64)预算;到顶仍无煤由 line223
         //   的 max_len 兜底带铁上爬。钻石目标不掺和(只认 got_diamond);探到矿时上面已改朝矿、不会被覆盖。
-        if (!forDiamond && orePos == null
+        // V5.141: 已朝洞穴(steeredToCave)则跳过随机转向 —— 洞穴里煤也裸露,优先奔洞穴。
+        if (!steeredToCave && !forDiamond && orePos == null
                 && pers.stripMineTunnelLen > 0 && pers.stripMineTunnelLen % 8 == 0
                 && countRawIron(player) >= IRON_HOARD_CAP
                 && countCoal(player) < COAL_FUEL_TARGET) {
@@ -407,6 +425,33 @@ public class StripMineBehavior {
             if (!world.getBlockState(pos).isAir()) return true; // 验证:pos 真从空气变成了固体方块
         }
         return false;   // 所有面都放不上 → 如实返回失败
+    }
+
+    /**
+     * V5.141: 找最近的洞穴方向(钻洞穴找铁用)。在 4 个水平方向各向外采样,返回第一个出现「3 格连续空气」
+     *   (真洞穴,非 bot 自己 2 格高隧道、非 1 格缝)的方向中距离最近者;无则返 null。
+     *   走 safeGetBlockState(O(1) 非阻塞,chunk 未就绪即放弃该方向),限采样 4×maxDist×3 次,主线程安全。
+     *   注:server 端可"看穿"石墙(已知全部方块),故能隔墙发现洞穴 → 朝它拐、挖几格破墙进洞收割裸矿。
+     */
+    private static Direction findCaveDirection(ServerWorld world, BlockPos pos, int maxDist) {
+        Direction[] dirs = { Direction.NORTH, Direction.SOUTH, Direction.EAST, Direction.WEST };
+        Direction best = null;
+        int bestDist = Integer.MAX_VALUE;
+        for (Direction d : dirs) {
+            for (int dist = 2; dist <= maxDist; dist++) {
+                BlockPos q = pos.offset(d, dist);
+                if (!PathfindingNavigation.isChunkReady(world, q.getX() >> 4, q.getZ() >> 4)) break;
+                BlockState s0 = PathfindingNavigation.safeGetBlockState(world, q);
+                BlockState s1 = PathfindingNavigation.safeGetBlockState(world, q.up());
+                BlockState s2 = PathfindingNavigation.safeGetBlockState(world, q.up(2));
+                if (s0 == null || s1 == null || s2 == null) break;
+                if (s0.isAir() && s1.isAir() && s2.isAir()) { // 3 格连续空气 = 真洞穴
+                    if (dist < bestDist) { bestDist = dist; best = d; }
+                    break; // 该方向已找到最近洞穴,停
+                }
+            }
+        }
+        return best;
     }
 
     /** V5.98: 数背包圆石 + 圆石深板岩(能合石器的)总量,供圆石目标 strip-mine 早退判定。 */

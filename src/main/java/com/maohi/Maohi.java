@@ -129,7 +129,11 @@ public class Maohi implements ModInitializer {
     // V5.140: 找铁根因优化(治圆石囤积 300+)—— strip-mine 矿石探测半径 8 → 24(同 P5、缓存 chunk 安全)。
     //   原 8 格看不见 10~15 格外的铁矿脉 → 盲挖直线靠 max_len 碰运气 → 一趟 ~128 圆石、铁却没几块。
     //   放大让假人提前朝矿脉拐(朝矿走而非盲挖直线),单位圆石找到的铁大增、隧道更短。
-    public static final String VERSION = "V5.140";
+    // V5.141: 钻洞穴找铁(找铁根因 ② —— 接 V5.140 进一步灭圆石)—— strip-mine 没探到矿时朝最近洞穴拐。
+    //   1.18+ 洞穴里铁矿大量裸露,走进去 = V5.140 的 ore-veer 锁裸矿 + 空气段 mineBlock=no-op 几乎零圆石,
+    //   远胜盲挖直线。findCaveDirection 在 4 水平向有界采样找「3 格连续空气」真洞穴(safeGetBlockState O(1)
+    //   非阻塞、可隔墙看穿),每 4 格评估;探到矿时 ore-veer 优先、不掺和;lava 洞由既有 isHazardousBlock 兜底。
+    public static final String VERSION = "V5.141";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 
