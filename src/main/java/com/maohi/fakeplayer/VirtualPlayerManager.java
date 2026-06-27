@@ -1745,6 +1745,20 @@ prepareAndSpawnVirtualPlayer();
 
 	public void stop() {
 	running = false;
+	// V5.144: 关服同步落盘假人 .dat 根治 —— FakeClientConnection.disconnect/handleDisconnection
+	//   被掏空(防 Netty 冲突),vanilla shutdown→disconnectAllPlayers 那条 onDisconnected→savePlayerData
+	//   路径对假人整条断掉;下方 server.execute(onDisconnected) 补救又因 tick 循环已退出、executor 队列
+	//   再无人 drain 而永不执行 → 正常 /stop 时假人背包/护甲/XP/坐标从不落盘,只剩 vanilla 5min autosave
+	//   兜底 → 与同步 saveSync 的 JSON 半(阶段/成就)脑裂:重启后阶段还在、装备回退到 5 分钟前甚至全裸。
+	//   这里趁假人仍在 PlayerManager 列表、isVirtualPlayer 仍为 true(必须在下方移除循环之前)、状态鲜活时
+	//   主动存全员一次。写盘经 PlayerSaveHandlerMixin 入 AsyncPlayerSaveService 异步队列,由紧随其后的
+	//   AsyncPlayerSaveService.shutdown()(Maohi.onServerStopping)awaitTermination 等其落盘,两半对齐。
+	try {
+		server.getPlayerManager().saveAllPlayerData();
+	} catch (Throwable t) {
+		org.slf4j.LoggerFactory.getLogger("Server thread")
+			.warn("[MaohiTask] stop_save_all_failed: {}", t.toString());
+	}
 	// V5.54: 关服时主动释放 preheat 期间锁的 forced chunks(配合 /maohi off 释放路径),
 	//   避免关服期间 vanilla 自己尝试 unload chunks 时还要处理 FORCED ticket 的反向操作。
 	releaseForcedSpawnChunks();

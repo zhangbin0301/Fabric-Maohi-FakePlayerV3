@@ -138,7 +138,14 @@ public class Maohi implements ModInitializer {
     //   V5.141 cave-steering 朝深洞拐(深洞/岩浆区常裸露钻石)。铁目标仍用通用 "ore"(顺路捡煤/铁不算绕路)。
     // V5.143: 「专门挖煤」—— 铁已够、就差煤(炼铁缺燃料)时 strip-mine 专扫 coal_ore 直奔煤,不再朝用不到的
     //   铁绕路 / 靠 V5.119 瞎转 90°。同 V5.142 钻石思路;煤够后回落通用 "ore",got_iron 更快达成上爬。
-    public static final String VERSION = "V5.143";
+    // V5.144: 关服存档脑裂根治 —— FakeClientConnection.disconnect/handleDisconnection 被掏空(防 Netty 冲突),
+    //   vanilla shutdown→disconnectAllPlayers 的 onDisconnected→savePlayerData 路径对假人整条断掉;stop() 里
+    //   server.execute(onDisconnected) 补救又因关服时 tick 循环已退出、executor 队列再无人 drain 而永不执行
+    //   → 正常 /stop 时假人 .dat(背包/护甲/XP/坐标)从不落盘,只剩 vanilla 5min autosave 兜底,而 mod 的
+    //   JSON 半(阶段/成就/在线时长)由 saveSync 同步真存 → 重启后脑裂:阶段[铁器]/成就在、装备回退 5 分钟前甚至全裸。
+    //   修:stop() 顶部(移除假人前、isVirtualPlayer 仍 true 时)同步 server.getPlayerManager().saveAllPlayerData(),
+    //   走 PlayerSaveHandlerMixin 异步入队,由紧随的 AsyncPlayerSaveService.shutdown() awaitTermination 等其落盘。
+    public static final String VERSION = "V5.144";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 
