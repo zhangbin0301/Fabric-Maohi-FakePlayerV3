@@ -186,6 +186,10 @@ public class Personality {
 	//   每 tick 强制 stuckTicks=0 → 卡死检测完全失效,stuck_blacklist / teleport / kick 三级全哑火。
 	//   transient 让这些字段每次会话从默认值(false / null / 0 / NORTH)起步,保证物理状态干净。
 	public transient boolean isMining = false;          // 是否正在挖掘
+	// V5.139: P11「挖木→授予 mine_wood 成就」一次性闸。vanilla 1.21.11 无独立「获得木头」成就,
+	//   每砍一根木都全量遍历 advancement loader 找不到 → 刷屏 p11_grant_miss + 浪费枚举开销。
+	//   首次尝试(命中/未命中)后置真,不再重入。
+	public transient boolean p11WoodGrantDone = false;
 	public transient BlockPos miningPos = null;          // 当前挖掘的方块坐标
 	public transient int miningTotalTicks = 0;           // 挖掘总时长（按方块硬度+工具效率计算）
 	public transient int miningElapsedTicks = 0;         // 已挖了多少 tick

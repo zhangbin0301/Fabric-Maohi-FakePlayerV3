@@ -3470,7 +3470,11 @@ prepareAndSpawnVirtualPlayer();
                 }
 
                 // P11 强制进度触发：如果挖掉的是原木，且掉落拾取存在延迟/判定失效，主动给 fake player 塞成就
-                if (minedType.endsWith("_log") || minedType.endsWith("_wood")) {
+                // V5.139: 加一次性闸 —— vanilla 1.21.11 无独立「获得木头」成就,本块每砍一根木都全量遍历
+                //   advancement loader、必 granted==0 → 刷屏 p11_grant_miss + 浪费枚举。首次尝试后置真不再重入
+                //   (标志同步设在派发前,免多根木在 flag 落定前重复入队 server.execute)。
+                if ((minedType.endsWith("_log") || minedType.endsWith("_wood")) && !personality.p11WoodGrantDone) {
+                    personality.p11WoodGrantDone = true;
                     server.execute(() -> {
                         // P22 vanilla 官方 API:直接触发 INVENTORY_CHANGED criterion。
                         //   1.21.11 fake player 走我们自己的 pickup 路径绕过了 vanilla 自动 trigger 链路,

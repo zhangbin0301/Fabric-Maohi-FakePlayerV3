@@ -317,21 +317,30 @@ public class BlockPlacer {
 		BlockPos placeAt = null;
 		BlockPos supportPos = null;
 		Direction faceDir = null;
-		for (BlockPos cand : candidates) {
-			// planA P-1 修复:isAir() → isAir() || isReplaceable()。
-			//   原 isAir() 排除草、藤蔓、雪层、mangrove_propagule、花等"vanilla 右键能放进去的"方块。
-			//   密林/红树林环境周围 1 格全是 mangrove_roots / 草 / 树叶 → 12 候选全 reject → no_place_pos。
-			//   isReplaceable() 与 vanilla 玩家右键放置语义一致(vanilla 玩家右键花的位置,工作台直接顶替花)。
-			// V5.66: cand 可能跨相邻 chunk, 未就绪即跳过该候选(防裸 getBlockState 同步加载)。cand 与 under 同 chunk, 一次 gate 覆盖两处。
+		// V5.139: 两遍扫 —— pass 0 要求支撑块实心(免把台子放树叶/雪层上,叶子衰变后台子掉成物品 →
+		//   假人丢台又重建,实测 Lunahd 把台放 birch_leaves 上 supportSolid=false)。pass 0 全无实心支撑
+		//   (周围全树叶/非实心)才 pass 1 退回「非空气即可」原行为,绝不因此回退 no_place_pos。
+		for (int pass = 0; pass < 2 && placeAt == null; pass++) {
+			boolean requireSolid = (pass == 0);
+			for (BlockPos cand : candidates) {
+				// planA P-1 修复:isAir() → isAir() || isReplaceable()。
+				//   原 isAir() 排除草、藤蔓、雪层、mangrove_propagule、花等"vanilla 右键能放进去的"方块。
+				//   密林/红树林环境周围 1 格全是 mangrove_roots / 草 / 树叶 → 12 候选全 reject → no_place_pos。
+				//   isReplaceable() 与 vanilla 玩家右键放置语义一致(vanilla 玩家右键花的位置,工作台直接顶替花)。
+				// V5.66: cand 可能跨相邻 chunk, 未就绪即跳过该候选(防裸 getBlockState 同步加载)。cand 与 under 同 chunk, 一次 gate 覆盖两处。
 				if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(player.getEntityWorld(), cand.getX() >> 4, cand.getZ() >> 4)) continue;
 				net.minecraft.block.BlockState candState = player.getEntityWorld().getBlockState(cand);
-			if (!candState.isAir() && !candState.isReplaceable()) continue;
-			BlockPos under = cand.down();
-			if (player.getEntityWorld().getBlockState(under).isAir()) continue;
-			placeAt = cand;
-			supportPos = under;        // 右键脚边格的下方实心面(face = UP)
-			faceDir = Direction.UP;
-			break;
+				if (!candState.isAir() && !candState.isReplaceable()) continue;
+				BlockPos under = cand.down();
+				net.minecraft.block.BlockState underState = player.getEntityWorld().getBlockState(under);
+				if (underState.isAir()) continue;
+				// V5.139: pass 0 跳过非实心支撑(树叶/雪层/地毯等),pass 1 放行兜底。
+				if (requireSolid && !underState.isSolidBlock(player.getEntityWorld(), under)) continue;
+				placeAt = cand;
+				supportPos = under;        // 右键脚边格的下方实心面(face = UP)
+				faceDir = Direction.UP;
+				break;
+			}
 		}
 		if (placeAt == null) {
 			// V5.122: 周围 12 候选都放不下台(脚边/头顶全是空气列或悬空,如山顶/窄柱/树梢)→ 武装放台冷却(100t≈5s),

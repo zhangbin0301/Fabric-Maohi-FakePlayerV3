@@ -124,7 +124,12 @@ public class Maohi implements ModInitializer {
     //   reach 或被 reassign 切走时 isMining 永久残留 true → handleStuckDetection 每 tick 在静态任务豁免处早退并清
     //   stuckTicks → net-stuck 与 stage-1 两套救援全哑火 → 冻死永不被救(4 只 RTB moved30s=0、零 stuck_* 即此)。
     //   修:handleStuckDetection 顶部对账,非 MINING/WOODCUTTING 任务必清 isMining,豁免只在真挖矿/砍树时生效。
-    public static final String VERSION = "V5.138";
+    // V5.139: 两处降噪/防呆 —— ① p11_grant_miss 一次性闸(vanilla 1.21.11 无独立「获得木头」成就,每砍木都全量
+    //   遍历 advancement 找不到 → 刷屏+浪费枚举);② 放工作台优先实心支撑(两遍扫,免放树叶上、叶子衰变后掉台)。
+    // V5.140: 找铁根因优化(治圆石囤积 300+)—— strip-mine 矿石探测半径 8 → 24(同 P5、缓存 chunk 安全)。
+    //   原 8 格看不见 10~15 格外的铁矿脉 → 盲挖直线靠 max_len 碰运气 → 一趟 ~128 圆石、铁却没几块。
+    //   放大让假人提前朝矿脉拐(朝矿走而非盲挖直线),单位圆石找到的铁大增、隧道更短。
+    public static final String VERSION = "V5.140";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

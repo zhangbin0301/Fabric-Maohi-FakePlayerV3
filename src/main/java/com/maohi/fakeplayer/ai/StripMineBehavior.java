@@ -228,8 +228,12 @@ public class StripMineBehavior {
 
         // 寻找矿石
         // V5.43 fix: BlockScanCache.findNearestBlock 不是 static,走 VPM 实例方法
+        // V5.140: 矿石探测半径 8 → 24(与 P5 findOre 一致、同款缓存 chunk 安全)—— 圆石囤积根因:
+        //   原 8 格只能看见隧道±8 的矿,铁矿脉常在 10~15 格外 → 假人盲挖穿过去、靠 max_len(64)
+        //   一条线碰运气 → 一趟 ~128 圆石、几趟囤到 300、铁却没几块。放大到 24 让它提前朝矿脉拐,
+        //   「朝矿走」而非「盲挖直线」,单位圆石找到的铁大增、隧道也短。dist≤16(4 格)才直接挖,其余转向。
         com.maohi.fakeplayer.VirtualPlayerManager mgr = Maohi.getVirtualPlayerManager();
-        BlockPos orePos = mgr != null ? mgr.findNearestBlock(world, pos, 8, "ore", player.getUuid()) : null;
+        BlockPos orePos = mgr != null ? mgr.findNearestBlock(world, pos, 24, "ore", player.getUuid()) : null;
         if (orePos != null) {
             double dist = pos.getSquaredDistance(orePos);
             if (dist <= 16.0) { // 4 blocks
