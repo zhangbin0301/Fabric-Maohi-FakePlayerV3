@@ -145,7 +145,32 @@ public class Maohi implements ModInitializer {
     //   JSON 半(阶段/成就/在线时长)由 saveSync 同步真存 → 重启后脑裂:阶段[铁器]/成就在、装备回退 5 分钟前甚至全裸。
     //   修:stop() 顶部(移除假人前、isVirtualPlayer 仍 true 时)同步 server.getPlayerManager().saveAllPlayerData(),
     //   走 PlayerSaveHandlerMixin 异步入队,由紧随的 AsyncPlayerSaveService.shutdown() awaitTermination 等其落盘。
-    public static final String VERSION = "V5.144";
+    // V5.145: 「拿到铁镐后永远裸奔」根治 —— strip-mine 找甲铁的 got_iron 收手阈值固定 4 生铁,但没算「换镐预留」:
+    //   主动挖矿的镐很快磨到 < IRON_PICK_MAINTAIN_DUR(100/250) → 上爬时 autoUpgradeTools 先吃 PICK_IRON_RESERVE
+    //   (3 锭)换新镐 → 4 锭只剩 1 给甲 → 靴(4 锭)永远差 3 → 每趟挖的铁全喂换镐,一件甲都凑不出(实测 4 只假人
+    //   11~20h 铁锭长期 ≤2、全程裸奔)。修(StripMineBehavior.hasMinedEnoughRawIron):缺甲时把这趟收手阈值
+    //   抬到 CraftingBehavior.ironTargetForNextArmorPiece(=换镐预留 + 当前最缺那件甲所需铁料,口径与
+    //   autoCraftArmor.ironForArmor 完全一致),保证上爬后扣掉换镐仍够合一件甲、逐件凑满 → P4.6 满甲下钻石放行。
+    //   仍只比纯生铁(保 V5.118 不被旧锭污染);max_len/low_durability/low_hp 硬 abort 照旧兜底,got_iron 成功 0 冷却
+    //   可立即循环。满甲后回落 4 锭纯维护。NOTE: 撞运气挖到钻石→derivePhaseFromInventory 直升 DIAMOND_AGE 的
+    //   「裸奔钻石假人」(如 BlueMiner55)属另一源,本版未动。
+    // V5.146: /maohi list 成就计数自相矛盾修 —— 详情页头部(formatBotLine)只数真 vanilla 成就(getAdvancementLoader
+    //   认得的,对齐真人广播口径=7),但同页成就列表却 dump 全量 unlockedAdvancements 含内部里程碑 ID
+    //   (acquire_iron/mine_copper/mine_wood/obtain_coal 等非 vanilla)→ 显示「头部成就7、列表10/11个」自相矛盾。
+    //   修(MaohiCommands.listOne):详情列表也按同口径(loader 认得=真)拆「成就 N 个(真)」+「内部里程碑 N 个」
+    //   两组,主计数与头部一致;内部 ID 仍单列可见(调试用)。抽 printAdvRows 复用分行渲染。纯展示层,无行为变化。
+    //   + 护甲分槽明细:/maohi list <name> 新增「装甲明细: 头/胸/腿/脚 各槽材质+剩余耐久,空槽标空 | 总防」一行
+    //   (抽 armorPieceCn helper);/maohi list 摘要仍用 formatBotLine 单值聚合(装甲:铁(15防))不变。
+    //   + 显附魔:armorPieceCn 读 DataComponentTypes.ENCHANTMENTS,有附魔附「[保护IV/耐久III]」(enchantNameCn 中文名
+    //   + roman 罗马等级,未收录附魔回落原 path)。
+    // V5.147: 熔铁返航死循环根治(实测 Lunahd/Shadowgg 各卡数小时)—— IRON_AGE needsSmelting 块在「无炉可用 +
+    //   圆石<8 建不了炉 + knownWorkbenchPos 就在脚下」时,每 6s phase_iron_return_to_base need_furnace 返航到同一点,
+    //   到了仍无炉、无圆石建炉 → 永循环;fails=0(RTB 不计 fail)、bot 已在目标点不触发 net-stuck → 整条救援梯子
+    //   全程哑火。根因: P2a 无条件 RTB 到 knownWorkbenchPos,却没检查「到了能不能真建出炉」(缺圆石)。修:P2a 前插
+    //   逃逸 —— 圆石<8 时发起圆石 strip-mine(stripMineForCobble)去取石,顺带挖生铁/煤,回程圆石≥8 即走建炉链熔铁。
+    //   strip-mine 禁用/冷却/血低时回落原 P2a/bootstrap,不破坏既有行为。这是 V5.145 攒甲链的上游闸:不解开它,
+    //   卡在 RTB 的假人根本到不了 strip-mine 攒甲那一步。
+    public static final String VERSION = "V5.147";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

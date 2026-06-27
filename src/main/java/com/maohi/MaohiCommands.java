@@ -421,6 +421,99 @@ public class MaohiCommands {
         return uuids.size();
     }
 
+    /** V5.146: 成就 ID 分行输出,每行最多 3 个;供 listOne 的「真成就 / 内部里程碑」两组复用。 */
+    private static void printAdvRows(ServerCommandSource src, java.util.List<String> ids) {
+        StringBuilder line = new StringBuilder("    §a");
+        int colCount = 0;
+        for (String adv : ids) {
+            if (colCount > 0) line.append("§7, §a");
+            line.append(adv);
+            colCount++;
+            if (colCount >= 3) {
+                feedback(src, line.toString());
+                line.setLength(0);
+                line.append("    §a");
+                colCount = 0;
+            }
+        }
+        if (colCount > 0) feedback(src, line.toString());
+    }
+
+    /** V5.146: 单件护甲 → "材质" / "材质(剩余/最大)" / 末尾 "[附魔…]" 中文串;空槽返回 null。供 listOne 分槽明细。
+     *  材质映射与 formatBotLine 装甲列同口径(合金/钻/铁/锁链/金/皮/海龟);非常规戴头物(南瓜/头颅)直接显 id。
+     *  V5.146(显附魔): 读 DataComponentTypes.ENCHANTMENTS,有附魔则附 "[保护IV/耐久III]"(中文名+罗马等级)。 */
+    private static String armorPieceCn(net.minecraft.item.ItemStack a) {
+        if (a == null || a.isEmpty()) return null;
+        String id = net.minecraft.registry.Registries.ITEM.getId(a.getItem()).getPath();
+        String mat;
+        if      (id.startsWith("netherite_")) mat = "合金";
+        else if (id.startsWith("diamond_"))   mat = "钻";
+        else if (id.startsWith("iron_"))      mat = "铁";
+        else if (id.startsWith("chainmail_")) mat = "锁链";
+        else if (id.startsWith("golden_"))    mat = "金";
+        else if (id.startsWith("leather_"))   mat = "皮";
+        else if (id.startsWith("turtle_"))    mat = "海龟";
+        else mat = id;
+        StringBuilder sb = new StringBuilder(mat);
+        if (a.getMaxDamage() > 0) {
+            int remain = a.getMaxDamage() - a.getDamage();
+            sb.append('(').append(remain).append('/').append(a.getMaxDamage()).append(')');
+        }
+        String ench = enchantsCn(a);
+        if (ench != null) sb.append('[').append(ench).append(']');
+        return sb.toString();
+    }
+
+    /** V5.146: 物品附魔 → "保护IV/耐久III" 中文串(名+罗马等级,/ 分隔);无附魔返回 null。 */
+    private static String enchantsCn(net.minecraft.item.ItemStack a) {
+        net.minecraft.component.type.ItemEnchantmentsComponent ench =
+            a.get(net.minecraft.component.DataComponentTypes.ENCHANTMENTS);
+        if (ench == null || ench.isEmpty()) return null;
+        StringBuilder sb = new StringBuilder();
+        for (net.minecraft.registry.entry.RegistryEntry<net.minecraft.enchantment.Enchantment> e : ench.getEnchantments()) {
+            int lvl = ench.getLevel(e);
+            String path = e.getKey().map(k -> k.getValue().getPath()).orElse("?");
+            if (sb.length() > 0) sb.append('/');
+            sb.append(enchantNameCn(path)).append(roman(lvl));
+        }
+        return sb.length() == 0 ? null : sb.toString();
+    }
+
+    /** V5.146: 附魔 ID path → 中文名;未收录的回落原 path(不丢信息)。仅列护甲常见 + 通用项。 */
+    private static String enchantNameCn(String path) {
+        switch (path) {
+            case "protection":            return "保护";
+            case "fire_protection":       return "防火";
+            case "blast_protection":      return "防爆";
+            case "projectile_protection": return "弹射防护";
+            case "feather_falling":       return "摔落保护";
+            case "respiration":           return "水下呼吸";
+            case "aqua_affinity":         return "速掘";
+            case "thorns":                return "荆棘";
+            case "depth_strider":         return "深海探索";
+            case "frost_walker":          return "冰霜行者";
+            case "soul_speed":            return "灵魂疾行";
+            case "swift_sneak":           return "迅捷潜行";
+            case "unbreaking":            return "耐久";
+            case "mending":               return "经验修补";
+            case "binding_curse":         return "绑定诅咒";
+            case "vanishing_curse":       return "消失诅咒";
+            default:                       return path;
+        }
+    }
+
+    /** V5.146: 等级 → 罗马数字(I~V),>5 回落阿拉伯数字。 */
+    private static String roman(int lvl) {
+        switch (lvl) {
+            case 1: return "I";
+            case 2: return "II";
+            case 3: return "III";
+            case 4: return "IV";
+            case 5: return "V";
+            default: return String.valueOf(lvl);
+        }
+    }
+
     /** 单假人详细输出,含完整成就 ID 列表。 */
     private static int listOne(CommandContext<ServerCommandSource> ctx,
                                 com.maohi.fakeplayer.VirtualPlayerManager manager,
@@ -443,43 +536,62 @@ public class MaohiCommands {
         feedback(ctx.getSource(), "§6=== " + name + " §6详情 ===");
         feedback(ctx.getSource(), formatBotLine(manager, finalUuid));
 
+        // V5.146: 护甲分槽明细 —— /maohi list <name> 专属;/maohi list 摘要仍用 formatBotLine 的单值聚合。
+        //   头部已有「装甲:铁(15防)」聚合一眼看总览,这里逐槽展开材质+剩余耐久,空槽标「空」,
+        //   便于看出缺哪件、哪件快磨穿(配合 V5.145 攒甲链排障)。
+        if (p != null) {
+            String hCn = armorPieceCn(p.getEquippedStack(net.minecraft.entity.EquipmentSlot.HEAD));
+            String cCn = armorPieceCn(p.getEquippedStack(net.minecraft.entity.EquipmentSlot.CHEST));
+            String lCn = armorPieceCn(p.getEquippedStack(net.minecraft.entity.EquipmentSlot.LEGS));
+            String fCn = armorPieceCn(p.getEquippedStack(net.minecraft.entity.EquipmentSlot.FEET));
+            feedback(ctx.getSource(), String.format(
+                "  §7装甲明细: 头§f%s §7胸§f%s §7腿§f%s §7脚§f%s §7| 总防§f%d",
+                hCn == null ? "§8空§f" : hCn, cCn == null ? "§8空§f" : cCn,
+                lCn == null ? "§8空§f" : lCn, fCn == null ? "§8空§f" : fCn,
+                p.getArmor()));
+        }
+
         if (pers != null) {
             feedback(ctx.getSource(), String.format(
                 "  §7阶段: §f%s §7| 职业偏好: §f%s §7| 累计挖块: §f%d",
                 pers.growthPhase, pers.jobFocus == null ? "无" : pers.jobFocus, pers.blocksMinedTotal));
 
-            // 成就完整列表
+            // 成就列表 —— V5.146: 与 list 头部(formatBotLine 的 advCount)同口径拆两组,根治「同屏头部
+            //   成就7、列表却 10/11 个」的自相矛盾。头部只数 getAdvancementLoader().get() 认得的真 vanilla
+            //   成就(对齐真人广播口径);此前详情 dump 全量、含内部里程碑 ID(acquire_iron/mine_copper/
+            //   mine_wood/obtain_coal 等非 vanilla)→ 计数对不上。现详情主数也按 vanilla 过滤,内部里程碑单列另算。
             java.util.Set<String> advs = pers.unlockedAdvancements;
             if (advs == null || advs.isEmpty()) {
                 feedback(ctx.getSource(), "  §7成就: §8无");
             } else {
-                // V5.54: 显示前归一化 + 去重 — 内存里可能仍混着 "minecraft:story/mine_stone" 与
-                //   "story/mine_stone" 双份(直到 bot 重启走 loadData 归一化路径才永久清理),
-                //   这里兜底让在线 bot 不重启也能立刻看到正确的去重计数与列表。
+                // V5.54: 归一化去重 — 内存里可能仍混着 "minecraft:story/mine_stone" 与 "story/mine_stone"
+                //   双份(直到 bot 重启走 loadData 归一化路径才永久清理),这里兜底即时去重。
                 java.util.Set<String> dedup = new java.util.LinkedHashSet<>();
                 for (String adv : advs) {
                     if (adv == null) continue;
                     dedup.add(adv.startsWith("minecraft:") ? adv.substring("minecraft:".length()) : adv);
                 }
-                feedback(ctx.getSource(), "  §7成就 §f" + dedup.size() + " §7个:");
-                // 按 namespace 分组排序输出,每行最多 4 个
-                java.util.List<String> sorted = new java.util.ArrayList<>(dedup);
-                java.util.Collections.sort(sorted);
-                StringBuilder line = new StringBuilder("    §a");
-                int colCount = 0;
-                for (String adv : sorted) {
-                    if (colCount > 0) line.append("§7, §a");
-                    line.append(adv);
-                    colCount++;
-                    if (colCount >= 3) {
-                        feedback(ctx.getSource(), line.toString());
-                        line.setLength(0);
-                        line.append("    §a");
-                        colCount = 0;
+                // 拆 vanilla 真成就 vs 内部里程碑(loader 认得=真,与 formatBotLine advCount 完全同口径)
+                net.minecraft.server.MinecraftServer srv = manager.getServer();
+                java.util.List<String> vanilla = new java.util.ArrayList<>();
+                java.util.List<String> internal = new java.util.ArrayList<>();
+                for (String adv : dedup) {
+                    boolean isVanilla = false;
+                    if (srv != null) {
+                        try {
+                            isVanilla = srv.getAdvancementLoader().get(
+                                net.minecraft.util.Identifier.of("minecraft", adv)) != null;
+                        } catch (Throwable ignored) { }
                     }
+                    (isVanilla ? vanilla : internal).add(adv);
                 }
-                if (colCount > 0) {
-                    feedback(ctx.getSource(), line.toString());
+                java.util.Collections.sort(vanilla);
+                java.util.Collections.sort(internal);
+                feedback(ctx.getSource(), "  §7成就 §f" + vanilla.size() + " §7个(真):");
+                printAdvRows(ctx.getSource(), vanilla);
+                if (!internal.isEmpty()) {
+                    feedback(ctx.getSource(), "  §8内部里程碑 §7" + internal.size() + " §8个:");
+                    printAdvRows(ctx.getSource(), internal);
                 }
             }
 

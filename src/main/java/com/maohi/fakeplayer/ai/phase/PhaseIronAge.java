@@ -273,6 +273,32 @@ public final class PhaseIronAge implements Phase {
                     return;
                 }
 
+                // V5.147: 需炉、无炉可用、且圆石不足建炉(<8)→ 发起圆石 strip-mine 去取石,而非死循环返航。
+                //   实测死锁(Lunahd/Shadowgg): 揣 1 粗铁要炼、knownWorkbenchPos 就在脚下、却 0 圆石 → 每 6s
+                //   phase_iron_return_to_base need_furnace 到同点 → 到了仍建不出炉(无圆石)→ 永循环、fails=0、
+                //   无 net-stuck(已在目标点不触发救援)。取石顺带挖到生铁/煤,回程圆石≥COBBLE_STRIPMINE_TARGET
+                //   即走上方建炉链熔铁,根治这条上游死锁(也喂 V5.145 攒甲链)。strip-mine 禁用/冷却/血低时回落
+                //   原 P2a/bootstrap,不破坏既有行为。
+                com.maohi.MaohiConfig cobCfg = com.maohi.MaohiConfig.getInstance();
+                if (cobbleCount < 8
+                        && personality.stripMineState == null
+                        && cobCfg != null && cobCfg.enableStripMine
+                        && personality.stripMineCooldownUntil <= System.currentTimeMillis()
+                        && player.getHealth() > 14.0f) {
+                    personality.stripMineForDiamond = false;
+                    personality.stripMineForCobble = true;
+                    personality.stripMineState = PhaseStoneAge.SubPhase.STRIP_MINE_DESCEND;
+                    personality.stripMineStartPos = player.getBlockPos().toImmutable();
+                    personality.stripMineStartY = player.getBlockY();
+                    personality.stripMineTunnelLen = 0;
+                    personality.stripMineConsecutiveFails = 0;
+                    personality.currentTask = TaskType.STRIP_MINE;
+                    com.maohi.fakeplayer.TaskLogger.log(player, "stripmine_enter",
+                        "goal", "cobble_for_furnace", "startY", personality.stripMineStartY,
+                        "cobble", cobbleCount, "rawIron", rawIronCount, "phase", "IRON_AGE");
+                    return;
+                }
+
                 // P2a: 有营地记录 且 ≤40 格 → 回营建炉。V5.115 边界:超 40 格不死磕(否则 forget 远炉后
                 //   平移成「走远营」同样 moved30s=0 卡死),落到下面 P2c 朝 spawn 探索(移动而非卡死,
                 //   营地通常在 spawn 方向,探索途中靠近工作台即由 P2b 就地建炉)。

@@ -646,8 +646,18 @@ public class StripMineBehavior {
         // V5.118: 门槛只数"生铁" —— 挖出来的就是生铁,铁锭是上爬后熔出来的结果,别混算。
         //   旧版 raw+ingot 混算会被已有铁锭污染:IRON_AGE 攒甲时一进矿层就因旧锭达标秒退、白挖一趟。
         //   纯生铁后每趟都实挖一批;已有铁锭是额外的(合成时自然一起用),不影响"这趟挖够没"。
-        //   无镐: 3 生铁 → 熔 3 锭 → 合铁镐(3锭+2棍);有镐: 4 生铁 → 熔 4 锭 → 合铁靴起步(攒甲)。
-        if (!hasIronPick) return rawIronCount >= 3;
+        if (!hasIronPick) return rawIronCount >= 3;   // 无镐 bootstrap:3 生铁 → 熔 3 锭 → 合铁镐(3锭+2棍)
+        // V5.145: 有镐分支拆「攒甲」vs「纯维护」根治 20h 裸奔死循环。旧固定 4 生铁阈值没算「换镐预留」:
+        //   主动挖矿的镐很快磨到 < IRON_PICK_MAINTAIN_DUR(100/250) → 上爬时 autoUpgradeTools 先吃
+        //   PICK_IRON_RESERVE(3 锭)换新镐 → 4 锭只剩 1 给甲 → 靴(4 锭)永远差 3 → 每趟挖的铁全喂换镐,
+        //   一件甲都凑不出(实测铁锭长期 ≤2、20h 全裸)。修:缺甲时收手阈值抬到 ironTargetForNextArmorPiece
+        //   (=换镐预留 + 当前最缺那件甲所需铁料,口径与 autoCraftArmor.ironForArmor 完全一致),保证上爬后
+        //   扣掉换镐仍够合出一件甲、逐件凑满。仍只比 rawIronCount(纯生铁,保 V5.118 不被旧锭污染);
+        //   阈值偏高只是"不早退",max_len/low_durability/low_hp 等硬 abort 照旧兜底,不会卡死。
+        //   满甲后回落 4 锭纯维护(此时已转 P4.6 钻石下挖,本分支基本不再走)。
+        if (!CraftingBehavior.hasFullIronArmor(player)) {
+            return rawIronCount >= CraftingBehavior.ironTargetForNextArmorPiece(player);
+        }
         return rawIronCount >= 4;
     }
 
