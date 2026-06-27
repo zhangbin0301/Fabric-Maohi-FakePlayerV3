@@ -133,7 +133,10 @@ public class Maohi implements ModInitializer {
     //   1.18+ 洞穴里铁矿大量裸露,走进去 = V5.140 的 ore-veer 锁裸矿 + 空气段 mineBlock=no-op 几乎零圆石,
     //   远胜盲挖直线。findCaveDirection 在 4 水平向有界采样找「3 格连续空气」真洞穴(safeGetBlockState O(1)
     //   非阻塞、可隔墙看穿),每 4 格评估;探到矿时 ore-veer 优先、不掺和;lava 洞由既有 isHazardousBlock 兜底。
-    public static final String VERSION = "V5.141";
+    // V5.142: 钻石「指定地点挖」—— 钻石 strip-mine 专扫 diamond_ore(子串匹配命中 diamond/deepslate_diamond_ore,
+    //   server 已知确切坐标直奔之),不再被深层遍地的煤/铁/铜诱走绕路。24 格无钻石则 orePos==null →
+    //   V5.141 cave-steering 朝深洞拐(深洞/岩浆区常裸露钻石)。铁目标仍用通用 "ore"(顺路捡煤/铁不算绕路)。
+    public static final String VERSION = "V5.142";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

@@ -233,7 +233,12 @@ public class StripMineBehavior {
         //   一条线碰运气 → 一趟 ~128 圆石、几趟囤到 300、铁却没几块。放大到 24 让它提前朝矿脉拐,
         //   「朝矿走」而非「盲挖直线」,单位圆石找到的铁大增、隧道也短。dist≤16(4 格)才直接挖,其余转向。
         com.maohi.fakeplayer.VirtualPlayerManager mgr = Maohi.getVirtualPlayerManager();
-        BlockPos orePos = mgr != null ? mgr.findNearestBlock(world, pos, 24, "ore", player.getUuid()) : null;
+        // V5.142: 钻石目标专扫 diamond_ore(matchesType 子串匹配命中 diamond_ore + deepslate_diamond_ore,
+        //   cache key 含类型独立缓存)—— server 已知每块钻石矿确切坐标,直奔它(真「指定地点挖」),不再被
+        //   深层遍地的煤/铁/铜诱走绕路。24 格内无钻石则 orePos==null → V5.141 cave-steering 朝深洞拐
+        //   (深洞/岩浆区常裸露钻石)。铁目标仍用通用 "ore"(它本就想顺路捡煤/铁,不算绕路)。
+        String oreScanType = pers.stripMineForDiamond ? "diamond_ore" : "ore";
+        BlockPos orePos = mgr != null ? mgr.findNearestBlock(world, pos, 24, oreScanType, player.getUuid()) : null;
         if (orePos != null) {
             double dist = pos.getSquaredDistance(orePos);
             if (dist <= 16.0) { // 4 blocks
