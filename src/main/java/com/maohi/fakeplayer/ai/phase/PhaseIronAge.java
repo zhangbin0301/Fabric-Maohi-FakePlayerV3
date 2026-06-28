@@ -142,6 +142,27 @@ public final class PhaseIronAge implements Phase {
             personality.knownFurnacePos = null;
         }
 
+        // ── V5.148: stale 设施断路器 —— 人已在记忆设施 reach 内、现场却扫不到真设施(被毁/失效)→ 立即 forget。
+        //   根治「到了基地却没台/炉 → P2a/P4/P4.5/Fix-9 反复 RTB/park 空转」的同族死循环(V5.147 cobble 子case
+        //   之外的 table/furnace 子case)。实测签名: fails=0 + 无 net-stuck —— bot 秒到目标点,V5.137「RTB 过期
+        //   才拉黑」的兜底永不触发。只在贴脸 reach 内验证(远处靠 RTB 走过去、到达后由本闸自然清);chunk 未就绪
+        //   safeGetBlockState 返 null → 保守不 forget,绝不误删有效记忆。forget 后下游 findFurnace/findCraftingTable
+        //   重扫不到 → 落 bootstrap 建新设施,「缺啥补啥」闭合。
+        if (personality.knownWorkbenchPos != null
+                && player.getBlockPos().getSquaredDistance(personality.knownWorkbenchPos) <= PhaseUtil.WORKBENCH_NEARBY_SQ
+                && isFacilityGone(world, personality.knownWorkbenchPos, Blocks.CRAFTING_TABLE)) {
+            com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_forget_stale_workbench",
+                "stale", personality.knownWorkbenchPos, "botY", player.getBlockY());
+            personality.knownWorkbenchPos = null;
+        }
+        if (personality.knownFurnacePos != null
+                && player.getBlockPos().getSquaredDistance(personality.knownFurnacePos) <= FURNACE_NEAR_SQ
+                && isFacilityGone(world, personality.knownFurnacePos, Blocks.FURNACE)) {
+            com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_forget_stale_furnace",
+                "stale", personality.knownFurnacePos, "botY", player.getBlockY());
+            personality.knownFurnacePos = null;
+        }
+
         // ── P2 / P3: 熔炼驱动 —— 背包有 raw_iron 但铁锭不足时优先处理 ──
         // V5.83: 缺整套铁甲时把熔炼目标抬到 8 锭（够合胸甲），让假人在"未披甲"阶段持续炼铁攒料
         //   → 铁甲快速成型；备齐铁甲后回落到 4（只维持工具铁锭），释放假人去挖钻石不被熔炼拖住。
@@ -690,6 +711,21 @@ public final class PhaseIronAge implements Phase {
         p.taskTarget   = new BlockPos(tx, ty, tz);
         p.taskExpireTime = player.getEntityWorld().getServer().getTicks()
                 + TimingConstants.TICK_TIMEOUT_EXPLORE;
+    }
+
+    /**
+     * V5.148: 记忆设施(台/炉)是否已不在(被毁/失效)。供 stale 设施断路器判定。
+     *   只在 chunk 就绪时判定;未就绪 / 读不到 → 返 false(保守,绝不误删有效记忆)。
+     *   用 safeGetBlockState 非阻塞读(主线程安全,与 isChunkReady 守卫同口径)。
+     */
+    private static boolean isFacilityGone(ServerWorld world, BlockPos pos, net.minecraft.block.Block expected) {
+        if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(world, pos.getX() >> 4, pos.getZ() >> 4)) {
+            return false; // chunk 未就绪 → 不确定 → 不 forget
+        }
+        net.minecraft.block.BlockState s =
+            com.maohi.fakeplayer.ai.PathfindingNavigation.safeGetBlockState(world, pos);
+        if (s == null) return false; // 读不到 → 保守不 forget
+        return !s.isOf(expected);
     }
 
     /**

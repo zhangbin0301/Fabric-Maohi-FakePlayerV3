@@ -170,7 +170,12 @@ public class Maohi implements ModInitializer {
     //   逃逸 —— 圆石<8 时发起圆石 strip-mine(stripMineForCobble)去取石,顺带挖生铁/煤,回程圆石≥8 即走建炉链熔铁。
     //   strip-mine 禁用/冷却/血低时回落原 P2a/bootstrap,不破坏既有行为。这是 V5.145 攒甲链的上游闸:不解开它,
     //   卡在 RTB 的假人根本到不了 strip-mine 攒甲那一步。
-    public static final String VERSION = "V5.147";
+    // V5.148: stale 设施断路器(通用化 V5.123/137/147)—— assignTask 顶部加集中校验:人已在记忆台/炉 reach 内、
+    //   现场却扫不到真设施(被毁/失效)→ 立即 forget(isFacilityGone:isChunkReady+safeGetBlockState 非阻塞读,
+    //   未就绪保守不删)。根治「到了基地却没台/炉 → P2a/P4/P4.5/Fix-9 反复 RTB/park 空转」整个家族(签名 fails=0
+    //   + 无 net-stuck:bot 秒到目标点 → V5.137 RTB 过期拉黑永不触发)。forget 后下游重扫不到 → bootstrap 建新设施,
+    //   「缺啥补啥」彻底闭合。远设施不动(靠 RTB 走过去、到达后由本闸自然清),不误删有效记忆。
+    public static final String VERSION = "V5.148";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 
