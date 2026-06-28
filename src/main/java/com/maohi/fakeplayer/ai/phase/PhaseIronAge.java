@@ -86,7 +86,6 @@ public final class PhaseIronAge implements Phase {
         int logCount = 0;
         int plankCount = 0;
         int stickCount = 0;
-        boolean hasTable = false;
         boolean hasFurnaceItem = false; // V5.117 Fix-5(重做): 背包是否揣着待复用的 FURNACE item
 
         for (int i = 0; i < inv.size(); i++) {
@@ -105,7 +104,6 @@ public final class PhaseIronAge implements Phase {
             if (s.isIn(net.minecraft.registry.tag.ItemTags.LOGS)) logCount += s.getCount();
             if (s.isIn(net.minecraft.registry.tag.ItemTags.PLANKS)) plankCount += s.getCount();
             if (it == Items.STICK) stickCount += s.getCount();
-            if (it == Items.CRAFTING_TABLE) hasTable = true;
             if (it == Items.FURNACE) hasFurnaceItem = true;
         }
 
@@ -321,20 +319,7 @@ public final class PhaseIronAge implements Phase {
                             "rawIron", rawIronCount, "cobble", cobbleCount, "botY", player.getBlockY());
                         return;
                     }
-                    if (hasTable || plankCount >= 4 || logCount >= 1) {
-                        if (player.getEntityWorld().getTime() < personality.tablePlaceRetryCooldownUntil) {
-                            PhaseUtil.setExplore(personality, player);
-                            com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_relocate_bench", "reason", "no_place_pos");
-                        } else {
-                            PhaseUtil.setIdle(personality, player, 100);
-                            com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_build_bench",
-                                "hasTable", hasTable, "planks", plankCount, "logs", logCount);
-                        }
-                        return;
-                    }
-                    com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_need_wood_for_bench",
-                        "planks", plankCount, "logs", logCount);
-                    PhaseUtil.assignChopTree(player, personality, ctx);
+                    PhaseUtil.buildTableOrGatherWood(player, personality, ctx, "furnace_bootstrap");
                     return;
                 }
                 setExploreTowardSpawn(personality, player, world);
@@ -387,17 +372,8 @@ public final class PhaseIronAge implements Phase {
                 }
                 return;
             } else {
-                // 没有工作台记录 → 尝试就地建台
-                if (hasTable || plankCount >= 4 || logCount >= 1) {
-                    PhaseUtil.setIdle(personality, player, 100);
-                    com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_build_bench",
-                        "hasTable", hasTable, "planks", plankCount, "logs", logCount);
-                } else {
-                    // 连建台木料都没有 → 砍树补料
-                    PhaseUtil.assignChopTree(player, personality, ctx);
-                    com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_need_wood_for_bench",
-                        "planks", plankCount, "logs", logCount);
-                }
+                // 没有工作台记录 → 就地建台/补木(V5.151 共享认知,顺带得 V5.122 放台冷却挪窝保护)
+                PhaseUtil.buildTableOrGatherWood(player, personality, ctx, "tool_upgrade");
                 return;
             }
         }
@@ -460,17 +436,8 @@ public final class PhaseIronAge implements Phase {
                 }
                 return;
             } else {
-                // 没有已知/附近工作台 → 尝试就地建台
-                if (hasTable || plankCount >= 4 || logCount >= 1) {
-                    PhaseUtil.setIdle(personality, player, 100);
-                    com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_gear_build_bench",
-                        "hasTable", hasTable, "planks", plankCount, "logs", logCount);
-                } else {
-                    // 连建台木料都没有 → 砍树补料
-                    PhaseUtil.assignChopTree(player, personality, ctx);
-                    com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_gear_need_wood",
-                        "planks", plankCount, "logs", logCount);
-                }
+                // 没有已知/附近工作台 → 就地建台/补木(V5.151 共享认知,顺带得 V5.122 放台冷却挪窝保护)
+                PhaseUtil.buildTableOrGatherWood(player, personality, ctx, "gear_craft");
                 return;
             }
         }

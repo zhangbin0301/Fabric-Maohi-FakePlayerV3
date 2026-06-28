@@ -190,7 +190,13 @@ public class Maohi implements ModInitializer {
     //   (IronAge 删 ~35 行 + isFacilityGone);② StoneAge 此前只有深 forget、缺 reach 保护,现自动获得,补上同族
     //   stale 空转破口;③ 立「每个阶段开头先做基础认知」的共享入口,新阶段自动继承,缺啥补啥不再各写各漏。
     //   IronAge 行为零变化(同逻辑搬家);StoneAge/DiamondAge 为增量增强。
-    public static final String VERSION = "V5.150";
+    // V5.151: 共享认知层续 —— 「缺台 → 有料就地建台 / 无料砍树补木」抽成 PhaseUtil.buildTableOrGatherWood,
+    //   替换 IronAge needsSmelting/P4/P4.5 三处逐字重复的 build-or-chop 尾巴(仅 log 串不同,用 reason 参数保留诊断)。
+    //   helper 采「稳版」含 V5.122 放台冷却挪窝保护 —— 原 P4/P4.5 是缺此保护的简版,改用本方法即顺带补上「坏点
+    //   (山顶/窄柱/树梢)放台失败 → 原地 IDLE 死循环」的防护(needsSmelting 那处本就有,行为保真)。删 IronAge
+    //   未用的 hasTable 局部。判断: 无能用镐(已链式委托)/熔铁链(已集中 Iron、Stone 调它)/欠装备回填(单
+    //   DiamondAge 调)不宜再提(冗余/过早抽象);故仅提此真重复块。
+    public static final String VERSION = "V5.151";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

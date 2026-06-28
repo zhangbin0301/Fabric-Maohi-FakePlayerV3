@@ -190,6 +190,34 @@ public final class PhaseUtil {
         return !s.isOf(expected);
     }
 
+    /**
+     * V5.151 (Step 2 续): 「缺工作台 → 有料就地建台 / 无料砍树补木」—— 全阶段共享的「缺台补台」认知。
+     *   抽自 PhaseIronAge needsSmelting/P4/P4.5 逐字重复的 build-or-chop 尾巴(仅 log 串不同 → reason 参数保留诊断)。
+     *   有台 item / 木板≥4 / 原木≥1 → 建台,但放台冷却期(V5.122:刚在坏点如山顶/窄柱/树梢放台失败)改 setExplore
+     *     挪窝重试,不在原地 IDLE 死循环;否则 park 让 BlockPlacer.tryPlaceCraftingTable 就地落台(放台无需工作台)。
+     *   无料 → 砍树补木。调用方应在调用后 return(本方法已设好任务)。
+     *   NOTE: 采「稳版」(含 V5.122 relocate)—— 原 P4/P4.5 是缺此保护的简版,改用本方法即顺带补上防坏点死循环。
+     */
+    public static void buildTableOrGatherWood(ServerPlayerEntity player, Personality personality,
+                                              PhaseContext ctx, String reason) {
+        Digest d = scan(player);
+        if (d.hasTable || d.plankCount >= 4 || d.logCount >= 1) {
+            if (player.getEntityWorld().getTime() < personality.tablePlaceRetryCooldownUntil) {
+                setExplore(personality, player);
+                com.maohi.fakeplayer.TaskLogger.log(player, "phase_relocate_bench",
+                    "reason", reason);
+            } else {
+                setIdle(personality, player, 100);
+                com.maohi.fakeplayer.TaskLogger.log(player, "phase_build_bench",
+                    "reason", reason, "hasTable", d.hasTable, "planks", d.plankCount, "logs", d.logCount);
+            }
+        } else {
+            assignChopTree(player, personality, ctx);
+            com.maohi.fakeplayer.TaskLogger.log(player, "phase_need_wood_for_bench",
+                "reason", reason, "planks", d.plankCount, "logs", d.logCount);
+        }
+    }
+
     // ==================== 背包扫描公共结构 ====================
 
     /**
