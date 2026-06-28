@@ -70,6 +70,27 @@ public final class PhaseDiamondAge implements Phase {
         ServerWorld world = player.getEntityWorld();
         InventoryDigest inv = scanInventory(player);
 
+        // V5.150 (Step 2): 全阶段共享「缺啥补啥」前置 —— 先清 stale 台/炉记忆(被毁/失效/深埋够不到),
+        //   免后续 driveToCraftDiamondGear 回台空转。与本类既有「用前校验」互补,统一认知。
+        PhaseUtil.forgetStaleFacilities(player, personality);
+
+        // ============================================================
+        // V5.149: 欠装备回填(「缺啥补啥」通用认知 Step 1)—— 处理「意外拿到不该拿的东西」。
+        //   DIAMOND_AGE 此前假设「已武装好」,但撞运气挖到 1 钻就被 derivePhaseFromInventory 升上来的假人
+        //   可能裸奔/无铁镐(BlueMiner55:石镐裸奔却[钻石]):既挖不动钻石(需铁镐+)又无甲生存,本类却无回补
+        //   基础的认知 → 漫游空转。正常认知 = 意外之财(那颗钻石)留着不丢,但行为继续「缺啥补啥」先补基础:
+        //   缺「铁镐+ 或 满铁甲」时委托 PhaseIronAge(其 smelt→镐→甲 完整链 + V5.144~148 已闭合健壮),补齐后
+        //   再回 DIAMOND_AGE 用那颗钻石挖钻/进下界。
+        // ============================================================
+        if (!inv.hasIronOrBetterPickaxe
+                || !com.maohi.fakeplayer.ai.CraftingBehavior.hasFullIronArmor(player)) {
+            com.maohi.fakeplayer.TaskLogger.log(player, "diamond_backfill_basics",
+                "reason", !inv.hasIronOrBetterPickaxe ? "no_iron_pickaxe" : "no_full_iron_armor",
+                "diamondTools", inv.diamondTools, "diamondArmor", inv.diamondArmor);
+            PhaseIronAge.INSTANCE.assignTask(player, personality, ctx);
+            return;
+        }
+
         // ============================================================
         // 优先级 1: 材料齐全 → 走下界 (复用 PhaseNether 的传送门状态机)
         // ============================================================
@@ -185,6 +206,9 @@ public final class PhaseDiamondAge implements Phase {
             else if (it == Items.DIAMOND_HELMET || it == Items.DIAMOND_CHESTPLATE
                   || it == Items.DIAMOND_LEGGINGS || it == Items.DIAMOND_BOOTS) d.diamondArmor++;
             else if (it == Items.CRAFTING_TABLE) d.hasCraftingTableItem = true; // V5.84.1: 就地建台用
+            // V5.149: 欠装备回填判定 —— 有没有「铁镐或更好」(挖钻石/黑曜石的硬前置,石镐挖不动钻石)
+            if (it == Items.IRON_PICKAXE || it == Items.DIAMOND_PICKAXE
+                    || it == Items.NETHERITE_PICKAXE) d.hasIronOrBetterPickaxe = true;
         }
         return d;
     }
@@ -195,6 +219,7 @@ public final class PhaseDiamondAge implements Phase {
         int diamondTools = 0;
         int diamondArmor = 0;
         boolean hasCraftingTableItem = false; // V5.84.1: 背包是否有工作台 item(就地放台用)
+        boolean hasIronOrBetterPickaxe = false; // V5.149: 欠装备回填判定(挖钻/黑曜石硬前置)
 
         boolean hasFullDiamondGear() {
             return diamondTools + diamondArmor >= DIAMOND_GEAR_SUFFICIENT;

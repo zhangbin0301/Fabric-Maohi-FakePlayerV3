@@ -2451,8 +2451,16 @@ prepareAndSpawnVirtualPlayer();
             if (eid.startsWith("iron_") && !eid.equals("iron_ingot")) { hasIron = true; break; }
         }
         if (hasNetherite) return GrowthPhase.NETHER;      // 下界合金 → 已远征下界
-        if (hasDiamond)   return GrowthPhase.DIAMOND_AGE; // 有钻石
-        if (hasIron)      return GrowthPhase.IRON_AGE;    // 有铁锭或已装备铁器
+        // V5.149: 钻石「意外之财」不抢跑阶段 —— 同 V5.80「raw_iron 不触发 IRON_AGE」思路。撞运气挖到/捡到
+        //   1 颗钻石、但还没满铁甲(挖钻石/进下界的 V5.124 硬前置)时,不把假人顶进 DIAMOND_AGE,否则裸奔石镐
+        //   却显 [钻石]、挖不动钻又无甲生存、PhaseDiamondAge 漫游空转(BlueMiner55 实测)。钻石留着不丢,
+        //   假人按 IRON_AGE 先补满铁甲,够格后下次 detect 自然升钻石。normal 进度不受影响:P4.6 下钻石本就要
+        //   满铁甲,首颗钻石到手时必已满甲 → 立即升 DIAMOND_AGE。配 PhaseDiamondAge V5.149 欠装备回填双保险
+        //   (ratchet 已锁进 DIAMOND_AGE 的老假人由回填兜)。
+        if (hasDiamond && com.maohi.fakeplayer.ai.CraftingBehavior.hasFullIronArmor(player)) {
+            return GrowthPhase.DIAMOND_AGE; // 有钻石 + 满铁甲 = 真·钻石时代
+        }
+        if (hasDiamond || hasIron) return GrowthPhase.IRON_AGE; // 有铁 / 有钻石未满甲 → 当 IRON_AGE 补基础(钻石留着)
         if (hasWoodenPickaxe || hasStonePickaxe) return GrowthPhase.STONE_AGE;
         return GrowthPhase.WOOD_AGE;
     }

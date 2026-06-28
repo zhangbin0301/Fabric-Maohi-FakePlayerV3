@@ -175,7 +175,22 @@ public class Maohi implements ModInitializer {
     //   未就绪保守不删)。根治「到了基地却没台/炉 → P2a/P4/P4.5/Fix-9 反复 RTB/park 空转」整个家族(签名 fails=0
     //   + 无 net-stuck:bot 秒到目标点 → V5.137 RTB 过期拉黑永不触发)。forget 后下游重扫不到 → bootstrap 建新设施,
     //   「缺啥补啥」彻底闭合。远设施不动(靠 RTB 走过去、到达后由本闸自然清),不误删有效记忆。
-    public static final String VERSION = "V5.148";
+    // V5.149: 「意外之财不抢跑阶段 + 欠装备回填」(缺啥补啥=通用认知,Step 1)—— 处理假人意外拿到不该拿的东西
+    //   (实测 BlueMiner55 找铁时撞运气挖到 1 钻 → derivePhaseFromInventory 直升 DIAMOND_AGE → 裸奔石镐却[钻石]、
+    //   挖不动钻又无甲、PhaseDiamondAge 漫游空转)。两道:
+    //   ① 阶段 gate(VPM.derivePhaseFromInventory,同 V5.80 raw_iron 思路):有钻石但没满铁甲(V5.124 硬前置)→
+    //      不升 DIAMOND_AGE,当 IRON_AGE 先补满甲(钻石留着不丢),够格后下次 detect 自然升;normal 进度不受影响
+    //      (P4.6 下钻本就要满甲,首钻到手必已满甲)。
+    //   ② 欠装备回填(PhaseDiamondAge.assignTask 顶部):ratchet 已锁进 DIAMOND_AGE 的老假人,缺「铁镐+ 或 满铁甲」
+    //      时委托 PhaseIronAge 补基础(其 smelt→镐→甲 链 + V5.144~148 已闭合),补齐再回钻石逻辑。双保险。
+    //   原则:意外拿到不该拿的 = 留着、阶段不抢跑、行为继续缺啥补啥先补基础。Step 2 拟抽 PhaseUtil.ensureBasics 共享。
+    // V5.150: 「缺啥补啥」共享认知层(Step 2)—— stale 设施记忆清理从 IronAge 提到 PhaseUtil.forgetStaleFacilities,
+    //   全阶段共享。原 V5.123「深埋够不到 forget」(IronAge/StoneAge 各一份重复)+ V5.148「贴脸已失效 reach 断路器」
+    //   (原 IronAge 独有)在此合并去重;IronAge/StoneAge/DiamondAge 的 assignTask 开头统一调一次。收益:① 去重
+    //   (IronAge 删 ~35 行 + isFacilityGone);② StoneAge 此前只有深 forget、缺 reach 保护,现自动获得,补上同族
+    //   stale 空转破口;③ 立「每个阶段开头先做基础认知」的共享入口,新阶段自动继承,缺啥补啥不再各写各漏。
+    //   IronAge 行为零变化(同逻辑搬家);StoneAge/DiamondAge 为增量增强。
+    public static final String VERSION = "V5.150";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

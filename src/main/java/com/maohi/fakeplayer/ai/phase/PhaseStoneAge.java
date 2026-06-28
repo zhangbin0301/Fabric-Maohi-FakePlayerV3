@@ -104,26 +104,10 @@ public final class PhaseStoneAge implements Phase {
             return;
         }
 
-        // V5.123: 忘掉「埋在脚下够不到」的营地设施记忆(工作台 + 熔炉)—— 与 PhaseIronAge.assignTask 顶部同款。
-        //   根因(FrostSky 卡死): bot 已在地表却把 RETURN_TO_BASE 设到井下旧营地(y=45);3D 距 <40 过得了
-        //   下游各 ≤1600/≤64² 距离闸,但地表 bot 无法穿石下挖到埋藏点 → moved30s=0 永卡。STONE_TOOL(~line 149)
-        //   与 STONE_STABLE 冶炼(considerSmeltingFromStoneStable saBase ~line 780)都直接读 knownWorkbenchPos
-        //   发 RETURN_TO_BASE,绕过 setReturnToBase 兜底,故须在这里提前清,落到「就地建台/建炉」自愈。
-        //   阈值同深炉 forget:在 bot 下方 >10 格 且 平方距 >25 才算「埋藏够不到」。
-        if (personality.knownWorkbenchPos != null
-                && personality.knownWorkbenchPos.getY() < player.getBlockY() - 10
-                && player.getBlockPos().getSquaredDistance(personality.knownWorkbenchPos) > 25.0) {
-            com.maohi.fakeplayer.TaskLogger.log(player, "stone_forget_deep_workbench",
-                "workbench", personality.knownWorkbenchPos, "botY", player.getBlockY());
-            personality.knownWorkbenchPos = null;
-        }
-        if (personality.knownFurnacePos != null
-                && personality.knownFurnacePos.getY() < player.getBlockY() - 10
-                && player.getBlockPos().getSquaredDistance(personality.knownFurnacePos) > 25.0) {
-            com.maohi.fakeplayer.TaskLogger.log(player, "stone_forget_deep_furnace",
-                "furnace", personality.knownFurnacePos, "botY", player.getBlockY());
-            personality.knownFurnacePos = null;
-        }
+        // V5.150 (Step 2): stale 设施记忆清理 —— 通用化提到 PhaseUtil 全阶段共享(原 V5.123「深埋够不到 forget」
+        //   在此并入,并新得 V5.148「贴脸已失效 reach 断路器」—— StoneAge 此前只有深 forget、缺 reach 保护)。
+        //   清掉用不了的台/炉记忆,让下游落「就地建台/建炉」自愈,绝不 RTB/park 到一个用不了的设施空转。
+        PhaseUtil.forgetStaleFacilities(player, personality);
 
         switch (sub) {
             case STONE_START -> {

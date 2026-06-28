@@ -119,49 +119,10 @@ public final class PhaseIronAge implements Phase {
             return;
         }
 
-        // ── V5.123: 忘掉「深井下方」的营地设施记忆（工作台 + 熔炉）——
-        //   根因(FrostSky 卡死;原 V5.120 Fix-C 方向反了): bot 已在地表(table_place_skip pos y=64),
-        //   却把 RETURN_TO_BASE 目标设成井下旧营地(move_diag target y=45, dy=-18.5)。3D 距离 <40
-        //   通过下游各处 <=1600 距离闸,但地表 bot 无法寻路穿石下到埋藏点 → moved30s=0 永卡。
-        //   ascendToSurfaceIfDeep 只在「bot 自己深」时触发,对地表 bot 是 no-op,救不了本症。
-        //   正解 = 镜像下方 needsSmelting 块内 knownFurnacePos 深炉 forget(~line 177):提前清掉深处
-        //   设施记忆,让 P2a/P4/P4.5/Fix-9 全部落到「就地建台/建炉」分支,在地表新建可达设施,永久自愈。
-        //   阈值同深炉 forget:在 bot 下方 >10 格 且 水平/三维距 >5 格(平方>25)才算「埋藏够不到」。
-        if (personality.knownWorkbenchPos != null
-                && personality.knownWorkbenchPos.getY() < player.getBlockY() - 10
-                && player.getBlockPos().getSquaredDistance(personality.knownWorkbenchPos) > 25.0) {
-            com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_forget_deep_workbench",
-                "workbench", personality.knownWorkbenchPos, "botY", player.getBlockY());
-            personality.knownWorkbenchPos = null;
-        }
-        if (personality.knownFurnacePos != null
-                && personality.knownFurnacePos.getY() < player.getBlockY() - 10
-                && player.getBlockPos().getSquaredDistance(personality.knownFurnacePos) > 25.0) {
-            com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_forget_deep_furnace_early",
-                "furnace", personality.knownFurnacePos, "botY", player.getBlockY());
-            personality.knownFurnacePos = null;
-        }
-
-        // ── V5.148: stale 设施断路器 —— 人已在记忆设施 reach 内、现场却扫不到真设施(被毁/失效)→ 立即 forget。
-        //   根治「到了基地却没台/炉 → P2a/P4/P4.5/Fix-9 反复 RTB/park 空转」的同族死循环(V5.147 cobble 子case
-        //   之外的 table/furnace 子case)。实测签名: fails=0 + 无 net-stuck —— bot 秒到目标点,V5.137「RTB 过期
-        //   才拉黑」的兜底永不触发。只在贴脸 reach 内验证(远处靠 RTB 走过去、到达后由本闸自然清);chunk 未就绪
-        //   safeGetBlockState 返 null → 保守不 forget,绝不误删有效记忆。forget 后下游 findFurnace/findCraftingTable
-        //   重扫不到 → 落 bootstrap 建新设施,「缺啥补啥」闭合。
-        if (personality.knownWorkbenchPos != null
-                && player.getBlockPos().getSquaredDistance(personality.knownWorkbenchPos) <= PhaseUtil.WORKBENCH_NEARBY_SQ
-                && isFacilityGone(world, personality.knownWorkbenchPos, Blocks.CRAFTING_TABLE)) {
-            com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_forget_stale_workbench",
-                "stale", personality.knownWorkbenchPos, "botY", player.getBlockY());
-            personality.knownWorkbenchPos = null;
-        }
-        if (personality.knownFurnacePos != null
-                && player.getBlockPos().getSquaredDistance(personality.knownFurnacePos) <= FURNACE_NEAR_SQ
-                && isFacilityGone(world, personality.knownFurnacePos, Blocks.FURNACE)) {
-            com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_forget_stale_furnace",
-                "stale", personality.knownFurnacePos, "botY", player.getBlockY());
-            personality.knownFurnacePos = null;
-        }
+        // ── V5.150 (Step 2): stale 设施记忆清理 —— 通用化提到 PhaseUtil 全阶段共享。
+        //   原 V5.123「深埋够不到 forget」+ V5.148「贴脸已失效 reach 断路器」在此合并(逻辑零变化),
+        //   清掉用不了的台/炉记忆,让下游 P2a/P4/P4.5/Fix-9 落到「就地重建」分支,绝不 RTB/park 空转。
+        PhaseUtil.forgetStaleFacilities(player, personality);
 
         // ── P2 / P3: 熔炼驱动 —— 背包有 raw_iron 但铁锭不足时优先处理 ──
         // V5.83: 缺整套铁甲时把熔炼目标抬到 8 锭（够合胸甲），让假人在"未披甲"阶段持续炼铁攒料
@@ -711,21 +672,6 @@ public final class PhaseIronAge implements Phase {
         p.taskTarget   = new BlockPos(tx, ty, tz);
         p.taskExpireTime = player.getEntityWorld().getServer().getTicks()
                 + TimingConstants.TICK_TIMEOUT_EXPLORE;
-    }
-
-    /**
-     * V5.148: 记忆设施(台/炉)是否已不在(被毁/失效)。供 stale 设施断路器判定。
-     *   只在 chunk 就绪时判定;未就绪 / 读不到 → 返 false(保守,绝不误删有效记忆)。
-     *   用 safeGetBlockState 非阻塞读(主线程安全,与 isChunkReady 守卫同口径)。
-     */
-    private static boolean isFacilityGone(ServerWorld world, BlockPos pos, net.minecraft.block.Block expected) {
-        if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(world, pos.getX() >> 4, pos.getZ() >> 4)) {
-            return false; // chunk 未就绪 → 不确定 → 不 forget
-        }
-        net.minecraft.block.BlockState s =
-            com.maohi.fakeplayer.ai.PathfindingNavigation.safeGetBlockState(world, pos);
-        if (s == null) return false; // 读不到 → 保守不 forget
-        return !s.isOf(expected);
     }
 
     /**

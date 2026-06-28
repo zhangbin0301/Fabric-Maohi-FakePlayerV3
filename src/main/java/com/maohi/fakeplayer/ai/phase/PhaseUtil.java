@@ -127,6 +127,69 @@ public final class PhaseUtil {
     /** V5.115 边界统一:40 格寻路上限。超一律就地自建,免 80+ 格 moved30s=0 卡死。 */
     public static final double SMELT_TRAVEL_MAX_SQ = 40.0 * 40.0;
 
+    /** V5.150: bot 与熔炉的"贴近"距离平方(5²),与 PhaseIronAge.FURNACE_NEAR_SQ 同语义。 */
+    public static final double FURNACE_NEARBY_SQ = 25.0;
+
+    // ============ V5.150 (Step 2): 全阶段共享「缺啥补啥」前置认知 ============
+
+    /**
+     * V5.150 (Step 2): stale 设施记忆清理 —— 全阶段共享的「缺啥补啥」前置认知。
+     *   抽自 PhaseIronAge V5.148(reach 断路器)+ IronAge/StoneAge 重复的「深设施 forget」(V5.123),
+     *   统一成一处,供任何用 knownWorkbenchPos/knownFurnacePos 的阶段在 assignTask 开头调一次。
+     *   记忆里的台/炉若满足任一即 forget,让下游落到「就地重建」分支,绝不 RTB/park 到一个用不了的设施空转:
+     *     (a) 深埋够不到: 在 bot 下方 >10 格 且 平方距 >25(地表 bot 无法穿石下挖到埋藏点);
+     *     (b) 贴脸已失效: 人已在 reach 内(台 ≤6 格 / 炉 ≤5 格)却现场扫不到真设施(被毁/失效)。
+     *   远设施不动(靠 RTB 走过去、到达后由 (b) 自然清);chunk 未就绪保守不删,绝不误删有效记忆。
+     */
+    public static void forgetStaleFacilities(ServerPlayerEntity player, Personality personality) {
+        ServerWorld world = (ServerWorld) player.getEntityWorld();
+        BlockPos botPos = player.getBlockPos();
+        int botY = player.getBlockY();
+
+        if (personality.knownWorkbenchPos != null) {
+            BlockPos wb = personality.knownWorkbenchPos;
+            double dsq = botPos.getSquaredDistance(wb);
+            boolean deepUnreachable = wb.getY() < botY - 10 && dsq > 25.0;
+            boolean staleAtReach = dsq <= WORKBENCH_NEARBY_SQ
+                && isFacilityGone(world, wb, net.minecraft.block.Blocks.CRAFTING_TABLE);
+            if (deepUnreachable || staleAtReach) {
+                com.maohi.fakeplayer.TaskLogger.log(player, "phase_forget_stale_workbench",
+                    "reason", deepUnreachable ? "deep_unreachable" : "no_table_at_reach",
+                    "stale", wb, "botY", botY);
+                personality.knownWorkbenchPos = null;
+            }
+        }
+
+        if (personality.knownFurnacePos != null) {
+            BlockPos fp = personality.knownFurnacePos;
+            double dsq = botPos.getSquaredDistance(fp);
+            boolean deepUnreachable = fp.getY() < botY - 10 && dsq > 25.0;
+            boolean staleAtReach = dsq <= FURNACE_NEARBY_SQ
+                && isFacilityGone(world, fp, net.minecraft.block.Blocks.FURNACE);
+            if (deepUnreachable || staleAtReach) {
+                com.maohi.fakeplayer.TaskLogger.log(player, "phase_forget_stale_furnace",
+                    "reason", deepUnreachable ? "deep_unreachable" : "no_furnace_at_reach",
+                    "stale", fp, "botY", botY);
+                personality.knownFurnacePos = null;
+            }
+        }
+    }
+
+    /**
+     * V5.150: 记忆设施(台/炉)是否已不在(被毁/失效)。抽自 PhaseIronAge V5.148。
+     *   只在 chunk 就绪时判定;未就绪 / 读不到 → 返 false(保守,绝不误删有效记忆)。
+     *   用 safeGetBlockState 非阻塞读(主线程安全,与 isChunkReady 守卫同口径)。
+     */
+    private static boolean isFacilityGone(ServerWorld world, BlockPos pos, net.minecraft.block.Block expected) {
+        if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(world, pos.getX() >> 4, pos.getZ() >> 4)) {
+            return false;
+        }
+        net.minecraft.block.BlockState s =
+            com.maohi.fakeplayer.ai.PathfindingNavigation.safeGetBlockState(world, pos);
+        if (s == null) return false;
+        return !s.isOf(expected);
+    }
+
     // ==================== 背包扫描公共结构 ====================
 
     /**
