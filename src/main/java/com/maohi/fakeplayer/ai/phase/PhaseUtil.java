@@ -88,19 +88,12 @@ public final class PhaseUtil {
      */
     public static float hostileEscapeYaw(ServerPlayerEntity player, com.maohi.fakeplayer.Personality p,
                                          ServerWorld world, ThreadLocalRandom rng) {
-        com.maohi.fakeplayer.ai.cognition.BiomePrior.ResourceType resource;
-        if (p.growthPhase == com.maohi.fakeplayer.GrowthPhase.WOOD_AGE) {
-            resource = com.maohi.fakeplayer.ai.cognition.BiomePrior.ResourceType.LOG;
-        } else if (p.growthPhase == com.maohi.fakeplayer.GrowthPhase.STONE_AGE) {
-            net.minecraft.item.ItemStack mainHand = player.getMainHandStack();
-            boolean hasPickaxe = !mainHand.isEmpty()
-                && mainHand.isIn(net.minecraft.registry.tag.ItemTags.PICKAXES);
-            resource = hasPickaxe
-                ? com.maohi.fakeplayer.ai.cognition.BiomePrior.ResourceType.LOG
-                : com.maohi.fakeplayer.ai.cognition.BiomePrior.ResourceType.STONE;
-        } else {
-            resource = com.maohi.fakeplayer.ai.cognition.BiomePrior.ResourceType.LOG;
-        }
+        // V5.153: phase→resource 映射统一走 ResourceKnowledge.surfaceExploreBias(单一事实源,IRON_AGE 偏山地)。
+        net.minecraft.item.ItemStack mainHand = player.getMainHandStack();
+        boolean hasPickaxe = !mainHand.isEmpty()
+            && mainHand.isIn(net.minecraft.registry.tag.ItemTags.PICKAXES);
+        com.maohi.fakeplayer.ai.cognition.BiomePrior.ResourceType resource =
+            com.maohi.fakeplayer.ai.cognition.ResourceKnowledge.surfaceExploreBias(p.growthPhase, hasPickaxe);
         float bestYaw = com.maohi.fakeplayer.ai.cognition.BiomePrior.findBestYaw(player, resource, rng);
         if (bestYaw < 0f) {
             BlockPos spawnPos = getWorldSpawnCached(world);
@@ -380,20 +373,12 @@ public final class PhaseUtil {
             }
         }
 
-        // P1: 按 phase 推断当前最需要的资源
-        com.maohi.fakeplayer.ai.cognition.BiomePrior.ResourceType neededResource;
-        if (p.growthPhase == com.maohi.fakeplayer.GrowthPhase.WOOD_AGE) {
-            neededResource = com.maohi.fakeplayer.ai.cognition.BiomePrior.ResourceType.LOG;
-        } else if (p.growthPhase == com.maohi.fakeplayer.GrowthPhase.STONE_AGE) {
-            net.minecraft.item.ItemStack mainHand = player.getMainHandStack();
-            boolean hasPickaxe = !mainHand.isEmpty()
-                && mainHand.isIn(net.minecraft.registry.tag.ItemTags.PICKAXES);
-            neededResource = hasPickaxe
-                ? com.maohi.fakeplayer.ai.cognition.BiomePrior.ResourceType.LOG
-                : com.maohi.fakeplayer.ai.cognition.BiomePrior.ResourceType.STONE;
-        } else {
-            neededResource = com.maohi.fakeplayer.ai.cognition.BiomePrior.ResourceType.LOG;
-        }
+        // P1: 按 phase 推断当前最需要的资源 (V5.153: 统一走 ResourceKnowledge.surfaceExploreBias,IRON_AGE 偏山地)
+        net.minecraft.item.ItemStack mainHand = player.getMainHandStack();
+        boolean hasPickaxe = !mainHand.isEmpty()
+            && mainHand.isIn(net.minecraft.registry.tag.ItemTags.PICKAXES);
+        com.maohi.fakeplayer.ai.cognition.BiomePrior.ResourceType neededResource =
+            com.maohi.fakeplayer.ai.cognition.ResourceKnowledge.surfaceExploreBias(p.growthPhase, hasPickaxe);
 
         boolean currentBiomeIsHostile = com.maohi.fakeplayer.ai.cognition.BiomePrior.isHostile(player, neededResource);
 

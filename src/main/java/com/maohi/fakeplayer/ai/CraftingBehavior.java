@@ -1137,7 +1137,16 @@ public final class CraftingBehavior {
 					//   findBlockNearby:806 卡 ~1s。chunk 已 FULL 时下方 getBlockState 走 fast cache hit
 					//   不会 park。
 					if (!PathfindingNavigation.isChunkReady(world, worldX >> 4, worldZ >> 4)) continue;
-					for (int dy = -3; dy <= 3; dy++) {
+					// V5.154: 垂直扫描 ±3 → ±6 根治「贴台/炉却永远合不出/炼不动」死循环(LazyTiny: 工作台 y=62、
+					//   bot y=67,dy=-5 → STONE_STABLE stone_gear_park 100% IDLE 卡死数分钟)。根因是 metric 失配:
+					//   各阶段「驻台 park」闸用欧氏距离(WORKBENCH_NEARBY_SQ=36→6 格 / FURNACE_NEAR_SQ=25→5 格),
+					//   会把「正下方 5 格的台/炉」算作"贴脸";但本扫描垂直只到 ±3 → 找不到 → workbenchNearby=false
+					//   → autoCraftStoneTools 跳过需台的合成、executeCraft 报 no_workbench → 永不前进。
+					//   park 半径(欧氏≤6)内任意点必有 |dy|≤6,故垂直放到 ±6 即覆盖整个 park 球,失配彻底消除
+					//   (台/炉一旦进 park 闸,本扫描必能找到)。executeCraft 第 3 步 openHandledScreen 直开屏、
+					//   绕过 reach 检查,故 5~6 格下方的台也能真合出来(假人无真客户端,可接受)。
+					//   现有调用方 radius 恒为 6,±6 即 13³ 盒;chunk-ready 预检已跳过未加载列,开销可控。
+					for (int dy = -6; dy <= 6; dy++) {
 						mut.set(worldX, center.getY() + dy, worldZ);
 						if (world.getBlockState(mut).isOf(block)) {
 							return mut.toImmutable();

@@ -518,7 +518,8 @@ public final class PhaseIronAge implements Phase {
             BlockPos target = ctx.findOre.apply(world, player.getBlockPos());
             if (target != null) {
                 set(personality, player, TaskType.MINING, target, TimingConstants.TICK_TIMEOUT_WORK);
-            } else {
+            } else if (!tryDescendForOre(player, personality, hasStonePickaxe || hasIronPickaxe)) {
+                // V5.153 (增量 B): 没探到地表矿 + 下挖不可行(在层附近/冷却/缺镐)→ 才横向 explore(原行为)。
                 setExplore(personality, player);
             }
         } else if (roll < 75) {
@@ -551,6 +552,41 @@ public final class PhaseIronAge implements Phase {
         p.currentTask = type;
         p.taskTarget = target;
         p.taskExpireTime = player.getEntityWorld().getServer().getTicks() + timeoutTicks;
+    }
+
+    /**
+     * V5.153 (增量 B): 「想挖矿却没探到矿、且明显在公知铁层之上」→ 发起可靠的铁层 strip-mine 下挖,
+     *   取代原地横向 explore 瞎逛(地表本就少有露天矿,在 Y64 横向扫矿石几乎徒劳;真矿在 Y15 上下)。
+     *   复用既有 strip-mine 机制(got_iron 自动收手上爬、low_durability 短冷却兜底),不新造下挖逻辑。
+     *   门槛: strip-mine 空闲 + 未冷却 + 血量够 + 有镐(调用点已过 P1 镐守卫,必有石镐+) +
+     *   bot 在 ResourceKnowledge.IRON 层 +10 之上(isWellAboveLayer)。已在层附近则返 false 交回横向 explore
+     *   (深处找矿靠 V5.140/141 的 24 格 ore-veer + cave-steering,不需再纵向抖动)。
+     *   @return true = 已发起下挖(调用方止于此);false = 不适合下挖,调用方走原 explore。
+     */
+    private static boolean tryDescendForOre(ServerPlayerEntity player, Personality personality, boolean hasPickaxe) {
+        if (!hasPickaxe) return false;
+        com.maohi.MaohiConfig cfg = com.maohi.MaohiConfig.getInstance();
+        if (cfg == null || !cfg.enableStripMine) return false;
+        if (personality.stripMineState != null) return false;
+        if (personality.stripMineCooldownUntil > System.currentTimeMillis()) return false;
+        if (player.getHealth() <= 14.0f) return false;
+        if (!com.maohi.fakeplayer.ai.cognition.ResourceKnowledge.isWellAboveLayer(
+                com.maohi.fakeplayer.ai.cognition.ResourceKnowledge.Resource.IRON, player.getBlockY())) {
+            return false;
+        }
+        personality.stripMineForDiamond = false;
+        personality.stripMineForCobble = false;   // 目标=铁,got_iron 收手(口径同 P4.1/SA 下挖)
+        personality.stripMineState = PhaseStoneAge.SubPhase.STRIP_MINE_DESCEND;
+        personality.stripMineStartPos = player.getBlockPos().toImmutable();
+        personality.stripMineStartY = player.getBlockY();
+        personality.stripMineTunnelLen = 0;
+        personality.stripMineConsecutiveFails = 0;
+        personality.currentTask = TaskType.STRIP_MINE;
+        com.maohi.fakeplayer.TaskLogger.log(player, "stripmine_enter",
+            "goal", "ore_descend", "startY", personality.stripMineStartY,
+            "targetY", com.maohi.fakeplayer.ai.cognition.ResourceKnowledge.Resource.IRON.digTargetY,
+            "phase", "IRON_AGE");
+        return true;
     }
 
     /**
@@ -651,7 +687,8 @@ public final class PhaseIronAge implements Phase {
             for (int dx = -d; dx <= d; dx++) {
                 for (int dz = -d; dz <= d; dz++) {
                     if (Math.max(Math.abs(dx), Math.abs(dz)) != d) continue;
-                    for (int dy = -4; dy <= 4; dy++) {
+                    // V5.154: 垂直 ±4 → ±6,与表查找统一(FURNACE_NEAR_SQ=25→5 格欧氏,dy=-5 的炉原 ±4 漏)。
+                    for (int dy = -6; dy <= 6; dy++) {
                         mut.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
                         if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(
                                 world, mut.getX() >> 4, mut.getZ() >> 4)) continue;
@@ -674,7 +711,9 @@ public final class PhaseIronAge implements Phase {
             for (int dx = -d; dx <= d; dx++) {
                 for (int dz = -d; dz <= d; dz++) {
                     if (Math.max(Math.abs(dx), Math.abs(dz)) != d) continue;
-                    for (int dy = -3; dy <= 3; dy++) {
+                    // V5.154: 垂直 ±3 → ±6,与 CraftingBehavior.findBlockNearby 同因(park 闸 WORKBENCH_NEARBY_SQ=36
+                    //   →6 格欧氏,下方 5 格的台算贴脸却扫不到 → 永 park 合不出)。详见 facility_park_scan_metric。
+                    for (int dy = -6; dy <= 6; dy++) {
                         mut.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
                         if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(
                                 world, mut.getX() >> 4, mut.getZ() >> 4)) continue;

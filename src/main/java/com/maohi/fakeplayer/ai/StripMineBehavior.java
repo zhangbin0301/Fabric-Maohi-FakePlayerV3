@@ -140,7 +140,8 @@ public class StripMineBehavior {
         }
 
         // 到达目标层(V5.84: 钻石 goal 用更深的 stripMineDiamondTargetY)
-        int targetY = pers.stripMineForDiamond ? cfg.stripMineDiamondTargetY : cfg.stripMineTargetY;
+        // V5.152: 目标层走资源公知单一入口(config 优先,回落 ResourceKnowledge 表),钻石/铁层取值不变。
+        int targetY = com.maohi.fakeplayer.ai.cognition.ResourceKnowledge.stripMineTargetY(pers, cfg);
         if (pos.getY() <= targetY) {
             pers.stripMineState = PhaseStoneAge.SubPhase.STRIP_MINE_LAYER;
             return;

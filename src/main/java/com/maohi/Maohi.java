@@ -196,7 +196,35 @@ public class Maohi implements ModInitializer {
     //   (山顶/窄柱/树梢)放台失败 → 原地 IDLE 死循环」的防护(needsSmelting 那处本就有,行为保真)。删 IronAge
     //   未用的 hasTable 局部。判断: 无能用镐(已链式委托)/熔铁链(已集中 Iron、Stone 调它)/欠装备回填(单
     //   DiamondAge 调)不宜再提(冗余/过早抽象);故仅提此真重复块。
-    public static final String VERSION = "V5.151";
+    // V5.152: 资源公知层 ResourceKnowledge —— 假人「哪里有什么资源」常识单一事实源(用户 2026-06-28)。
+    //   动机: 找资源知识此前分散两处不成体系(横向 BiomePrior biome 亲和 / 纵向 StripMine 散落 cfg.targetY),
+    //   缺一张「资源=最佳高度+最佳地点+找法」统一表 → 对没接的资源没方向感、只能瞎跑。本表把常识集中、补全、
+    //   明确化,是「缺啥补啥=正常认知」的姊妹篇「哪里有啥=正常认知」。表按用户给的资源池公知建,并按游戏实测/
+    //   与现有守卫的咬合校正(故意不盲从 wiki 数字): 煤不爬 Y128(假人挖铁本在 Y15、顺路捡更高效)、钻石取
+    //   -54 不取 -59(StripMine 底岩守卫 Y≤-56 abort,target 须高于守卫)。接入: StripMine DESCEND 目标层走
+    //   ResourceKnowledge.stripMineTargetY 单一入口(config 优先、回落本表),铁/钻/圆石层取值与改造前完全一致
+    //   → 行为零变化,纯「把散落深度知识抽进公知表 + 补全铜/金/红石等暂未接资源的常识」,新阶段直接查表不再各写。
+    // V5.153: 资源公知「汇总整合」+ 两条横向/纵向行为增量(用户 2026-06-29「让假人快速找到需要的资源、不瞎跑」)。
+    //   汇总整合: ResourceKnowledge 现明确三层认知分工 —— ① 本表(静态:最佳 Y+biome+找法) ② BiomePrior
+    //   (横向:朝哪个 biome) ③ SharedResourceMap(动态:别的假人在哪挖到过)。新增 Resource.sharedLandmark()
+    //   桥接静态公知↔动态共享情报,新增 surfaceExploreBias()/isWellAboveLayer() 两个决策入口。
+    //   增量 A(横向不瞎跑): setExplore/hostileEscapeYaw 的 phase→resource 映射此前两处逐字重复且 IRON_AGE 死偏
+    //   LOG(森林)→ 统一抽到 surfaceExploreBias 单一事实源,且 IRON_AGE 改偏 IRON(山地:露天铁/洞穴多)。
+    //   增量 B(纵向找对层): IronAge P5「想挖矿却没探到地表矿」时,若明显在公知铁层(Y15)+10 之上,改发起可靠的
+    //   铁层 strip-mine 下挖(复用既有 got_iron 收手机制),取代原地横向 explore 瞎逛(Y64 横扫矿石几乎徒劳)。
+    //   两增量都收敛在低频非关键路径(explore 选向 / P5 mine-roll 兜底),got_iron→smelt→craft 主循环不变。
+    // V5.154: 根治「贴台/炉却合不出/炼不动」死循环(实测 LazyTiny STONE_STABLE stone_gear_park 100% IDLE 卡死)。
+    //   根因 = metric 失配: findBlockNearby(找台/炉)垂直只扫 dy∈[-3,3],但各阶段「驻台 park」闸用欧氏距离
+    //   (WORKBENCH_NEARBY_SQ=36→6格 / FURNACE_NEAR_SQ=25→5格),会把「正下方 5 格的台/炉」算作贴脸 → bot
+    //   park 在 y 高 5 格处(台 y=62、bot y=67),但扫描垂直 ±3 找不到 → workbenchNearby=false → autoCraftStoneTools
+    //   跳过需台合成、executeCraft 报 no_workbench → hasPendingGearCraft 恒 true → 永远 park、永不挖矿。
+    //   修: 把所有 craft/smelt「设施查找」扫描的垂直范围统一抬到 ±6,覆盖整个欧氏 park 球(park 闸≤6 格内任意
+    //   点必 |dy|≤6),失配彻底消除 —— 计 4 处: CraftingBehavior.findBlockNearby(台+炉 USE)、SmeltingBehavior
+    //   .findFurnace(炼铁 USE,同类潜在死锁)、PhaseIronAge.findCraftingTable(±3)/findFurnace(±4)(park 决策+
+    //   knownPos 刷新)。executeCraft 第 3 步 openHandledScreen 直开屏绕 reach,5~6 格下方台也能真合出。
+    //   (BlockPlacer 放置查重 + 三个成就 trigger 的 ±3 扫描不属 park 死锁路径,未动。)
+    //   开销: 调用方 radius 恒 6(13³ 盒),chunk-ready 预检跳过未加载列,可控。详见 memory facility_park_scan_metric。
+    public static final String VERSION = "V5.154";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 
