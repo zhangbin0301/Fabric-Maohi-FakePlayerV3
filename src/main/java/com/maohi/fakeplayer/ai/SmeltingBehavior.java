@@ -74,10 +74,14 @@ public final class SmeltingBehavior {
 		if (pers.smeltingTicks > 0) return;             // 已在阶段 2 等待
 		if (pers.smeltingFurnacePos != null) return;    // 阶段 1 已执行待 collect
 		if (pers.currentTask == com.maohi.fakeplayer.TaskType.CRAFTING) return; // 与合成串行
-		// V5.83: 节流从 1/500 降到 1/40 —— 旧值批次间隔 ~25s，叠加 200tick 熔炼 → ~35s/锭，
-		//   整套铁甲 24 锭要 ~14 分钟。1/40 后批次间隔 ~2s，~12s/锭（贴近 vanilla 10s/锭下限），
-		//   整套铁甲 ~5 分钟。smeltingTicks/CRAFTING 守卫仍保证不洪泛、不超 vanilla 熔炼速度。
-		if (ThreadLocalRandom.current().nextInt(40) != 0) return;
+		// V5.156 根治「一个多月从未合出铁甲」总根因: 删掉 1/40 节流。
+		//   V5.83 的 1/40 是基于「autoSmeltOres 每 tick(20/s)被调」的错误前提算的(号称批次间隔 ~2s、~12s/锭)。
+		//   实际本方法在 processHeavyAILogic 内、受 logicTickCounter>=20 门控 → 只 ~1/s 被调(与 line ~1062
+		//   updatePlayerMetadata 当年踩的同款「误以为每 50ms 调一次」坑)。1/s × 1/40 = 一炉约每 40s 才起一次
+		//   → ~40s/锭(实测 DesertMiner66 4h 仅 4 锭、DiamondDig 攒 3 锭合镐后再无余力攒甲)→ 全套铁甲 24 锭需
+		//   连烧 ~16 分钟不被打断,假人做不到 → 一个多月零铁甲。
+		//   删节流后由 smeltingTicks(=200tick/10s)+ smeltingFurnacePos 守卫天然限速到 vanilla(1 锭/~11s),
+		//   既不洪泛也不超 vanilla 速;批次间隙才跑一次背包扫描,开销可忽略。知炉时不做 24³ 扫描(knownFurnacePos)。
 
 		PlayerInventory inv = player.getInventory();
 		// V5.131: 缺煤且木炭储备不足时,先烧原木→木炭(自给高效燃料);否则正常炼铁。
@@ -126,10 +130,13 @@ public final class SmeltingBehavior {
 		// 标记阶段 2 状态
 		pers.smeltingFurnacePos = furnace;
 		pers.smeltingIsCharcoal = makeCharcoal; // V5.131: 供 collect 区分(木炭不发 story/smelt_iron)
-		// vanilla 烧炼周期 200 tick;给点抖动避免与多假人同步
-		pers.smeltingTicks = 200 + ThreadLocalRandom.current().nextInt(40);
+		// V5.156: 存「完成的游戏 tick 截止」= server.getTicks()+200(真游戏 tick 20/s,与 vanilla 炉同步),
+		//   由 tickSmelting 按真 tick 判完成,不再按调用次数倒计时(tickSmelting 在 ~1/s 的 heavy-AI 里跑,
+		//   旧 200 倒计时要 ~200s 才收一锭 → 全套铁甲遥不可及,见本类 V5.156 改注)。
+		pers.smeltingTicks = player.getEntityWorld().getServer().getTicks()
+			+ 200 + ThreadLocalRandom.current().nextInt(40);
 		com.maohi.fakeplayer.TaskLogger.log(player, makeCharcoal ? "charcoal_start" : "smelt_start",
-			"furnace", furnace, "ticks", pers.smeltingTicks);
+			"furnace", furnace, "doneAtTick", pers.smeltingTicks);
 	}
 
 	/**
@@ -137,9 +144,12 @@ public final class SmeltingBehavior {
 	 */
 	public static void tickSmelting(ServerPlayerEntity player, Personality pers) {
 		if (pers.smeltingTicks <= 0) return;
-		pers.smeltingTicks--;
-
-		if (pers.smeltingTicks == 0) {
+		// V5.156: 按真游戏 tick(server.getTicks(),20/s,与 vanilla 炉同步)判完成 —— 而非每调一次 smeltingTicks--。
+		//   tickSmelting 在 ~1/s 的 processHeavyAILogic 里跑,旧「每调一次 --」让 200 计数要 ~200s 才归零
+		//   (炉其实 200 game tick=10s 就烧好)→ 假人空等 ~200s 才收一锭 → 全套铁甲(24 锭)需连烧 ~80min,做不到
+		//   → 一个多月零铁甲。smeltingTicks 现是「完成的游戏 tick 截止值」(autoSmeltOres 设 = getTicks()+200)。
+		if (player.getEntityWorld().getServer().getTicks() >= pers.smeltingTicks) {
+			pers.smeltingTicks = 0; // 清零,放行下一炉(line74 的 smeltingTicks>0 守卫)
 			BlockPos furnace = pers.smeltingFurnacePos;
 			pers.smeltingFurnacePos = null; // 不论成败都清状态,避免卡死
 

@@ -654,15 +654,17 @@ public final class CraftingBehavior {
 	 */
 	public static void tickCrafting(ServerPlayerEntity player, com.maohi.fakeplayer.Personality pers) {
 		if (pers.craftingTicks <= 0) return;
-		pers.craftingTicks--;
+		// V5.156: 每次 -20(≈1 个真游戏 tick 周期 = 20 game tick)而非 -1 —— 同 smelt 根因: tickCrafting 在 ~1/s 的
+		//   processHeavyAILogic 里跑,旧 -1 让 craftingTicks=60 要 ~60s 才归零(本意 60 game tick=3s)→ 每件
+		//   工具/装备空等 ~60s,叠加 smelt 一起把铁甲(6+ 件合成)拖到遥不可及。倒计时纯属「假装在台前忙活」的
+		//   动画延时,executeCraft 才是真合成(瞬时),故快无副作用(瞬时合也行,这里留 ~3s 像真人手速)。
+		pers.craftingTicks = Math.max(0, pers.craftingTicks - 20);
 
-		// 倒计时期间:每 10 tick 挥一下手模拟在工作台前忙活
-		if (pers.craftingTicks % 10 == 0) {
-			PacketHelper.swingHand(player, Hand.MAIN_HAND);
-		}
+		// 倒计时期间:挥手模拟在工作台前忙活(cosmetic)
+		PacketHelper.swingHand(player, Hand.MAIN_HAND);
 
 		// 归零:走真实合成协议
-		if (pers.craftingTicks == 0 && pers.craftingTarget != null) {
+		if (pers.craftingTicks <= 0 && pers.craftingTarget != null) {
 			executeCraft(player, pers.craftingTarget);
 			pers.currentTask = com.maohi.fakeplayer.TaskType.IDLE;
 			pers.craftingTarget = null;

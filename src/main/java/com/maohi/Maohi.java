@@ -234,7 +234,17 @@ public class Maohi implements ModInitializer {
     //   换平地重试。同时把 carryingFurnaceForReuse 的 fresh-craft 漏网归一。另: phase_iron_smelt_park 加 smelt 状态
     //   诊断字段(smeltTicks/smeltFurnace/distSq),定位 DesertMiner66 那类「贴炉 park 却 ironIngot 不增、无 smelt_*」
     //   的残留(autoSmeltOres 早退但日志查不出 guard;非本版 Noah123/放炉类,下次按新诊断字段再判)。
-    public static final String VERSION = "V5.155";
+    // V5.156: ★根治「一个多月从未合出铁防具」总根因 —— 熔炼/合成「每调一次 -1」误把 ~1/s 当 20/s,实测慢 ~20×。
+    //   processHeavyAILogic(内含 tickSmelting/tickCrafting)受 logicTickCounter>=20 门控 → 实际 ~1/s 被调一次
+    //   (line 1063 自证),但 smeltingTicks=200 / craftingTicks=60 是按「20/s 的真游戏 tick」设的(200tick=10s)。
+    //   于是: ① 熔炼每调 -1 → 200 计数要 ~200s 才归零(炉其实 10s 烧好)→ 假人空等 ~200s 才收一锭;② autoSmeltOres
+    //   还叠了 1/40 节流(同样误以为 20/s)→ 一炉约每 40s 才起;③ 合成每件空等 ~60s。合计:一锭铁 ~40~200s、
+    //   全套铁甲 24 锭需连烧 ~80min 不被打断 → 假人做不到 → 一个多月零铁甲(只够攒 3 锭合镐,故有铁镐没铁甲)。
+    //   修(三处):(a) 删 autoSmeltOres 1/40 节流(smeltingTicks+furnacePos 守卫已天然限速到 vanilla);(b) smeltingTicks
+    //   改存「完成的真游戏 tick 截止」(getTicks()+200),tickSmelting 按 server.getTicks() 判完成 → 真 ~10s 收炉;
+    //   (c) tickCrafting 每调 -20(≈1 个真 tick 周期)→ 合成 ~3s。三者合计:铁锭 ~11s/个、铁甲数分钟可成,
+    //   彻底解开月余死结。(craftingTicks 倒计时纯动画延时,executeCraft 才是瞬时真合成,故加速无副作用。)
+    public static final String VERSION = "V5.156";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 
