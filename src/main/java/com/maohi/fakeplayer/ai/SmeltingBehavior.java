@@ -105,20 +105,20 @@ public final class SmeltingBehavior {
 		// V5.83: 贴炉(≤5格,区块必加载，调 isFurnaceBlock 安全不会 park)时校验记忆坐标仍是熔炉；
 		//   失效则清掉，避免对幽灵炉反复空驻留 / smelt_fail。远距离不校验（绝不读未加载区块）。
 		if (furnace != null
-				&& player.squaredDistanceTo(Vec3d.ofCenter(furnace)) <= COLLECT_DIST_SQ
+				&& player.getBlockPos().getSquaredDistance(furnace) <= COLLECT_DIST_SQ
 				&& !isFurnaceBlock(player.getEntityWorld(), furnace)) {
 			pers.knownFurnacePos = null;
 			furnace = null;
 		}
 		if (furnace == null
-				|| player.squaredDistanceTo(Vec3d.ofCenter(furnace)) > COLLECT_DIST_SQ) {
+				|| player.getBlockPos().getSquaredDistance(furnace) > COLLECT_DIST_SQ) {
 			furnace = findFurnace(player, FURNACE_SCAN_RADIUS);
 			if (furnace == null) return;
 			pers.knownFurnacePos = furnace;
 		}
 
 		// 距离检查 — 只有真正贴炉(≤5格)才启动熔炼
-		if (player.squaredDistanceTo(Vec3d.ofCenter(furnace)) > COLLECT_DIST_SQ) return;
+		if (player.getBlockPos().getSquaredDistance(furnace) > COLLECT_DIST_SQ) return;
 
 		// 真协议化阶段 1: 开熔炉 → 摆 1 份输入(生铁/原木)+(按需)1 份燃料 → 关
 		if (!placeIngredientsInFurnace(player, furnace, inputSlot, fuelSlot)) {

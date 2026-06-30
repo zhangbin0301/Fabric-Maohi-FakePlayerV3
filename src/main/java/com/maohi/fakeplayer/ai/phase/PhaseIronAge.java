@@ -349,6 +349,8 @@ public final class PhaseIronAge implements Phase {
         //   离开后炉变远就只能丢弃/重建;FURNACE item 进包后由上面建炉分支复用(省 8 圆石、不留炉子垃圾)。
         //   仅收 owned(不拆别人/共享炉);收走即清 knownFurnacePos,furnacesOwned 留给 RecycleFurnaceTask 成功时清。
         if (rawIronCount == 0
+                && personality.smeltingTicks <= 0
+                && personality.smeltingFurnacePos == null
                 && personality.recycleTarget == null
                 && !personality.carryingFurnaceForReuse
                 && personality.knownFurnacePos != null
@@ -841,7 +843,15 @@ public final class PhaseIronAge implements Phase {
 
         // 无熔炉 → 优先级: 能建就建 > 共享炉(escape hatch) > 回营 > 就地自建台。
         BlockPos saWorkbench = PhaseIronAge.findCraftingTable(saWorld, player.getBlockPos(), 6);
-        // SA-P4: 已贴台(≤6) + cobble≥8 → 就地合熔炉
+        // SA-P4: 无炉但背包里有熔炉物品，或者具备合炉条件
+        if (d.hasFurnaceItem) {
+            // 就地放下(无需工作台)
+            PhaseUtil.setIdle(personality, player, 60);
+            if (personality.carryingFurnaceForReuse) personality.carryingFurnaceForReuse = false;
+            com.maohi.fakeplayer.TaskLogger.log(player, "stone_smelt_place_inv_furnace");
+            return true;
+        }
+        // SA-P4b: 已贴台(≤6) + cobble≥8 → 就地合熔炉
         if (saWorkbench != null && d.cobbleCount >= 8) {
             PhaseUtil.setIdle(personality, player, 100);
             com.maohi.fakeplayer.TaskLogger.log(player, "stone_smelt_craft_furnace",

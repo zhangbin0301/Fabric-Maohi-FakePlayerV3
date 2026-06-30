@@ -564,7 +564,7 @@ public class BlockPlacer {
 					//   getChunk(FULL,true) 在 chunk gen 未完成时 pump 主线程任务队列。watchdog 抓到
 					//   findBlockNearby:508 卡 1034ms(tryPlaceFurnace → findFurnaceNearby)。
 					if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(world, worldX >> 4, worldZ >> 4)) continue;
-					for (int dy = -3; dy <= 3; dy++) {
+					for (int dy = -6; dy <= 6; dy++) {
 						mut.set(worldX, center.getY() + dy, worldZ);
 						if (world.getBlockState(mut).isOf(block)) return true;
 					}
