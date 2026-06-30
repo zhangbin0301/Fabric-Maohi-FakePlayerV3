@@ -257,7 +257,11 @@ public class Maohi implements ModInitializer {
     //       MSPT 自适应 48→40→32) ③ 洞穴兜底。仅铁目标调,钻石/圆石不动。
     //   (C) 洞穴优先基本已有,A 把 tickLayer 优先级理顺成 iron_ore→泛 ore→洞穴→随机。
     //   不改 matchesType / 不动熔炼链(V5.156/157) / 不动钻石·圆石路径,改动收敛在「铁的找矿方向」。
-    public static final String VERSION = "V5.158";
+    // V5.159: 炉子回收执行期双保险 —— RecycleFurnaceTask.tick 开头加守卫:若 target 正是当前熔炼炉
+    //   (smeltingFurnacePos==target),放弃回收不拆。补 V5.158 安排闸 smelt 守卫之外的窄竞态(安排时没熔、
+    //   回收任务多 tick 推进期间 autoSmeltOres 又起一炉 → 旧逻辑仍会拆到新熔)。根治 GoldenSleepy 那类
+    //   「smelt_start → 拆炉 → smelt_fail furnace_destroyed → 丢料 → 再建再拆」自毁循环的最后一道缝。
+    public static final String VERSION = "V5.159";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

@@ -45,6 +45,18 @@ public final class RecycleFurnaceTask {
 			return false;
 		}
 
+		// V5.159: 执行期双保险 —— 即使回收已安排,若这炉此刻正熔着东西(autoSmeltOres 在安排后又起了一炉),
+		//   绝不拆。否则毁掉熔炼批次 + 丢料(= GoldenSleepy「炉 smelt_start → 拆炉 → smelt_fail furnace_destroyed」
+		//   自毁循环同源)。V5.158 已在 PhaseIronAge 安排闸加 smelt 守卫;此处补「执行那一刻」的窄竞态(安排时没熔、
+		//   多 tick 推进期间又起一炉)。放弃本次回收交还调度,熔完由 smelt-loop 正常收,之后真空闲再重排回收。
+		if (personality.smeltingFurnacePos != null && personality.smeltingFurnacePos.equals(target)) {
+			com.maohi.fakeplayer.TaskLogger.log(player, "recycle_furnace_skip",
+				"reason", "smelt_active", "target", target);
+			personality.recycleStage = 0;
+			personality.recycleTarget = null;
+			return false;
+		}
+
 		// V5.117: 检查 SharedResourceMap 中是否被别的 bot claim 中 → 跳过防碰撞
 		com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkNode node =
 			findNode(personality, target);
