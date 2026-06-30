@@ -244,7 +244,11 @@ public class Maohi implements ModInitializer {
     //   改存「完成的真游戏 tick 截止」(getTicks()+200),tickSmelting 按 server.getTicks() 判完成 → 真 ~10s 收炉;
     //   (c) tickCrafting 每调 -20(≈1 个真 tick 周期)→ 合成 ~3s。三者合计:铁锭 ~11s/个、铁甲数分钟可成,
     //   彻底解开月余死结。(craftingTicks 倒计时纯动画延时,executeCraft 才是瞬时真合成,故加速无副作用。)
-    public static final String VERSION = "V5.156";
+    // V5.157: 修 V5.156 的重启边界 —— smeltingTicks 会持久化,而 V5.156 把它改成「绝对游戏 tick 截止」。
+    //   服务器重启后 server.getTicks() 归零,持久化的旧截止变「远在未来」→ 重启时正在烧的假人会空等数十分钟。
+    //   tickSmelting 加钳: 到截止 OR 截止离谱地远(>300 tick,远超单炉上限 240)→ 都收炉(后者=重启失效,
+    //   炉在停机期间早烧好了)。craftingTicks 是相对倒计时不受影响(无此问题)。
+    public static final String VERSION = "V5.157";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

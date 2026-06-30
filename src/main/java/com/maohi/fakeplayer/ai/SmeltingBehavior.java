@@ -148,7 +148,11 @@ public final class SmeltingBehavior {
 		//   tickSmelting 在 ~1/s 的 processHeavyAILogic 里跑,旧「每调一次 --」让 200 计数要 ~200s 才归零
 		//   (炉其实 200 game tick=10s 就烧好)→ 假人空等 ~200s 才收一锭 → 全套铁甲(24 锭)需连烧 ~80min,做不到
 		//   → 一个多月零铁甲。smeltingTicks 现是「完成的游戏 tick 截止值」(autoSmeltOres 设 = getTicks()+200)。
-		if (player.getEntityWorld().getServer().getTicks() >= pers.smeltingTicks) {
+		// V5.157: 截止是「绝对游戏 tick」且 smeltingTicks 会持久化 → 服务器重启后 server.getTicks() 归零,旧截止
+		//   变成「远在未来」会让重启时正在烧的假人空等数十分钟。故: 到截止 OR 截止离谱地远(>300 tick,远超单炉
+		//   上限 240 = 200+抖动)→ 都收炉(后者=重启失效,炉在停机期间早烧好了)。
+		long nowTick = player.getEntityWorld().getServer().getTicks();
+		if (nowTick >= pers.smeltingTicks || pers.smeltingTicks - nowTick > 300) {
 			pers.smeltingTicks = 0; // 清零,放行下一炉(line74 的 smeltingTicks>0 守卫)
 			BlockPos furnace = pers.smeltingFurnacePos;
 			pers.smeltingFurnacePos = null; // 不论成败都清状态,避免卡死
