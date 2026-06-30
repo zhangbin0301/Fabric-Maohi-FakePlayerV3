@@ -203,22 +203,38 @@ public final class PhaseIronAge implements Phase {
                 //   （一出 5 格 autoSmeltOres 就不触发，raw_iron 永远炼不动 → 铁甲遥遥无期）。
                 //   攒到目标锭数后 needsSmelting 转 false，自动退出驻留去合装备 / 挖矿。
                 PhaseUtil.setIdle(personality, player, 60);
+                // V5.155 诊断: 加 smelt 状态字段 —— 实测 DesertMiner66 贴炉 park 但 ironIngot/rawIron 数分钟不变、
+                //   无任何 smelt_*(autoSmeltOres 早退却查不出哪条 guard)。打出 smeltTicks(>0=正在烧)/smeltFurnace
+                //   (非 null=已摆料待 collect)/到 knownFurnace 距离,下次部署即可定位是「卡 mid-batch」还是「距离/找炉」。
                 com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_smelt_park",
-                    "ironIngot", ironIngotCount, "rawIron", rawIronCount);
+                    "ironIngot", ironIngotCount, "rawIron", rawIronCount,
+                    "smeltTicks", personality.smeltingTicks,
+                    "smeltFurnace", personality.smeltingFurnacePos,
+                    "distSq", personality.knownFurnacePos != null
+                        ? (int) player.getBlockPos().getSquaredDistance(personality.knownFurnacePos) : -1);
                 return;
             } else {
                 // 无熔炉记录 → 需要建熔炉
                 // V5.117 Fix-5(重做): 若背包揣着回收来的待复用炉 → 优先放下复用,不再耗 8 圆石现合。
                 //   清 carry 标志即解开 tryPlaceFurnace 放置闸门;setIdle 驻留让放炉状态机就地落炉(放炉无需工作台)。
-                if (hasFurnaceItem && personality.carryingFurnaceForReuse) {
-                    personality.carryingFurnaceForReuse = false;
-                    PhaseUtil.setIdle(personality, player, 60);
-                    com.maohi.fakeplayer.TaskLogger.log(player, "iron_reuse_carried_furnace",
-                        "cobble", cobbleCount);
+                // V5.155: 有熔炉 item(回收待复用 / 刚合出还没放下的 fresh 炉)→ 一律「放」不「再合」。
+                //   旧漏: 仅 carryingFurnaceForReuse=true 才走放置;fresh-craft 的炉 item(flag=false)落到下面 craft
+                //   分支又合一个(8 圆石)却仍不放 → 越攒越多、furnaceNearby 永 false、铁永远炼不了。根因:
+                //   tryPlaceFurnace 在「四邻无空位(被围/坏点)」placeAt==null 静默 return、无放台同款挪窝冷却 → 永放不下。
+                //   现 BlockPlacer 在 no_place_pos 武装 furnacePlaceRetryCooldownUntil,这里据此挪窝换地重试。
+                if (hasFurnaceItem) {
+                    personality.carryingFurnaceForReuse = false; // 解 tryPlaceFurnace 放置闸
+                    if (player.getEntityWorld().getTime() < personality.furnacePlaceRetryCooldownUntil) {
+                        setExplore(personality, player);
+                        com.maohi.fakeplayer.TaskLogger.log(player, "iron_relocate_furnace", "reason", "no_place_pos");
+                    } else {
+                        PhaseUtil.setIdle(personality, player, 60); // 驻留让 tryPlaceFurnace 落地复用/新建
+                        com.maohi.fakeplayer.TaskLogger.log(player, "iron_place_own_furnace", "cobble", cobbleCount);
+                    }
                     return;
                 }
                 // 标志为真但背包已无炉 item(异常/丢失)→ 清掉陈旧标志,落到下面正常现合。
-                if (personality.carryingFurnaceForReuse && !hasFurnaceItem) {
+                if (personality.carryingFurnaceForReuse) {
                     personality.carryingFurnaceForReuse = false;
                 }
                 BlockPos workbench = findCraftingTable(world, player.getBlockPos(), WORKBENCH_SCAN_RADIUS);
@@ -801,6 +817,22 @@ public final class PhaseIronAge implements Phase {
                     "furnace", saFurnace, "distSq", (int) saDistSq);
                 return true;
             }
+        }
+
+        // V5.155: 有熔炉 item 却没放出来 → 放它(放不下则挪窝),别走 SA-P4 空 park 等一个永不发生的 craft。
+        //   实测 Noah123: hasFurnaceItem=true + furnaceNearby=false → SA-P4 park 记 stone_smelt_craft_furnace 100%
+        //   IDLE 数分钟,但 autoCraftStoneTools step8 要 !hasFurnace、有 item 不会再合 → 永等。改为主动放置,
+        //   放不下(BlockPlacer no_place_pos 武装冷却)就 setExplore 换平地重试。
+        if (d.hasFurnaceItem) {
+            personality.carryingFurnaceForReuse = false;
+            if (player.getEntityWorld().getTime() < personality.furnacePlaceRetryCooldownUntil) {
+                PhaseUtil.setExplore(personality, player);
+                com.maohi.fakeplayer.TaskLogger.log(player, "stone_smelt_relocate_furnace", "reason", "no_place_pos");
+            } else {
+                PhaseUtil.setIdle(personality, player, 100);
+                com.maohi.fakeplayer.TaskLogger.log(player, "stone_smelt_place_furnace", "cobble", d.cobbleCount);
+            }
+            return true;
         }
 
         // 无熔炉 → 优先级: 能建就建 > 共享炉(escape hatch) > 回营 > 就地自建台。

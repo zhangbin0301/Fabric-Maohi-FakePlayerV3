@@ -365,6 +365,9 @@ public class Personality {
 	// planA P-2: 工作台放置失败计数与冷却。
 	public int tablePlaceFailCount = 0;
 	public long tablePlaceRetryCooldownUntil = 0L;
+	// V5.155: 熔炉放置失败(四邻无空位/被围/坏点)挪窝冷却,对称 tablePlaceRetryCooldownUntil。
+	//   tryPlaceFurnace 在 no_place_pos 时武装;smelt 建炉分支据此 setExplore 换地重试,根治「揣炉却放不下」死循环。
+	public long furnacePlaceRetryCooldownUntil = 0L;
 	// planA P-1 诊断:tryPlaceCraftingTable 节流日志锚点(避免每 tick 刷屏)。
 	public transient long lastTablePlaceDiagAt = 0L;
 	// V5.45 OPT: no_inv_table 是木器时代常态,单独延长节流到 5min(6000 tick),

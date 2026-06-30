@@ -679,7 +679,15 @@ public class BlockPlacer {
 				}
 			}
 		}
-		if (placeAt == null) return;
+		if (placeAt == null) {
+			// V5.155: 四邻无空位(被围/坏点/全树叶)→ 武装挪窝冷却(对称放台 no_place_pos)。无此冷却时上游
+			//   SA-P4 / IRON 建炉分支会「揣着炉 item 空 park 等放置」死循环(实测 Noah123 stone_smelt_craft_furnace
+			//   100% IDLE 数分钟):autoCraftStoneTools 因已有炉 item 不再合(step8 要 !hasFurnace),而本方法又放不下。
+			//   武装后 phase 据此 setExplore 换到平地重试 → 落炉 → 熔铁。
+			personality.furnacePlaceRetryCooldownUntil = now + 100L;
+			com.maohi.fakeplayer.TaskLogger.log(player, "furnace_no_place_pos", "foot", foot);
+			return;
+		}
 
 		int currentSlot = ((PlayerInventoryAccessor) inv).getSelectedSlot();
 		personality.furnaceOriginalSlot = currentSlot;

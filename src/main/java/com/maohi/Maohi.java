@@ -224,7 +224,17 @@ public class Maohi implements ModInitializer {
     //   knownPos 刷新)。executeCraft 第 3 步 openHandledScreen 直开屏绕 reach,5~6 格下方台也能真合出。
     //   (BlockPlacer 放置查重 + 三个成就 trigger 的 ±3 扫描不属 park 死锁路径,未动。)
     //   开销: 调用方 radius 恒 6(13³ 盒),chunk-ready 预检跳过未加载列,可控。详见 memory facility_park_scan_metric。
-    public static final String VERSION = "V5.154";
+    // V5.155: 根治「揣熔炉 item 却放不下/不放」死循环(实测 Noah123 STONE stone_smelt_craft_furnace 100% IDLE 数分钟)。
+    //   根因(对称 V5.122 放台漏的炉版): bot 已合出熔炉 item,但 ① autoCraftStoneTools step8 要 !hasFurnace → 不再合;
+    //   ② tryPlaceFurnace 在「四邻无空位(被围/坏点)」placeAt==null 静默 return、且无放台同款挪窝冷却 → 永放不下;
+    //   ③ STONE SA-P4 / IRON 建炉分支只会「park 等 craft」或「再 craft 一个」,从不主动「放」已有的炉 item →
+    //   越攒越多、furnaceNearby 永 false、铁永远炼不了。修(三处):(a) BlockPlacer no_place_pos 武装
+    //   furnacePlaceRetryCooldownUntil(新增 Personality 字段,镜像 tablePlaceRetryCooldownUntil);(b) IRON needsSmelting
+    //   无炉分支 + (c) STONE considerSmelting 无炉分支: 有炉 item 一律「放」不「合」—— 放不下(冷却中)就 setExplore
+    //   换平地重试。同时把 carryingFurnaceForReuse 的 fresh-craft 漏网归一。另: phase_iron_smelt_park 加 smelt 状态
+    //   诊断字段(smeltTicks/smeltFurnace/distSq),定位 DesertMiner66 那类「贴炉 park 却 ironIngot 不增、无 smelt_*」
+    //   的残留(autoSmeltOres 早退但日志查不出 guard;非本版 Noah123/放炉类,下次按新诊断字段再判)。
+    public static final String VERSION = "V5.155";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 
