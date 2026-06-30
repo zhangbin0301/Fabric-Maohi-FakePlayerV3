@@ -216,6 +216,39 @@ public final class BlockScanCache {
 	}
 
 	/**
+	 * V5.158: 「下挖前开天眼大扫」专用 —— 一次/会话(strip-mine 发起时调一次,非每 tick),用于让假人
+	 *   把下挖楼梯朝最近的铁矿脉方向斜下。与 {@link #findNearestBlock} 的区别:
+	 *     - **绕开** 24 格 maxRadius 上限(那是给"每 tick 找眼前矿"用的);本方法允许 32~48 的更大视野。
+	 *     - 仍复用同一套安全机制: scanShells 同心壳早退 + per-pos chunk-ready 闸 + 30s 缓存。
+	 *   半径 MSPT 自适应(用户要的"卡顿自动降级"): mspt≤40 → radius(默认 48); mspt≤55 → 40; 否则 32 地板。
+	 *   30s 缓存(key 含 8 格区域 + type)让错峰下挖的临近假人复用同一次大扫结果,进一步摊薄开销。
+	 *   注: 调用方通常传"合成坐标"(botX, 铁层 Y, botZ),让 y 向扫描(yMin=-20,yMax=+2)罩住铁层。
+	 */
+	public BlockPos findNearestBlockBig(MinecraftServer server, ServerWorld world, BlockPos pos, int radius, String type) {
+		double mspt = server.getAverageTickTime();
+		int maxRadius;
+		if (mspt <= 40) maxRadius = radius;       // 流畅: 用满请求半径(默认 48)
+		else if (mspt <= 55) maxRadius = 40;      // 轻卡: 降到 40
+		else maxRadius = 32;                       // 卡顿地板: 32(用户指定)
+		if (radius > maxRadius) radius = maxRadius;
+
+		// V5.158: 大扫缓存 key 加 "#big" 后缀,与每 tick 的常规 24 格扫(同 type)隔离,互不污染;
+		//   错峰下挖的临近假人之间仍复用同一次大扫(它们都走 "#big")。scanShells 仍按真 type 匹配。
+		String cacheKey = key(pos, type + "#big");
+		Object[] cached = cache.get(cacheKey);
+		if (cached != null && System.currentTimeMillis() < (long) cached[1]) {
+			return (BlockPos) cached[0];
+		}
+
+		// 大扫只用于矿石(iron_ore 等),y 向沿用矿石区间(脚下 -20 ~ +2)。
+		int yMin = -20, yMax = 2;
+		BlockPos result = scanShells(world, pos, radius, yMin, yMax, type, Collections.emptySet());
+		long ttl = result != null ? CACHE_TTL_MS : 3_000L;
+		cache.put(cacheKey, new Object[]{result, System.currentTimeMillis() + ttl});
+		return result;
+	}
+
+	/**
 	 * 失效指定位置 + 类型的缓存(假人挖完该方块后调用)
 	 */
 	public void invalidate(BlockPos pos, String type) {

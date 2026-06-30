@@ -1139,6 +1139,15 @@ prepareAndSpawnVirtualPlayer();
 	}
 
 	/**
+	 * V5.158: 「下挖前开天眼大扫」passthrough —— 一次/会话,绕开 24 格上限(允许 32~48),
+	 *   MSPT 自适应 + 30s 缓存在 {@link com.maohi.fakeplayer.tick.BlockScanCache#findNearestBlockBig} 内。
+	 *   供 StripMineBehavior.aimIronDescend 在铁层合成坐标处找最近铁矿脉、瞄准下挖方向。
+	 */
+	public BlockPos findNearestBlockBig(net.minecraft.server.world.ServerWorld world, BlockPos pos, int radius, String type) {
+		return blockScanCache.findNearestBlockBig(server, world, pos, radius, type);
+	}
+
+	/**
 	 * V5.40 多 bot 目标去重:收集除 self 外所有 bot 的 taskTarget,让 BlockScanCache 跳过这些位置。
 	 *   原因:cache key 是 8×8×8 cube,落在同 cube 的 bot(spawn 附近常见)共享同一答案 → 全砍同一棵树。
 	 *   收集开销:O(N bots) per query,N=100 时仍是微秒级,远低于一次 BlockScan。

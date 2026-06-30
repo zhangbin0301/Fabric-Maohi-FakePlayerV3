@@ -248,7 +248,16 @@ public class Maohi implements ModInitializer {
     //   服务器重启后 server.getTicks() 归零,持久化的旧截止变「远在未来」→ 重启时正在烧的假人会空等数十分钟。
     //   tickSmelting 加钳: 到截止 OR 截止离谱地远(>300 tick,远超单炉上限 240)→ 都收炉(后者=重启失效,
     //   炉在停机期间早烧好了)。craftingTicks 是相对倒计时不受影响(无此问题)。
-    public static final String VERSION = "V5.157";
+    // V5.158: 「精准奔铁」三件套 —— 缩短攒满 24 锭铁甲的挖矿时间(挖矿端,接 V5.156 熔炼端总根因之后)。
+    //   (A) 铁阶段 strip-mine 由泛扫 "ore"(Y15 老被又大又多的煤/铜矿脉勾走)改为专扫 "iron_ore",扫不到
+    //       再回落泛 ore(顺路捡煤/铜燃料+圆石)。一处改 StripMineBehavior.tickLayer 覆盖所有铁挖(石/铁器共用)。
+    //   (B) 接上死通道 IRON_DEPOSIT 共享地标: 挖到铁即 report(±5 模糊+60s/chunk 限频内建);下挖发起时
+    //       aimIronDescend 把 1:1 楼梯方向(stripMineFacing)朝最可能有铁的方向瞄准 —— ① 舰队共享图已知铁区
+    //       (≤ironAimMaxDist=96) ② 开天眼大扫(ironDescendScanRadius=48,一次/会话,findNearestBlockBig 内
+    //       MSPT 自适应 48→40→32) ③ 洞穴兜底。仅铁目标调,钻石/圆石不动。
+    //   (C) 洞穴优先基本已有,A 把 tickLayer 优先级理顺成 iron_ore→泛 ore→洞穴→随机。
+    //   不改 matchesType / 不动熔炼链(V5.156/157) / 不动钻石·圆石路径,改动收敛在「铁的找矿方向」。
+    public static final String VERSION = "V5.158";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

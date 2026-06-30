@@ -423,6 +423,8 @@ public final class PhaseIronAge implements Phase {
                     personality.stripMineConsecutiveFails = 0;
                     personality.stoneStableCyclesNoIron = 0;
                     personality.currentTask = TaskType.STRIP_MINE;
+                    // V5.158: 铁目标 → 把下挖楼梯朝最可能有铁的方向瞄准(共享图/开天眼大扫/洞穴)
+                    com.maohi.fakeplayer.ai.StripMineBehavior.aimIronDescend(player, personality);
                     com.maohi.fakeplayer.TaskLogger.log(player, "stripmine_enter",
                         "goal", p41PickResupply ? "iron_resupply" : "armor_iron",
                         "startY", personality.stripMineStartY,
@@ -598,6 +600,8 @@ public final class PhaseIronAge implements Phase {
         personality.stripMineTunnelLen = 0;
         personality.stripMineConsecutiveFails = 0;
         personality.currentTask = TaskType.STRIP_MINE;
+        // V5.158: 铁目标 → 瞄准下挖(共享图/开天眼大扫/洞穴)
+        com.maohi.fakeplayer.ai.StripMineBehavior.aimIronDescend(player, personality);
         com.maohi.fakeplayer.TaskLogger.log(player, "stripmine_enter",
             "goal", "ore_descend", "startY", personality.stripMineStartY,
             "targetY", com.maohi.fakeplayer.ai.cognition.ResourceKnowledge.Resource.IRON.digTargetY,

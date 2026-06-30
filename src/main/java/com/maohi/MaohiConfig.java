@@ -88,6 +88,13 @@ public class MaohiConfig {
     public int stripMineCooldownMinutes = 10;        // V5.72: 危险退出(血量/岩浆/触底/无镐)后冷却,30→10
     public int stripMineBenignCooldownMinutes = 2;   // V5.72: 无害退出(没找到铁 max_len/被挡)后短冷却,快速换地方重试
     public boolean stripMineRequireTorches = false;  // 是否需要火把才下去(Peaceful 关掉)
+    // V5.158: 铁「精准奔铁」—— 下挖前把楼梯方向朝最可能有铁的方向瞄准(StripMineBehavior.aimIronDescend)。
+    //   ironDescendScanRadius: 下挖前「开天眼大扫」找最近铁矿脉的半径(0=关闭,纯靠舰队共享图)。
+    //     一次/会话(非每 tick),且 MSPT 高时在 BlockScanCache.findNearestBlockBig 内自动降级 48→40→32。
+    //   ironAimMaxDist: 朝「舰队共享图已知铁区」瞄准下挖的最大水平距(超出则不瞄,避免奔向太远的铁脉空跑)。
+    //   注: 与 stripMine* 同款 —— 仅代码默认值,不从 maohi.properties 解析。
+    public int ironDescendScanRadius = 48;
+    public int ironAimMaxDist = 96;
 
     // ===== V5.87 spawn 错峰节流 (削 spawn 爆发期 chunk-save 序列化卡顿) =====
     /** 两次假人 spawn 之间的最小冷却(ms)。10s 太短:vanilla 滚动平均 MSPT 还没反映上一个 spawn 的

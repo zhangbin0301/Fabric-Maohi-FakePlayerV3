@@ -245,13 +245,31 @@ public class StripMineBehavior {
             oreScanType = "diamond_ore";
         } else if (hasMinedEnoughRawIron(player) && countCoal(player) < COAL_FUEL_TARGET) {
             oreScanType = "coal_ore";
-        } else {
+        } else if (pers.stripMineForCobble) {
+            // V5.158: 圆石目标用木镐采不动铁,专扫铁只会空破铁矿(无掉落);挖任意矿/石头取圆石即可。
             oreScanType = "ore";
+        } else {
+            // V5.158 (A): 铁目标专扫 iron_ore —— 原泛 "ore" 在 Y15 老被又大又多的煤/铜矿脉勾走,
+            //   真正奔铁的时间少。专扫铁直奔铁脉;扫不到铁再回落泛 ore(见下),顺路捡煤/铜燃料+圆石搭柱。
+            oreScanType = "iron_ore";
         }
         BlockPos orePos = mgr != null ? mgr.findNearestBlock(world, pos, 24, oreScanType, player.getUuid()) : null;
+        // V5.158 (B1): foundIronOre 仅当「铁专扫」本身命中 —— 回落泛 ore 命中的非铁块不能误报成 IRON_DEPOSIT。
+        boolean foundIronOre = orePos != null && "iron_ore".equals(oreScanType);
+        if (orePos == null && "iron_ore".equals(oreScanType) && mgr != null) {
+            // V5.158 (A): 24 格内没铁 → 回落泛 "ore" 别空转(iron_ore 负结果有 3s 缓存,不会每 tick 重扫铁)。
+            orePos = mgr.findNearestBlock(world, pos, 24, "ore", player.getUuid());
+        }
         if (orePos != null) {
             double dist = pos.getSquaredDistance(orePos);
             if (dist <= 16.0) { // 4 blocks
+                // V5.158 (B1): 真挖到铁矿那一刻上报舰队共享图(±5 模糊 + 60s/chunk 限频已内建,不刷爆),
+                //   让其它假人下挖时朝这片铁区瞄准(aimIronDescend 查询侧)。仅「铁专扫」命中时报。
+                if (foundIronOre) {
+                    com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().report(
+                        com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType.IRON_DEPOSIT,
+                        orePos, player.getUuid());
+                }
                 mineBlock(player, world, orePos);
                 pers.stoneStableCyclesNoIron = 0; // 重置
             } else {
@@ -440,6 +458,78 @@ public class StripMineBehavior {
             if (!world.getBlockState(pos).isAir()) return true; // 验证:pos 真从空气变成了固体方块
         }
         return false;   // 所有面都放不上 → 如实返回失败
+    }
+
+    /**
+     * V5.158 (B2/C): 铁目标 strip-mine 发起时,把下挖楼梯方向(stripMineFacing)朝「最可能有铁的方向」瞄准。
+     *   下挖是 1:1 楼梯(tickDescend `pos.offset(facing).down()`),设好 facing 整条楼梯就斜着奔过去,几乎零成本。
+     *   优先级:
+     *     ① 舰队共享图最近 IRON_DEPOSIT(别的假人挖到过铁的区,水平距 ≤ cfg.ironAimMaxDist)→ 朝它。
+     *     ② 否则开天眼大扫(cfg.ironDescendScanRadius>0):在铁层合成坐标找最近 iron_ore(一次/会话,
+     *        MSPT 自适应 48→40→32)→ 朝它。
+     *     ③ 否则朝最近洞穴(铁矿在洞壁裸露;地表洞穴少,作兜底)。
+     *     ④ 都没有 → 保留默认 facing(原行为)。
+     *   仅铁目标调用(钻石/圆石不调)。不 claim 共享节点(铁区可多人共用,同 FURNACE/TABLE 共享语义)。
+     */
+    public static void aimIronDescend(ServerPlayerEntity player, Personality pers) {
+        MaohiConfig cfg = MaohiConfig.getInstance();
+        BlockPos pos = player.getBlockPos();
+        ServerWorld world = player.getEntityWorld();
+
+        // ① 共享图: 别的假人挖到过铁的区(查询侧不 claim,铁区可多人共用)
+        com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkNode node =
+            com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().queryNearest(
+                pos, player.getUuid(),
+                com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType.IRON_DEPOSIT);
+        int aimMaxDist = cfg != null ? cfg.ironAimMaxDist : 96;
+        if (node != null) {
+            int dx = node.approxPos.getX() - pos.getX();
+            int dz = node.approxPos.getZ() - pos.getZ();
+            double horizDist = Math.sqrt((double) dx * dx + (double) dz * dz);
+            if (horizDist <= aimMaxDist && (dx != 0 || dz != 0)) {
+                pers.stripMineFacing = dominantFacing(dx, dz);
+                TaskLogger.log(player, "stripmine_aim", "src", "peer",
+                    "facing", pers.stripMineFacing, "dist", (int) horizDist);
+                return;
+            }
+        }
+
+        // ② 开天眼大扫(一次/会话,绕 24 格上限 + MSPT 自适应)
+        int scanRadius = cfg != null ? cfg.ironDescendScanRadius : 48;
+        if (scanRadius > 0) {
+            com.maohi.fakeplayer.VirtualPlayerManager mgr = Maohi.getVirtualPlayerManager();
+            int ironY = com.maohi.fakeplayer.ai.cognition.ResourceKnowledge.Resource.IRON.digTargetY;
+            BlockPos synthPos = new BlockPos(pos.getX(), ironY, pos.getZ());
+            BlockPos hit = mgr != null ? mgr.findNearestBlockBig(world, synthPos, scanRadius, "iron_ore") : null;
+            if (hit != null) {
+                int dx = hit.getX() - pos.getX();
+                int dz = hit.getZ() - pos.getZ();
+                if (dx != 0 || dz != 0) {
+                    pers.stripMineFacing = dominantFacing(dx, dz);
+                    TaskLogger.log(player, "stripmine_aim", "src", "scan",
+                        "facing", pers.stripMineFacing,
+                        "dist", (int) Math.sqrt((double) dx * dx + (double) dz * dz));
+                    return;
+                }
+            }
+        }
+
+        // ③ 洞穴兜底(地表洞穴少,价值有限,仅作最后兜底)
+        Direction caveDir = findCaveDirection(world, pos, 16);
+        if (caveDir != null) {
+            pers.stripMineFacing = caveDir;
+            TaskLogger.log(player, "stripmine_aim", "src", "cave", "facing", caveDir);
+            return;
+        }
+        // ④ 都没有: 保留默认 facing(不记 log,避免噪声)
+    }
+
+    /** V5.158: 由 (dx,dz) 取主轴 Direction(楼梯瞄准用;与 tickLayer ore-veer 同款 max(|dx|,|dz|) 取主轴)。 */
+    private static Direction dominantFacing(int dx, int dz) {
+        if (Math.abs(dx) >= Math.abs(dz)) {
+            return dx >= 0 ? Direction.EAST : Direction.WEST;
+        }
+        return dz >= 0 ? Direction.SOUTH : Direction.NORTH;
     }
 
     /**

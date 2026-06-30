@@ -312,6 +312,8 @@ public final class PhaseStoneAge implements Phase {
                     personality.stripMineStartY = player.getBlockY();
                     personality.stripMineTunnelLen = 0;
                     personality.currentTask = TaskType.STRIP_MINE;
+                    // V5.158: 铁目标 → 瞄准下挖(共享图/开天眼大扫/洞穴)
+                    com.maohi.fakeplayer.ai.StripMineBehavior.aimIronDescend(player, personality);
                     com.maohi.fakeplayer.TaskLogger.log(player, "stripmine_enter",
                         "goal", "iron", "startY", personality.stripMineStartY,
                         "pickDur", d.maxStonePickaxeRemainingDurability);
