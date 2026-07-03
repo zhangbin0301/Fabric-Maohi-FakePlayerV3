@@ -261,7 +261,12 @@ public class Maohi implements ModInitializer {
     //   (smeltingFurnacePos==target),放弃回收不拆。补 V5.158 安排闸 smelt 守卫之外的窄竞态(安排时没熔、
     //   回收任务多 tick 推进期间 autoSmeltOres 又起一炉 → 旧逻辑仍会拆到新熔)。根治 GoldenSleepy 那类
     //   「smelt_start → 拆炉 → smelt_fail furnace_destroyed → 丢料 → 再建再拆」自毁循环的最后一道缝。
-    public static final String VERSION = "V5.159";
+    // V5.160: 「假人把挖到的铁当垃圾扔了」总根因 —— InventorySimulator.cleanupJunk 的 JUNK_ITEM_IDS
+    //   竟含 raw_iron / raw_copper。背包被圆石(实测囤 400~635!)塞满触发清理时,把刚挖的生铁当杂物 dropItem 掉,
+    //   釜底抽薪 → 6~16h 假人仍铁锭≤3、全裸。修:①矿物移出清理表(生铁/生铜永不丢);②真塞死(空位≤2)必清、
+    //   不再受 3% 概率节流 —— 否则背包塞满时合成产物(木板/熔炉/工具)无处存放静默丢失 → 无限重合死循环
+    //   (实测 WardenEye 连合 oak_planks 2h+、planks 恒 0)。
+    public static final String VERSION = "V5.160";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

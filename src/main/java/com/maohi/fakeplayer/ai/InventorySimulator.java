@@ -159,11 +159,14 @@ public class InventorySimulator {
 	}
 
 	// NOTE: 可丢弃的低价值物品 ID — 真人会在背包快满时主动清理这些杂物
+	// V5.160: 移除 raw_iron / raw_copper —— 生铁/生铜是要冶炼的资源,绝不是杂物!背包被圆石塞满触发
+	//   cleanupJunk 时会把刚挖到的生铁当垃圾丢掉 → 铁器进度被自己扔铁料釜底抽薪(实测 6~16h 假人仍
+	//   铁锭≤3、全裸)。矿物永不入清理表;只留真·低价值的石头变体/腐肉等。
 	private static final java.util.Set<String> JUNK_ITEM_IDS = java.util.Set.of(
 		"cobblestone", "cobbled_deepslate", "dirt", "gravel", "sand",
 		"andesite", "granite", "diorite", "netherrack", "tuff",
 		"rotten_flesh", "spider_eye", "poisonous_potato",
-		"clay_ball", "flint", "bone", "calcite", "raw_copper", "raw_iron"
+		"clay_ball", "flint", "bone", "calcite"
 	);
 
 	/**
@@ -187,8 +190,10 @@ public class InventorySimulator {
 		// 背包还有空间时不清理（真人不会提前清理）
 		if (emptySlots > 5) return false;
 
-		// 3% 概率触发清理行为（防止每 tick 都丢东西，一眼假）
-		if (ThreadLocalRandom.current().nextInt(100) >= 3) return false;
+		// V5.160: 快满(≤5)保持 3% 环境概率(拟真,不一眼假);但真塞死(≤2 空位)必清 ——
+		//   否则背包被圆石/石头变体堆满时,合成产物(木板/熔炉/工具)无处存放会静默丢失 →
+		//   无限重合死循环(实测 WardenEye 连合 oak_planks 2h+,planks 永远 0)。
+		if (emptySlots > 2 && ThreadLocalRandom.current().nextInt(100) >= 3) return false;
 
 		int dropped = 0;
 		int maxDrop = 1 + ThreadLocalRandom.current().nextInt(3); // 每次最多丢 1~3 组
