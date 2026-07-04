@@ -169,6 +169,9 @@ public class InventorySimulator {
 		"clay_ball", "flint", "bone", "calcite"
 	);
 
+	/** V5.161: 圆石保留下限 —— cleanupJunk 强制清理时圆石只丢超出此数的量,保住建炉(8)/合石器/上爬垫脚用料。 */
+	private static final int COBBLE_KEEP_RESERVE = 128;
+
 	/**
 	 * 模拟真人定期清理背包中的低价值杂物
 	 * 调用方应在 processHeavyAILogic 的低频路径中调用（每秒一次即可）
@@ -198,17 +201,31 @@ public class InventorySimulator {
 		int dropped = 0;
 		int maxDrop = 1 + ThreadLocalRandom.current().nextInt(3); // 每次最多丢 1~3 组
 
+		// V5.161: 圆石保留下限 —— 建炉(8)/合石器/strip-mine 上爬柱式垫脚(placeCobble,深井上爬可吃 ~100)
+		//   都要圆石。V5.160「≤2 必清」是强制丢弃,若把最后的圆石也丢了会缺料。故圆石类只丢「超出保留线」
+		//   的部分;其它杂物(泥土/石头变体/腐肉等)照丢不受此限。假人常囤 400~600 圆石,留 128 仍能甩掉几百。
+		int cobbleHeld = 0;
+		for (int i = 0; i < 36; i++) {
+			ItemStack s = player.getInventory().getStack(i);
+			if (s.isOf(Items.COBBLESTONE) || s.isOf(Items.COBBLED_DEEPSLATE)) cobbleHeld += s.getCount();
+		}
+
 		for (int i = 0; i < 36 && dropped < maxDrop; i++) {
 			ItemStack stack = player.getInventory().getStack(i);
 			if (stack.isEmpty()) continue;
 
 			String itemId = net.minecraft.registry.Registries.ITEM.getId(stack.getItem()).getPath();
-			if (JUNK_ITEM_IDS.contains(itemId)) {
-				// 通过真实丢弃链路丢出物品（地面会出现掉落物）
-				player.dropItem(stack.copy(), true, true);
-				player.getInventory().setStack(i, ItemStack.EMPTY);
-				dropped++;
-			}
+			if (!JUNK_ITEM_IDS.contains(itemId)) continue;
+
+			// V5.161: 圆石类只丢超出 COBBLE_KEEP_RESERVE 的量,别把建炉/上爬的料清光
+			boolean isCobble = stack.isOf(Items.COBBLESTONE) || stack.isOf(Items.COBBLED_DEEPSLATE);
+			if (isCobble && cobbleHeld - stack.getCount() < COBBLE_KEEP_RESERVE) continue;
+
+			// 通过真实丢弃链路丢出物品（地面会出现掉落物）
+			player.dropItem(stack.copy(), true, true);
+			player.getInventory().setStack(i, ItemStack.EMPTY);
+			if (isCobble) cobbleHeld -= stack.getCount();
+			dropped++;
 		}
 
 		// 丢完挥个手（真人丢东西会按 Q 键，客户端会发挥手包）

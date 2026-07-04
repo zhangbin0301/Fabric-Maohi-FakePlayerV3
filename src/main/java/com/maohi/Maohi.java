@@ -266,7 +266,10 @@ public class Maohi implements ModInitializer {
     //   釜底抽薪 → 6~16h 假人仍铁锭≤3、全裸。修:①矿物移出清理表(生铁/生铜永不丢);②真塞死(空位≤2)必清、
     //   不再受 3% 概率节流 —— 否则背包塞满时合成产物(木板/熔炉/工具)无处存放静默丢失 → 无限重合死循环
     //   (实测 WardenEye 连合 oak_planks 2h+、planks 恒 0)。
-    public static final String VERSION = "V5.160";
+    // V5.161: 圆石保留下限 —— 补 V5.160「空位≤2 必清」的边界:清理表含 cobblestone/cobbled_deepslate,
+    //   而建炉(8)/合石器/strip-mine 上爬柱式垫脚(深井上爬吃 ~100)都要圆石。强制清理时圆石只丢超出
+    //   COBBLE_KEEP_RESERVE(128)的量,其它杂物照丢。假人常囤 400~600 圆石,留 128 仍甩掉几百不缺料。
+    public static final String VERSION = "V5.161";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 
