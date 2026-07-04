@@ -275,10 +275,14 @@ public class Maohi implements ModInitializer {
     // V5.163: 「贫瘠出生逃不出去」根治 —— 出生在无树敌对 biome 的木器假人被 anti-outlier 皮筋(explore_pull_home
     //   + clampRescueTarget,离 world spawn ≤explorationRadius)锁死在贫瘠区,连 escalation≥4 紧急传送也被钳回
     //   spawn 圈内 → 40min 0 木 0 成就(实测 4 只)。修:①配置 explorationRadius 200→350 全局止血;②代码根治:
-    //   Personality.homeAnchor(个人 leash 圆心覆盖)+ 木器假人卡无树带时定向弹射到「舰队共享逃生锚」(SharedResourceMap,
+    //   Personality.homeAnchor(个人 leash 圆心覆盖)+ 木器假人卡住时定向弹射到「舰队共享逃生锚」(SharedResourceMap,
     //   离 spawn ≤800、聚拢重锚、仍卡则 ratchet 外扩、砍到木头即锁),homeAnchor 让皮筋改绕新家、不再拽回贫瘠 spawn。
     //   仅 WOOD_AGE 触发(收敛);homeAnchor transient 不持久化(重启回落 spawn 重评估)。日志 biome_escape_rehome。
-    public static final String VERSION = "V5.163";
+    // V5.164: 修 V5.163 触发漏网 —— 逃生分支原 gate 在 isTreelessBiome,但那张表只含 desert/ocean/badlands/snowy/
+    //   peaks 等,漏掉 savanna/windswept_hills 等丘陵稀树 biome(实测卡点很可能就在这类)→ 逃生不触发。改用
+    //   「可观测症状」: WOOD_AGE + escalation≥4(本地阶梯已尽)+ 舰队无人报过 LOG_CLUSTER(全队都没找到木头=真贫瘠)。
+    //   biome 无关,catch 到所有「全队木荒」;若已有人找到木头则不盲逃、落 shared_resource teleport 送过去。
+    public static final String VERSION = "V5.164";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

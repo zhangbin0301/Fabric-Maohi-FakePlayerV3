@@ -2016,14 +2016,18 @@ prepareAndSpawnVirtualPlayer();
         boolean cooldownOk = nowMs - personality.lastStuckTeleportAt > 6_000L;
         net.minecraft.server.world.ServerWorld world = (net.minecraft.server.world.ServerWorld) p.getEntityWorld();
 
-        // V5.163: 贫瘠出生逃生 —— 木器假人卡在无树 biome、本地阶梯已尽(escalation≥4)、冷却到 + 无真人观察 →
-        //   定向弹射到舰队共享逃生锚(离 world spawn ≤800,聚拢重锚),把个人 leash 圆心搬到新家,逃出无树带找树。
-        //   仅 WOOD_AGE(还没 bootstrap 出木镐);优先于下面 home-clamp 的紧急 teleport(那个会被皮筋钳回贫瘠 spawn)。
+        // V5.163 (修订): 触发用「可观测症状」而非窄 biome 表 —— WOOD_AGE + escalation≥4(本地阶梯已尽) +
+        //   舰队无人报过 LOG_CLUSTER(=全队都没找到木头=真贫瘠) + 冷却 + 无真人观察。不再依赖 isTreelessBiome
+        //   (那表漏 savanna/windswept_hills 等丘陵稀树 biome,实测卡点很可能就在这类,依赖它会漏触发)。
+        //   LOG_CLUSTER 查询短路在便宜 gate 之后:只有 WOOD_AGE+escalation≥4+冷却+无观察 全过才查。
+        //   若已有人找到木头(fleetHasWood),不进本分支 → 落下面 home-clamp teleport 的 shared_resource 档送过去,不盲逃。
         if (personality.growthPhase == com.maohi.fakeplayer.GrowthPhase.WOOD_AGE
-                && treeless
                 && personality.forceExploreEscalation >= 4
                 && cooldownOk
-                && !com.maohi.fakeplayer.ai.MovementController.hasNearbyRealObserver(p, world, 32)) {
+                && !com.maohi.fakeplayer.ai.MovementController.hasNearbyRealObserver(p, world, 32)
+                && com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().queryNearest(
+                        p.getBlockPos(), p.getUuid(),
+                        com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType.LOG_CLUSTER) == null) {
             net.minecraft.util.math.BlockPos wSpawn = readWorldSpawnSafe(world);
             com.maohi.fakeplayer.ai.cognition.SharedResourceMap srm =
                 com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance();
