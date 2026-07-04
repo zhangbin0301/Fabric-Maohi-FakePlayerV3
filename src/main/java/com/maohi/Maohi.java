@@ -269,7 +269,10 @@ public class Maohi implements ModInitializer {
     // V5.161: 圆石保留下限 —— 补 V5.160「空位≤2 必清」的边界:清理表含 cobblestone/cobbled_deepslate,
     //   而建炉(8)/合石器/strip-mine 上爬柱式垫脚(深井上爬吃 ~100)都要圆石。强制清理时圆石只丢超出
     //   COBBLE_KEEP_RESERVE(128)的量,其它杂物照丢。假人常囤 400~600 圆石,留 128 仍甩掉几百不缺料。
-    public static final String VERSION = "V5.161";
+    // V5.162: 补 V5.161 死角 —— cleanupJunk 圆石保留线在「真塞死(空位≤2)」时从 128 降到 16(仍够建炉 8)。
+    //   否则 clog 全是圆石、总量卡在 128~192 时,128 保留会让「必清」路径一件都丢不掉 → 背包仍塞死、合成
+    //   产物继续静默丢失,defeats V5.160 腾空保证。逻辑复审自查发现(实际罕见,但把腾空保证做成可证明)。
+    public static final String VERSION = "V5.162";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

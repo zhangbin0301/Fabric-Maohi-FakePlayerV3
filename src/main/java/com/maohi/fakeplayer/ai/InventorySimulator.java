@@ -209,6 +209,10 @@ public class InventorySimulator {
 			ItemStack s = player.getInventory().getStack(i);
 			if (s.isOf(Items.COBBLESTONE) || s.isOf(Items.COBBLED_DEEPSLATE)) cobbleHeld += s.getCount();
 		}
+		// V5.162: 真塞死(≤2 空位)时保留线降到 16(仍够建炉 8)—— 优先腾空。否则用 128 常规保留。
+		//   杜绝死角:clog 全是圆石且总量卡在 128~192 之间时,常规 128 保留会让「必清」路径一件都丢不掉
+		//   → 背包仍塞死、合成产物继续静默丢失,defeats V5.160 的腾空保证。16 floor 保证总能腾出空间。
+		int cobbleReserve = emptySlots <= 2 ? 16 : COBBLE_KEEP_RESERVE;
 
 		for (int i = 0; i < 36 && dropped < maxDrop; i++) {
 			ItemStack stack = player.getInventory().getStack(i);
@@ -217,9 +221,9 @@ public class InventorySimulator {
 			String itemId = net.minecraft.registry.Registries.ITEM.getId(stack.getItem()).getPath();
 			if (!JUNK_ITEM_IDS.contains(itemId)) continue;
 
-			// V5.161: 圆石类只丢超出 COBBLE_KEEP_RESERVE 的量,别把建炉/上爬的料清光
+			// V5.161: 圆石类只丢超出保留线的量,别把建炉/上爬的料清光(保留线见上,V5.162 塞死时降到 16)
 			boolean isCobble = stack.isOf(Items.COBBLESTONE) || stack.isOf(Items.COBBLED_DEEPSLATE);
-			if (isCobble && cobbleHeld - stack.getCount() < COBBLE_KEEP_RESERVE) continue;
+			if (isCobble && cobbleHeld - stack.getCount() < cobbleReserve) continue;
 
 			// 通过真实丢弃链路丢出物品（地面会出现掉落物）
 			player.dropItem(stack.copy(), true, true);
