@@ -272,7 +272,13 @@ public class Maohi implements ModInitializer {
     // V5.162: 补 V5.161 死角 —— cleanupJunk 圆石保留线在「真塞死(空位≤2)」时从 128 降到 16(仍够建炉 8)。
     //   否则 clog 全是圆石、总量卡在 128~192 时,128 保留会让「必清」路径一件都丢不掉 → 背包仍塞死、合成
     //   产物继续静默丢失,defeats V5.160 腾空保证。逻辑复审自查发现(实际罕见,但把腾空保证做成可证明)。
-    public static final String VERSION = "V5.162";
+    // V5.163: 「贫瘠出生逃不出去」根治 —— 出生在无树敌对 biome 的木器假人被 anti-outlier 皮筋(explore_pull_home
+    //   + clampRescueTarget,离 world spawn ≤explorationRadius)锁死在贫瘠区,连 escalation≥4 紧急传送也被钳回
+    //   spawn 圈内 → 40min 0 木 0 成就(实测 4 只)。修:①配置 explorationRadius 200→350 全局止血;②代码根治:
+    //   Personality.homeAnchor(个人 leash 圆心覆盖)+ 木器假人卡无树带时定向弹射到「舰队共享逃生锚」(SharedResourceMap,
+    //   离 spawn ≤800、聚拢重锚、仍卡则 ratchet 外扩、砍到木头即锁),homeAnchor 让皮筋改绕新家、不再拽回贫瘠 spawn。
+    //   仅 WOOD_AGE 触发(收敛);homeAnchor transient 不持久化(重启回落 spawn 重评估)。日志 biome_escape_rehome。
+    public static final String VERSION = "V5.163";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

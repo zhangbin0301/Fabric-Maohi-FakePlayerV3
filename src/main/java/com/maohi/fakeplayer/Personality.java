@@ -436,6 +436,11 @@ public class Personality {
 	// 上次 stuck-teleport 时间(wall-clock ms)。10 分钟内不重复 teleport,避免 bug 循环触发。
 	public transient long lastStuckTeleportAt = 0L;
 
+	// V5.163: 个人 leash 圆心覆盖。null = 用 world spawn(默认)。贫瘠出生(无树 biome)的木器假人逃生
+	//   重锚到落点后填此值 → explore_pull_home / clampRescueTarget 不再把它拽回贫瘠 spawn。transient:
+	//   不持久化,重启回落 world spawn 重评估(会话态别持久化,同 V5.157 smeltingTicks 教训)。
+	public transient net.minecraft.util.math.BlockPos homeAnchor = null;
+
 	// V5.43.5 P-3.E Y 水位 guard 基准:bot 不允许低于此 y 时仍朝同高度/更低 target 走。
 	//   背景:这次 P22 测试发现 7 bots 全部从 spawn(y=63/64)在 30s 内沉到 y=34~51 被 kick。
 	//     根因不是 isDangerAhead 不严(那个 y-2 漏洞已在 P-3.E bug 修复),而是 setExplore 用

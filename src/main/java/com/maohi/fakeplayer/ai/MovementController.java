@@ -331,7 +331,7 @@ public class MovementController {
 							// V5.66 皮筋: 把 500~1500 远征落点收进当前阶段+维度允许范围
 							//   (主世界=距 spawn ≤ leashRadius, 异维=相对当前位置位移 ≤ leashRadius)。
 							//   早期 bot 被 clamp 后直接召回近 spawn 已生成区块, 不再制造新 chunk-gen 前沿。
-							long sinkPacked = clampRescueTarget(p, pers.growthPhase, farX, farZ);
+							long sinkPacked = clampRescueTarget(p, pers.growthPhase, farX, farZ, pers.homeAnchor);
 							farX = (int) (sinkPacked >> 32);
 							farZ = (int) (sinkPacked & 0xFFFFFFFFL);
 						// V5.49: 删除 getChunk(FULL, true) 同步强加载远征落点 chunk。
@@ -1333,12 +1333,21 @@ public class MovementController {
 	 */
 	public static long clampRescueTarget(ServerPlayerEntity bot, com.maohi.fakeplayer.GrowthPhase phase,
 			int targetX, int targetZ) {
+		return clampRescueTarget(bot, phase, targetX, targetZ, null);
+	}
+
+	/**
+	 * V5.163: 加 homeOverride —— 贫瘠出生逃生重锚过的假人(pers.homeAnchor 非空)传它作圆心,
+	 *   救援落点收进「距新家 ≤leashRadius」而非 world spawn,否则会被立刻拽回贫瘠 spawn。null=用 world spawn(原行为)。
+	 */
+	public static long clampRescueTarget(ServerPlayerEntity bot, com.maohi.fakeplayer.GrowthPhase phase,
+			int targetX, int targetZ, net.minecraft.util.math.BlockPos homeOverride) {
 		com.maohi.fakeplayer.GrowthPhase ph = (phase != null) ? phase : com.maohi.fakeplayer.GrowthPhase.WOOD_AGE;
 		int radius = leashRadius(ph);
 		ServerWorld world = bot.getEntityWorld();
 		int ox, oz;
 		if (world.getRegistryKey() == net.minecraft.world.World.OVERWORLD) {
-			BlockPos s = overworldSpawn(world);
+			BlockPos s = homeOverride != null ? homeOverride : overworldSpawn(world);
 			ox = s.getX();
 			oz = s.getZ();
 		} else {

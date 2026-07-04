@@ -251,6 +251,81 @@ public final class SharedResourceMap {
         return globalFlockYaw;
     }
 
+    // ==================== 贫瘠出生逃生锚 (V5.163) ====================
+    // 舰队共享的「逃出无树 spawn」目标锚点。首个贫瘠卡死的木器假人创建,其余复用 → 聚拢重锚到同一新家
+    //   (不四散、chunk-spread 可控)。仍卡则 ratchet 外扩、硬封顶 ≤maxDist;拿到木头即锁定。仿 flockYaw。
+
+    private volatile BlockPos barrenEscapeAnchor = null;
+    private volatile long barrenEscapeAnchorAt = 0L;
+    private volatile boolean barrenEscapeAnchorLocked = false;
+    private static final long BARREN_ANCHOR_TTL_MS = 10 * 60 * 1000L; // 10min 无人续用即失效,下次重新评估
+    private static final long BARREN_RATCHET_COOLDOWN_MS = 60_000L;    // 外扩最少间隔 60s
+    private static final int BARREN_RATCHET_STEP = 200;               // 每次外扩步长(格)
+
+    /**
+     * 获取/创建舰队共享逃生锚。首个调用者按「背离 spawn」方向选一个离 spawn 约 min(maxDist, 2*step) 格的锚点;
+     * TTL 内其余调用者复用同一锚(聚拢)。读取不刷新 TTL,10min 后自然失效重评估。
+     * 返回的 Y 取 worldSpawn.getY() 名义值,调用方落地时再 getSafeTopY 校正。
+     */
+    public BlockPos getOrCreateBarrenEscapeAnchor(BlockPos worldSpawn, BlockPos botPos, int maxDist) {
+        long now = System.currentTimeMillis();
+        BlockPos cur = barrenEscapeAnchor;
+        if (cur != null && now - barrenEscapeAnchorAt < BARREN_ANCHOR_TTL_MS) {
+            return cur;
+        }
+        double dx = botPos.getX() - worldSpawn.getX();
+        double dz = botPos.getZ() - worldSpawn.getZ();
+        double len = Math.sqrt(dx * dx + dz * dz);
+        double dirX, dirZ;
+        if (len < 1e-6) {
+            // bot 恰在 spawn:用坐标哈希定一个确定方向(不用 Math.random,保 resume 可复算)
+            double a = ((botPos.getX() * 31 + botPos.getZ()) % 360) * Math.PI / 180.0;
+            dirX = Math.cos(a);
+            dirZ = Math.sin(a);
+        } else {
+            dirX = dx / len;
+            dirZ = dz / len;
+        }
+        double dist = Math.min(maxDist, Math.max(BARREN_RATCHET_STEP * 2, len + BARREN_RATCHET_STEP));
+        BlockPos anchor = new BlockPos(
+            worldSpawn.getX() + (int) (dirX * dist),
+            worldSpawn.getY(),
+            worldSpawn.getZ() + (int) (dirZ * dist));
+        barrenEscapeAnchor = anchor;
+        barrenEscapeAnchorAt = now;
+        barrenEscapeAnchorLocked = false;
+        return anchor;
+    }
+
+    /** 锚点处仍全卡(冷却后再被贫瘠假人触发)→ 沿背离 spawn 方向外扩一步,硬封顶 ≤maxDist。已锁定/冷却内不动。 */
+    public BlockPos ratchetBarrenEscapeAnchor(BlockPos worldSpawn, int maxDist) {
+        long now = System.currentTimeMillis();
+        BlockPos cur = barrenEscapeAnchor;
+        if (cur == null || barrenEscapeAnchorLocked) return cur;
+        if (now - barrenEscapeAnchorAt < BARREN_RATCHET_COOLDOWN_MS) return cur;
+        double dx = cur.getX() - worldSpawn.getX();
+        double dz = cur.getZ() - worldSpawn.getZ();
+        double len = Math.sqrt(dx * dx + dz * dz);
+        double dirX = len < 1e-6 ? 1 : dx / len;
+        double dirZ = len < 1e-6 ? 0 : dz / len;
+        double newDist = Math.min(maxDist, len + BARREN_RATCHET_STEP);
+        BlockPos next = new BlockPos(
+            worldSpawn.getX() + (int) (dirX * newDist),
+            worldSpawn.getY(),
+            worldSpawn.getZ() + (int) (dirZ * newDist));
+        barrenEscapeAnchor = next;
+        barrenEscapeAnchorAt = now;
+        return next;
+    }
+
+    /** 任一假人在锚点附近拿到木头 → 锁定锚,不再 ratchet(这片有树 = 好家)。 */
+    public void markBarrenEscapeAnchorGood() {
+        if (barrenEscapeAnchor != null) {
+            barrenEscapeAnchorLocked = true;
+            barrenEscapeAnchorAt = System.currentTimeMillis();
+        }
+    }
+
     // ==================== 维护 ====================
 
     /** 清理过期节点，防内存泄漏（由 report() 触发，也可外部定期调用）。 */

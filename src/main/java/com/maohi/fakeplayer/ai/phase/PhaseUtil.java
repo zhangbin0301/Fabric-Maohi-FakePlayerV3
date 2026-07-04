@@ -72,6 +72,12 @@ public final class PhaseUtil {
         return cached != null ? cached : new BlockPos(0, 64, 0);
     }
 
+    /** V5.163: 个人 leash 圆心 —— pers.homeAnchor 非空(贫瘠出生逃生重锚过)则用它,否则用 world spawn。
+     *  贫瘠假人逃出无树带后 homeAnchor 指向新家,explore_pull_home / clampRescueTarget 用此不再拽它回贫瘠 spawn。 */
+    public static BlockPos effectiveHome(Personality pers, ServerWorld world) {
+        return (pers != null && pers.homeAnchor != null) ? pers.homeAnchor : getWorldSpawnCached(world);
+    }
+
     // ==================== Yaw 工具 ====================
 
     /** yaw 加权混合，取短角差避免 -180/+180 边界 wrap。weight∈[0,1] */
@@ -390,7 +396,8 @@ public final class PhaseUtil {
         }
 
         // V5.62: spawn 引力 + 切向 Flocking
-        BlockPos spawnPos = PhaseUtil.getWorldSpawnCached(player.getEntityWorld());
+        // V5.163: 圆心走 effectiveHome —— 贫瘠逃生重锚过的假人用新家(homeAnchor),否则 world spawn。
+        BlockPos spawnPos = PhaseUtil.effectiveHome(p, player.getEntityWorld());
         double dxToSpawn = spawnPos.getX() - player.getBlockX();
         double dzToSpawn = spawnPos.getZ() - player.getBlockZ();
         double distFromSpawn = Math.sqrt(dxToSpawn * dxToSpawn + dzToSpawn * dzToSpawn);

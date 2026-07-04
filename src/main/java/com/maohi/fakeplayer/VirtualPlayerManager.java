@@ -1995,13 +1995,14 @@ prepareAndSpawnVirtualPlayer();
         ThreadLocalRandom rng = ThreadLocalRandom.current();
         // V5.43 P-1.C 阶梯递增半径
         personality.forceExploreEscalation++;
+        boolean treeless = isTreelessBiome(p); // V5.163: 单次计算(可能读 biome,较贵),下面两处复用
         // V5.43 P-1.D / V5.62 缓和: 无树 biome 抬升起点,但不再直接跳到 4。
         //   原版 isTreelessBiome → escalation=4 → 立即 1500 格 teleport,木器期在异常地形
         //   (Y=131 高地表 / 小岛 / 沙漠) spawn 的 bot 第一次失败就被甩到极远 → 累积 outlier
         //   (实测 6h33m 漂到 2099 格)。V5.62 改成抬到 2: 仍能跳过慢爬阶梯,但需要至少
         //   2 次失败累积才触发 escalation>=4 的 teleport,给 setExplore (有 spawn 引力 +
         //   shared_resource 查询) 一个慢慢拉回的机会。
-        if (isTreelessBiome(p) && personality.forceExploreEscalation < 2) {
+        if (treeless && personality.forceExploreEscalation < 2) {
             personality.forceExploreEscalation = 2;
         }
         // V5.59 (teleport-rescue): forceExploreEscalation 已升至 4+ 表示 bot 至少经历 4 次远征 +
@@ -2014,6 +2015,52 @@ prepareAndSpawnVirtualPlayer();
         long nowMs = System.currentTimeMillis();
         boolean cooldownOk = nowMs - personality.lastStuckTeleportAt > 6_000L;
         net.minecraft.server.world.ServerWorld world = (net.minecraft.server.world.ServerWorld) p.getEntityWorld();
+
+        // V5.163: 贫瘠出生逃生 —— 木器假人卡在无树 biome、本地阶梯已尽(escalation≥4)、冷却到 + 无真人观察 →
+        //   定向弹射到舰队共享逃生锚(离 world spawn ≤800,聚拢重锚),把个人 leash 圆心搬到新家,逃出无树带找树。
+        //   仅 WOOD_AGE(还没 bootstrap 出木镐);优先于下面 home-clamp 的紧急 teleport(那个会被皮筋钳回贫瘠 spawn)。
+        if (personality.growthPhase == com.maohi.fakeplayer.GrowthPhase.WOOD_AGE
+                && treeless
+                && personality.forceExploreEscalation >= 4
+                && cooldownOk
+                && !com.maohi.fakeplayer.ai.MovementController.hasNearbyRealObserver(p, world, 32)) {
+            net.minecraft.util.math.BlockPos wSpawn = readWorldSpawnSafe(world);
+            com.maohi.fakeplayer.ai.cognition.SharedResourceMap srm =
+                com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance();
+            net.minecraft.util.math.BlockPos anchor =
+                srm.getOrCreateBarrenEscapeAnchor(wSpawn, p.getBlockPos(), 800);
+            // 已在锚附近还卡 → 这片也贫瘠,外扩一步(硬封顶 ≤800 在 ratchet 内)
+            if (p.getBlockPos().getSquaredDistance(anchor) < 100.0 * 100.0) {
+                net.minecraft.util.math.BlockPos next = srm.ratchetBarrenEscapeAnchor(wSpawn, 800);
+                if (next != null) anchor = next;
+            }
+            int fromX = (int) p.getX(), fromY = (int) p.getY(), fromZ = (int) p.getZ();
+            int ax = anchor.getX() + rng.nextInt(-15, 16);
+            int az = anchor.getZ() + rng.nextInt(-15, 16);
+            int aY = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(world, ax, az, 80);
+            double aNewY = aY + 1.0;
+            float aYaw = rng.nextFloat() * 360f - 180f;
+            p.refreshPositionAndAngles(ax + 0.5, aNewY, az + 0.5, aYaw, p.getPitch());
+            personality.homeAnchor = anchor;               // ★重锚:leash 圆心搬到新家,不再被拽回贫瘠 spawn
+            personality.lastStuckTeleportAt = nowMs;
+            personality.lagFreezeUntil = nowMs + 15_000L;
+            personality.heightFloorY = aNewY - 10.0;
+            personality.forceExploreEscalation = 0;
+            personality.taskFailCount = 0;
+            personality.lastFailedTarget = null;
+            personality.failedTargets.clear();
+            personality.currentTask = TaskType.IDLE;
+            personality.taskTarget = null;
+            personality.currentPath.clear();
+            double distSpawn = Math.sqrt(Math.pow(ax - wSpawn.getX(), 2) + Math.pow(az - wSpawn.getZ(), 2));
+            com.maohi.fakeplayer.TaskLogger.log(p, "biome_escape_rehome",
+                "from", String.format("(%d,%d,%d)", fromX, fromY, fromZ),
+                "to", String.format("(%d,%.1f,%d)", ax, aNewY, az),
+                "anchor", anchor,
+                "distFromSpawn", String.format("%.0f", distSpawn));
+            return;
+        }
+
         if (personality.forceExploreEscalation >= 4
                 && cooldownOk
                 && !com.maohi.fakeplayer.ai.MovementController.hasNearbyRealObserver(p, world, 32)) {
@@ -2107,7 +2154,7 @@ prepareAndSpawnVirtualPlayer();
             // V5.66 皮筋: 落点收进当前阶段+维度允许范围(主世界=距 spawn 半径, 异维=相对当前位置);
             //   皮筋优先于上面的避让推移(server 稳定 > 避让)。早期 bot 在此被直接召回 spawn 圆内。
             long tpPacked = com.maohi.fakeplayer.ai.MovementController.clampRescueTarget(
-                p, personality.growthPhase, targetX, targetZ);
+                p, personality.growthPhase, targetX, targetZ, personality.homeAnchor);
             targetX = (int) (tpPacked >> 32);
             targetZ = (int) (tpPacked & 0xFFFFFFFFL);
             actualDist = Math.sqrt(
@@ -2150,7 +2197,7 @@ prepareAndSpawnVirtualPlayer();
         int tz = p.getBlockZ() + dz;
         // V5.66 皮筋: force_explore 行走落点收进当前阶段+维度允许范围, 防止逐轮往外棘轮。
         long fePacked = com.maohi.fakeplayer.ai.MovementController.clampRescueTarget(
-            p, personality.growthPhase, tx, tz);
+            p, personality.growthPhase, tx, tz, personality.homeAnchor);
         tx = (int) (fePacked >> 32);
         tz = (int) (fePacked & 0xFFFFFFFFL);
         int ty = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(
@@ -3580,6 +3627,11 @@ prepareAndSpawnVirtualPlayer();
                     if (landmarkType != null) {
                         com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().report(
                             landmarkType, finalMinePos, p.getUuid());
+                        // V5.163: 逃生重锚过的假人在新家砍到木头 → 锁定舰队逃生锚(这片有树=好家,别再 ratchet 走)
+                        if (landmarkType == com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType.LOG_CLUSTER
+                                && personality.homeAnchor != null) {
+                            com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().markBarrenEscapeAnchorGood();
+                        }
                     }
                 }
 
