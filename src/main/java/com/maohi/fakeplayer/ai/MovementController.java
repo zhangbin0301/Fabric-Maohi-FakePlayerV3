@@ -1337,8 +1337,9 @@ public class MovementController {
 	}
 
 	/**
-	 * V5.163: 加 homeOverride —— 贫瘠出生逃生重锚过的假人(pers.homeAnchor 非空)传它作圆心,
-	 *   救援落点收进「距新家 ≤leashRadius」而非 world spawn,否则会被立刻拽回贫瘠 spawn。null=用 world spawn(原行为)。
+	 * V5.166: overworld 圆心跟随全队共用的 SharedResourceMap.fleetHome(贫瘠逃生整队搬家过则非 world spawn),
+	 *   救援落点收进「距舰队之家 ≤leashRadius」→ 全队聚拢不散。homeOverride 非空时优先(显式覆盖);
+	 *   否则 fleetHome;都无则 world spawn(原行为)。取代 V5.163 逐 bot homeAnchor。
 	 */
 	public static long clampRescueTarget(ServerPlayerEntity bot, com.maohi.fakeplayer.GrowthPhase phase,
 			int targetX, int targetZ, net.minecraft.util.math.BlockPos homeOverride) {
@@ -1347,7 +1348,8 @@ public class MovementController {
 		ServerWorld world = bot.getEntityWorld();
 		int ox, oz;
 		if (world.getRegistryKey() == net.minecraft.world.World.OVERWORLD) {
-			BlockPos s = homeOverride != null ? homeOverride : overworldSpawn(world);
+			BlockPos fh = com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().getFleetHome();
+			BlockPos s = homeOverride != null ? homeOverride : (fh != null ? fh : overworldSpawn(world));
 			ox = s.getX();
 			oz = s.getZ();
 		} else {

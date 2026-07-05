@@ -279,7 +279,22 @@ public class Maohi implements ModInitializer {
     //   (homeAnchor 从此永不被设=功能等同 V5.162)+ explorationRadius 350→200 紧密皮筋。homeAnchor/
     //   effectiveHome/clampRescueTarget-param/SharedResourceMap 逃生锚方法留作 dormant 死码(homeAnchor 恒 null
     //   → 全部回落 world spawn 原行为),下次用「不打散舰队」的保守设计再解贫瘠出生(见 memory)。
-    public static final String VERSION = "V5.165";
+    // V5.166: 贫瘠出生「整队搬家」v2 —— 重引贫瘠逃生,但根治 V5.163 覆辙。核心=舰队共用「唯一之家」:
+    //   全队共享 ONE SharedResourceMap.fleetHome,所有相位 leash 圆心(effectiveHome/clampRescueTarget)都指向它;
+    //   搬家时整队一起 teleport 到新 fleetHome ±15 一个小圈(不止 WOOD_AGE,无掉队) → 任意时刻只 ~1 个 chunk
+    //   前沿,结构性不可能散开。触发症状式(不靠 biome 名单): WOOD_AGE + escalation>=4 + 全队零 LOG_CLUSTER +
+    //   舰队级冷却过 + 无真人观察。半径恒 explorationRadius=200 不放大、fleetHome 距 spawn 硬封顶 1000(到顶切向
+    //   旋转不外推)、任一 bot 砍到第一根木头即 lockFleetHome 永久停搬。fleetHome transient(重启重评估)。
+    //   三大翻车根因结构性防止: (a)唯一圆心+硬封顶 (b)零 LOG_CLUSTER 才触发+砍木即锁 (c)整队一起搬=单前沿。
+    //   config: fleetRelocateEnabled/MaxDist=1000/Step=256/CooldownMin=3。V5.163 死码就地改造成 fleetHome API。
+    // V5.167: 「全员裸奔总凶」—— 熔炼半途走人丢锭。根因: needsSmelting = rawIron>0 && ingot<target,autoSmeltOres
+    //   把最后一份生铁摆进炉后 rawIron 归 0 → needsSmelting 立刻转 false → 假人当场走开 strip-mine → ~10s 后炉
+    //   烧好人已离炉 >5 格 → smelt_fail walked_away、铁锭留炉没收 → 永攒不够 24 锭铁甲 → P4.6 钻石闸永不放行
+    //   (实测 3.5h 全员裸奔、铁锭恒 1)。修(PhaseIronAge 主熔 + considerSmeltingFromStoneStable 两处同 bug):
+    //   ① needsSmelting 增「熔炼进行中(smeltingFurnacePos!=null || smeltingTicks>0)」项 → 料在炉里就死守炉边
+    //   park,直到 tickSmelting 收锭清状态才放行;② 补燃料前置加 rawIron>0 守卫(纯待收时料已在炉、别走开砍树);
+    //   ③ targetFurnace 记忆为空时回落 smeltingFurnacePos(熔炼中直接守那口炉)。
+    public static final String VERSION = "V5.167";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

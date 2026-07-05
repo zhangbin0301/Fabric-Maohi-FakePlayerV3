@@ -436,9 +436,9 @@ public class Personality {
 	// 上次 stuck-teleport 时间(wall-clock ms)。10 分钟内不重复 teleport,避免 bug 循环触发。
 	public transient long lastStuckTeleportAt = 0L;
 
-	// V5.163: 个人 leash 圆心覆盖。null = 用 world spawn(默认)。贫瘠出生(无树 biome)的木器假人逃生
-	//   重锚到落点后填此值 → explore_pull_home / clampRescueTarget 不再把它拽回贫瘠 spawn。transient:
-	//   不持久化,重启回落 world spawn 重评估(会话态别持久化,同 V5.157 smeltingTicks 教训)。
+	// V5.163: 个人 leash 圆心覆盖。【V5.166 起已弃用/恒 null】——「贫瘠出生逃生」改用舰队共用的
+	//   SharedResourceMap.fleetHome(唯一之家,全队聚拢不散),不再逐 bot 重锚。此字段永不被赋值,保留仅
+	//   为让 3 个 clampRescueTarget(...,homeAnchor) 调用点零改动编译(恒 null → 回落 fleetHome/world spawn)。
 	public transient net.minecraft.util.math.BlockPos homeAnchor = null;
 
 	// V5.43.5 P-3.E Y 水位 guard 基准:bot 不允许低于此 y 时仍朝同高度/更低 target 走。

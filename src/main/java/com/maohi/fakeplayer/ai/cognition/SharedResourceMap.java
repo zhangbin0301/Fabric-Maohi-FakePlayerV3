@@ -251,79 +251,60 @@ public final class SharedResourceMap {
         return globalFlockYaw;
     }
 
-    // ==================== 贫瘠出生逃生锚 (V5.163) ====================
-    // 舰队共享的「逃出无树 spawn」目标锚点。首个贫瘠卡死的木器假人创建,其余复用 → 聚拢重锚到同一新家
-    //   (不四散、chunk-spread 可控)。仍卡则 ratchet 外扩、硬封顶 ≤maxDist;拿到木头即锁定。仿 flockYaw。
+    // ==================== 舰队共享「唯一之家」 (V5.166) ====================
+    // 全队共用 ONE fleetHome。所有假人的 leash 圆心都指向它,搬家时整队一起 teleport 到同一小圈 →
+    //   任意时刻只有 ~1 个 chunk 前沿,结构性不可能散开(修 V5.163 逐 bot homeAnchor 分头漂散卡服的覆辙)。
+    //   半径恒不变(仍是 explorationRadius),只有圆心可迁;距 world spawn 硬封顶;砍到第一根木头即锁定不再搬。
+    //   仿 getOrUpdateFlockYaw 的 volatile 单例模式,全部主线程读写。
 
-    private volatile BlockPos barrenEscapeAnchor = null;
-    private volatile long barrenEscapeAnchorAt = 0L;
-    private volatile boolean barrenEscapeAnchorLocked = false;
-    private static final long BARREN_ANCHOR_TTL_MS = 10 * 60 * 1000L; // 10min 无人续用即失效,下次重新评估
-    private static final long BARREN_RATCHET_COOLDOWN_MS = 60_000L;    // 外扩最少间隔 60s
-    private static final int BARREN_RATCHET_STEP = 200;               // 每次外扩步长(格)
+    private volatile BlockPos fleetHome = null;          // null = 尚未设定 → 回落 world spawn
+    private volatile long fleetHomeAt = 0L;
+    private volatile boolean fleetHomeLocked = false;    // 砍到木头即 true,永久停搬(本 session)
+    private volatile long lastFleetRelocateAt = 0L;      // 上次整队搬家时刻(舰队级冷却)
 
-    /**
-     * 获取/创建舰队共享逃生锚。首个调用者按「背离 spawn」方向选一个离 spawn 约 min(maxDist, 2*step) 格的锚点;
-     * TTL 内其余调用者复用同一锚(聚拢)。读取不刷新 TTL,10min 后自然失效重评估。
-     * 返回的 Y 取 worldSpawn.getY() 名义值,调用方落地时再 getSafeTopY 校正。
-     */
-    public BlockPos getOrCreateBarrenEscapeAnchor(BlockPos worldSpawn, BlockPos botPos, int maxDist) {
-        long now = System.currentTimeMillis();
-        BlockPos cur = barrenEscapeAnchor;
-        if (cur != null && now - barrenEscapeAnchorAt < BARREN_ANCHOR_TTL_MS) {
-            return cur;
-        }
-        double dx = botPos.getX() - worldSpawn.getX();
-        double dz = botPos.getZ() - worldSpawn.getZ();
-        double len = Math.sqrt(dx * dx + dz * dz);
-        double dirX, dirZ;
-        if (len < 1e-6) {
-            // bot 恰在 spawn:用坐标哈希定一个确定方向(不用 Math.random,保 resume 可复算)
-            double a = ((botPos.getX() * 31 + botPos.getZ()) % 360) * Math.PI / 180.0;
-            dirX = Math.cos(a);
-            dirZ = Math.sin(a);
-        } else {
-            dirX = dx / len;
-            dirZ = dz / len;
-        }
-        double dist = Math.min(maxDist, Math.max(BARREN_RATCHET_STEP * 2, len + BARREN_RATCHET_STEP));
-        BlockPos anchor = new BlockPos(
-            worldSpawn.getX() + (int) (dirX * dist),
-            worldSpawn.getY(),
-            worldSpawn.getZ() + (int) (dirZ * dist));
-        barrenEscapeAnchor = anchor;
-        barrenEscapeAnchorAt = now;
-        barrenEscapeAnchorLocked = false;
-        return anchor;
+    /** 当前舰队之家;null = 尚未设定(调用方回落 world spawn)。仅 volatile 读,主线程调用。 */
+    public BlockPos getFleetHome() { return fleetHome; }
+
+    /** 是否已锁家(砍到木头后不再搬)。 */
+    public boolean isFleetHomeLocked() { return fleetHomeLocked; }
+
+    /** 舰队级搬家冷却是否已过(防止连锁 relocate,每 cooldownMs 最多搬一次)。 */
+    public boolean fleetRelocateCooldownElapsed(long cooldownMs) {
+        return System.currentTimeMillis() - lastFleetRelocateAt >= cooldownMs;
     }
 
-    /** 锚点处仍全卡(冷却后再被贫瘠假人触发)→ 沿背离 spawn 方向外扩一步,硬封顶 ≤maxDist。已锁定/冷却内不动。 */
-    public BlockPos ratchetBarrenEscapeAnchor(BlockPos worldSpawn, int maxDist) {
+    /**
+     * 计算并设置下一个舰队之家。base = 当前 home(无则 world spawn),沿 dirYaw 迈 step 格。
+     * 距 world spawn 硬封顶 maxDist —— 到顶则切向旋转 60°(不再外推),结构性防止无限外漂。
+     * yaw→(dx,dz) 用全码统一口径(见 setExplore / findBestYaw):dx=-sin(rad)*step, dz=cos(rad)*step。
+     * 返回名义 Y = worldSpawn.getY(),落地由调用方 getSafeSpawnY 校正。仅主线程调用。
+     */
+    public BlockPos advanceFleetHome(BlockPos worldSpawn, float dirYaw, int step, int maxDist) {
+        BlockPos base = (fleetHome != null) ? fleetHome : worldSpawn;
+        double rad = Math.toRadians(dirYaw);
+        int nx = base.getX() + (int) Math.round(-Math.sin(rad) * step);
+        int nz = base.getZ() + (int) Math.round(Math.cos(rad) * step);
+        double dx = nx - worldSpawn.getX(), dz = nz - worldSpawn.getZ();
+        double d = Math.sqrt(dx * dx + dz * dz);
+        if (d > maxDist) {                                   // 已到封顶圈 → 切向旋转,绝不外推
+            double bearing = Math.atan2(dz, dx) + Math.PI / 3.0;
+            nx = worldSpawn.getX() + (int) (Math.cos(bearing) * maxDist);
+            nz = worldSpawn.getZ() + (int) (Math.sin(bearing) * maxDist);
+        }
+        BlockPos next = new BlockPos(nx, worldSpawn.getY(), nz);
         long now = System.currentTimeMillis();
-        BlockPos cur = barrenEscapeAnchor;
-        if (cur == null || barrenEscapeAnchorLocked) return cur;
-        if (now - barrenEscapeAnchorAt < BARREN_RATCHET_COOLDOWN_MS) return cur;
-        double dx = cur.getX() - worldSpawn.getX();
-        double dz = cur.getZ() - worldSpawn.getZ();
-        double len = Math.sqrt(dx * dx + dz * dz);
-        double dirX = len < 1e-6 ? 1 : dx / len;
-        double dirZ = len < 1e-6 ? 0 : dz / len;
-        double newDist = Math.min(maxDist, len + BARREN_RATCHET_STEP);
-        BlockPos next = new BlockPos(
-            worldSpawn.getX() + (int) (dirX * newDist),
-            worldSpawn.getY(),
-            worldSpawn.getZ() + (int) (dirZ * newDist));
-        barrenEscapeAnchor = next;
-        barrenEscapeAnchorAt = now;
+        fleetHome = next;
+        fleetHomeAt = now;
+        fleetHomeLocked = false;
+        lastFleetRelocateAt = now;
         return next;
     }
 
-    /** 任一假人在锚点附近拿到木头 → 锁定锚,不再 ratchet(这片有树 = 好家)。 */
-    public void markBarrenEscapeAnchorGood() {
-        if (barrenEscapeAnchor != null) {
-            barrenEscapeAnchorLocked = true;
-            barrenEscapeAnchorAt = System.currentTimeMillis();
-        }
+    /** 任一假人在 home 附近砍到木头 → snap home 到木头 + 锁定,本 session 不再 relocate(这片有树 = 好家)。 */
+    public void lockFleetHome(BlockPos woodPos) {
+        fleetHome = new BlockPos(woodPos.getX(), woodPos.getY(), woodPos.getZ());
+        fleetHomeAt = System.currentTimeMillis();
+        fleetHomeLocked = true;
     }
 
     // ==================== 维护 ====================

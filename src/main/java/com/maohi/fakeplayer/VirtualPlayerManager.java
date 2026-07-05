@@ -2021,6 +2021,76 @@ prepareAndSpawnVirtualPlayer();
         //   皮筋、进阶后不清 → 铁器假人漂到离 spawn 1100+ 格;逃生假人在远处报 LOG_CLUSTER 又把别的假人 teleport
         //   过去 → 全队向外迁徙、多 chunk-gen 前沿 → c2me 崩。回退到 V5.162 的紧密皮筋(explorationRadius=200)。
         //   贫瘠出生问题另行用「不打散舰队」的保守设计再解(见 memory barren_spawn_leash_trap)。
+
+        // V5.166: 贫瘠出生「整队搬家」—— 唯一共享 fleetHome + 整队一起 teleport,根治 V5.163 逐 bot 漂散覆辙。
+        //   触发(症状式,不靠 biome 名单): WOOD_AGE + escalation>=4 + 全队零 LOG_CLUSTER(没人知道任何木头)
+        //   + 未锁家 + 舰队级冷却过 + 6s cooldown + 无真人观察。命中即整队搬到新 fleetHome ±15 一个小圈 →
+        //   只留 1 个 chunk 前沿(结构性不散);任一 bot 砍到第一根木头即 lockFleetHome 永久停搬。
+        //   半径恒 explorationRadius=200 不放大、距 spawn 硬封顶 1000(见 SharedResourceMap.advanceFleetHome)。
+        com.maohi.MaohiConfig fleetCfg = com.maohi.MaohiConfig.getInstance();
+        com.maohi.fakeplayer.ai.cognition.SharedResourceMap srmFleet =
+            com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance();
+        if (fleetCfg != null && fleetCfg.fleetRelocateEnabled
+                && personality.growthPhase == GrowthPhase.WOOD_AGE
+                && personality.forceExploreEscalation >= 4
+                && !srmFleet.isFleetHomeLocked()
+                && srmFleet.snapshotLandmarks(
+                       com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType.LOG_CLUSTER).isEmpty()
+                && srmFleet.fleetRelocateCooldownElapsed(fleetCfg.fleetRelocateCooldownMin * 60_000L)
+                && cooldownOk
+                && !com.maohi.fakeplayer.ai.MovementController.hasNearbyRealObserver(p, world, 32)) {
+
+            net.minecraft.util.math.BlockPos wSpawn = readWorldSpawnSafe(world);
+            // 方向: BiomePrior 朝最友好 forest 方向;-1(chunk 未就绪/平局,贫瘠冷启常见) → 背离 spawn/哈希
+            float dirYaw = com.maohi.fakeplayer.ai.cognition.BiomePrior.findBestYaw(
+                p, com.maohi.fakeplayer.ai.cognition.BiomePrior.ResourceType.LOG, rng);
+            if (dirYaw < 0f) {
+                double ax = p.getX() - wSpawn.getX(), az = p.getZ() - wSpawn.getZ();
+                if (ax * ax + az * az < 1.0) {
+                    // 恰在 spawn:坐标哈希定方向(不用 Math.random,保 resume 可复算)
+                    dirYaw = (float) (((p.getBlockX() * 31 + p.getBlockZ()) % 360 + 360) % 360);
+                } else {
+                    dirYaw = (float) Math.toDegrees(Math.atan2(-ax, az)); // 背离 spawn
+                }
+            }
+
+            net.minecraft.util.math.BlockPos newHome = srmFleet.advanceFleetHome(
+                wSpawn, dirYaw, fleetCfg.fleetRelocateStep, fleetCfg.fleetRelocateMaxDist);
+
+            // 整队一起搬: 所有主世界在线 bot teleport 到 newHome ±15 同一小圈(不止 WOOD_AGE → 无掉队者,
+            //   硬保证「单 chunk 前沿」不变量)。每 bot 复用现成 teleport reset(同 force_explore_teleport 尾部)。
+            int movedCount = 0;
+            for (UUID fuid : virtualPlayerUUIDs) {
+                Personality fp = playerPersonalities.get(fuid);
+                if (fp == null) continue;
+                ServerPlayerEntity fb = server.getPlayerManager().getPlayer(fuid);
+                if (fb == null) continue;
+                if (fb.getEntityWorld().getRegistryKey() != net.minecraft.world.World.OVERWORLD) continue;
+                int bx = newHome.getX() + rng.nextInt(-15, 16);
+                int bz = newHome.getZ() + rng.nextInt(-15, 16);
+                int by = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeSpawnY(world, bx, bz, 80);
+                double byd = by + 1.0;
+                fb.refreshPositionAndAngles(bx + 0.5, byd, bz + 0.5, rng.nextFloat() * 360f - 180f, fb.getPitch());
+                fp.lastStuckTeleportAt = nowMs;
+                fp.lagFreezeUntil = nowMs + 15_000L;
+                fp.heightFloorY = byd - 10.0;
+                fp.forceExploreEscalation = 0;
+                fp.taskFailCount = 0;
+                fp.lastFailedTarget = null;
+                fp.failedTargets.clear();
+                fp.currentTask = TaskType.IDLE;
+                fp.taskTarget = null;
+                fp.currentPath.clear();
+                movedCount++;
+            }
+            com.maohi.fakeplayer.TaskLogger.log(p, "fleet_relocate",
+                "home", String.format("(%d,%d,%d)", newHome.getX(), newHome.getY(), newHome.getZ()),
+                "dirYaw", (int) dirYaw,
+                "moved", movedCount,
+                "distFromSpawn", (int) Math.sqrt(newHome.getSquaredDistance(wSpawn)));
+            return;
+        }
+
         if (personality.forceExploreEscalation >= 4
                 && cooldownOk
                 && !com.maohi.fakeplayer.ai.MovementController.hasNearbyRealObserver(p, world, 32)) {
@@ -3587,6 +3657,18 @@ prepareAndSpawnVirtualPlayer();
                     if (landmarkType != null) {
                         com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().report(
                             landmarkType, finalMinePos, p.getUuid());
+                        // V5.166: 砍到第一根木头即锁定舰队之家 —— 这片有树=好家,本 session 不再整队搬家,
+                        //   杜绝「远木头拽全队」链(V5.163 覆辙)。只在已设过 fleetHome(搬过家)且未锁时触发。
+                        if (landmarkType == com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType.LOG_CLUSTER) {
+                            com.maohi.fakeplayer.ai.cognition.SharedResourceMap srmLock =
+                                com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance();
+                            if (srmLock.getFleetHome() != null && !srmLock.isFleetHomeLocked()) {
+                                srmLock.lockFleetHome(finalMinePos);
+                                com.maohi.fakeplayer.TaskLogger.log(p, "fleet_home_lock",
+                                    "at", String.format("(%d,%d,%d)",
+                                        finalMinePos.getX(), finalMinePos.getY(), finalMinePos.getZ()));
+                            }
+                        }
                     }
                 }
 

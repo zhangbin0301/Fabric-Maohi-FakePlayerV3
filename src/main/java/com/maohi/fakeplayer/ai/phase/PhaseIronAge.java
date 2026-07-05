@@ -143,12 +143,20 @@ public final class PhaseIronAge implements Phase {
         //   24³ 扫炉的卡顿真凶 + 1/40 节流,park 本身不再 lag(这正是 V5.117 Fix-7 当年压到 4 的顾虑)。
         int smeltTarget = com.maohi.fakeplayer.ai.CraftingBehavior.ironTargetForNextArmorPiece(player);
         if (smeltTarget <= 0) smeltTarget = 4; // 满甲 → 只为工具(镐3/剑2)维持铁锭
-        boolean needsSmelting = rawIronCount > 0 && ironIngotCount < smeltTarget;
+        // V5.167: 熔炼进行中(已摆料待收 smeltingFurnacePos!=null / 倒计时中 smeltingTicks>0)也算 needsSmelting。
+        //   根因(全员裸奔总凶): autoSmeltOres 把最后一份生铁摆进炉后 rawIron 归 0 → needsSmelting 立刻转 false
+        //   → 假人当场走开去 strip-mine → ~10s 后炉烧好人已离炉 5 格外 → smelt_fail walked_away、铁锭留炉里没收
+        //   → 铁锭永远攒不够 24 → 铁甲永不成型 → P4.6 钻石闸永不放行。修: 熔炼中就死守炉边 park,直到 tickSmelting
+        //   收锭清状态(smeltingFurnacePos=null+smeltingTicks=0)才放行去挖矿。
+        boolean smeltInProgress = personality.smeltingFurnacePos != null || personality.smeltingTicks > 0;
+        boolean needsSmelting = smeltInProgress || (rawIronCount > 0 && ironIngotCount < smeltTarget);
         if (needsSmelting) {
             // V5.86: 冶炼前置 —— 同 PhaseStoneAge SA-P0。有 raw_iron 要炼但背包无任何可用燃料
             //   → 先砍树补燃料,否则下面贴炉 setIdle 驻留时 autoSmeltOres 空转、反复 park 不前进。
             //   复用 PhaseUtil.assignChopTree (V5.117 由 PhaseStoneAge 迁出, 同包 pkg-private)的稳健砍树逻辑;煤/木炭也算燃料。
-            if (!com.maohi.fakeplayer.ai.SmeltingBehavior.hasSmeltFuel(player)) {
+            //   V5.167: 仅在「还有生铁要摆」(rawIron>0)时才去补燃料;若只是熔炼进行中(rawIron==0,料已在炉)
+            //   则燃料早在炉里、无需再砍 → 跳过直接下去 park 守炉,别因缺手持燃料又走开导致 walked_away。
+            if (rawIronCount > 0 && !com.maohi.fakeplayer.ai.SmeltingBehavior.hasSmeltFuel(player)) {
                 // V5.117 Fix-1: 深井 bot 砍不到 log → 先柱式上爬回地表（同 PhaseStoneAge SA-P0 V5.111 改造）。
                 //   ascendToSurfaceIfDeep 自带 stripMineState==null + cobble≥8 守卫，安全前置。
                 if (PhaseStoneAge.ascendToSurfaceIfDeep(player, personality, cobbleCount)) {
@@ -166,6 +174,9 @@ public final class PhaseIronAge implements Phase {
             //   仅在无记忆时扫一次来发现熔炉；记忆坐标若失效，由 RETURN_TO_BASE 到达后的重扫
             //   / autoSmeltOres 的就近扫描自愈并回写（与改前行为等价，只是省掉了每周期的浪费扫描）。
             BlockPos targetFurnace = personality.knownFurnacePos;
+            if (targetFurnace == null && smeltInProgress) {
+                targetFurnace = personality.smeltingFurnacePos; // V5.167: 熔炼进行中直接守着摆过料的那口炉
+            }
             if (targetFurnace == null) {
                 BlockPos found = findFurnace(world, player.getBlockPos(), FURNACE_SCAN_RADIUS);
                 if (found != null) {
@@ -762,12 +773,16 @@ public final class PhaseIronAge implements Phase {
                                                            PhaseUtil.Digest d, PhaseContext ctx) {
         // smeltTarget 与 PhaseIronAge 内部一致,稳定 4 锭够升 IRON_AGE(已有 IRON_AGE 阶段这份代码不触)。
         final int SA_SMELT_TARGET = 4;
-        if (!(d.rawIronCount > 0 && d.ironIngotCount < SA_SMELT_TARGET)) {
+        // V5.167: 同 PhaseIronAge —— 熔炼进行中(已摆料待收/倒计时)也要守炉,否则最后一份生铁进炉后 rawIron 归 0
+        //   → 本函数返 false → 假人走开挖矿 → smelt_fail walked_away、铁锭没收。修:进行中继续守炉 park。
+        boolean smeltInProgress = personality.smeltingFurnacePos != null || personality.smeltingTicks > 0;
+        if (!smeltInProgress && !(d.rawIronCount > 0 && d.ironIngotCount < SA_SMELT_TARGET)) {
             return false;
         }
 
         // SA-P0: 冶炼前置 —— 有铁矿但无燃料 → 先砍树补燃料;深处砍不到 → 柱式上爬。
-        if (!com.maohi.fakeplayer.ai.SmeltingBehavior.hasSmeltFuel(player)) {
+        //   V5.167: 仅在还有生铁要摆(rawIron>0)时补燃料;纯熔炼进行中(料已在炉)跳过,别走开导致 walked_away。
+        if (d.rawIronCount > 0 && !com.maohi.fakeplayer.ai.SmeltingBehavior.hasSmeltFuel(player)) {
             if (PhaseStoneAge.ascendToSurfaceIfDeep(player, personality, d.cobbleCount)) return true;
             com.maohi.fakeplayer.TaskLogger.log(player, "stone_smelt_need_fuel",
                 "logs", d.logCount, "planks", d.plankCount, "rawIron", d.rawIronCount);
@@ -778,6 +793,9 @@ public final class PhaseIronAge implements Phase {
 
         // SA-P3: 先用记忆熔炉坐标,失效时 24 格扫描补上,并上报共享地图。
         BlockPos saFurnace = personality.knownFurnacePos;
+        if (saFurnace == null && smeltInProgress) {
+            saFurnace = personality.smeltingFurnacePos; // V5.167: 熔炼进行中直接守着摆过料的那口炉
+        }
         if (saFurnace == null) {
             BlockPos found = PhaseIronAge.findFurnace(saWorld, player.getBlockPos(), 24);
             if (found != null) {

@@ -96,6 +96,18 @@ public class MaohiConfig {
     public int ironDescendScanRadius = 48;
     public int ironAimMaxDist = 96;
 
+    // ===== V5.166 舰队整队搬家(贫瘠出生逃生 v2)—— 仅代码默认值,不从 maohi.properties 解析 =====
+    //   全队木荒(零 LOG_CLUSTER)时整队一起 teleport 到唯一共享 fleetHome ±15 一个小圈,只留 1 个 chunk 前沿。
+    //   修 V5.163 逐 bot homeAnchor 分头漂散卡服的覆辙(见 memory barren_spawn_leash_trap / SharedResourceMap)。
+    /** 舰队整队搬家总开关(false=完全回退到 V5.165 紧密皮筋行为,贫瘠出生假人会再次卡住但绝不卡服)。 */
+    public boolean fleetRelocateEnabled = true;
+    /** fleetHome 距 world spawn 硬封顶(格)。到顶切向旋转不外推,结构性防漂散。 */
+    public int fleetRelocateMaxDist = 1000;
+    /** 每次整队搬家步长(格)。 */
+    public int fleetRelocateStep = 256;
+    /** 舰队级搬家冷却(分)。防连锁 relocate,每 home 给足时间找树。 */
+    public int fleetRelocateCooldownMin = 3;
+
     // ===== V5.87 spawn 错峰节流 (削 spawn 爆发期 chunk-save 序列化卡顿) =====
     /** 两次假人 spawn 之间的最小冷却(ms)。10s 太短:vanilla 滚动平均 MSPT 还没反映上一个 spawn 的
      *  chunk-save 负载,下一个就被放行 → 成本叠加成多秒卡顿(实测 2 个 spawn 11s 内挤一起 → 15s 落后)。

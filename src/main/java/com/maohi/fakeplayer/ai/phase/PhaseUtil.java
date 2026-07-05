@@ -72,10 +72,12 @@ public final class PhaseUtil {
         return cached != null ? cached : new BlockPos(0, 64, 0);
     }
 
-    /** V5.163: 个人 leash 圆心 —— pers.homeAnchor 非空(贫瘠出生逃生重锚过)则用它,否则用 world spawn。
-     *  贫瘠假人逃出无树带后 homeAnchor 指向新家,explore_pull_home / clampRescueTarget 用此不再拽它回贫瘠 spawn。 */
+    /** V5.166: leash 圆心 —— 全队共用的 SharedResourceMap.fleetHome 非空(贫瘠逃生整队搬家过)则用它,否则 world spawn。
+     *  所有相位的 explore_pull_home / clampRescueTarget 都跟随这唯一圆心 → 全队聚拢、不散(取代 V5.163 逐 bot homeAnchor)。
+     *  pers 参保留仅为向后兼容(不再读)。 */
     public static BlockPos effectiveHome(Personality pers, ServerWorld world) {
-        return (pers != null && pers.homeAnchor != null) ? pers.homeAnchor : getWorldSpawnCached(world);
+        BlockPos fh = com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().getFleetHome();
+        return (fh != null) ? fh : getWorldSpawnCached(world);
     }
 
     // ==================== Yaw 工具 ====================
