@@ -2016,55 +2016,11 @@ prepareAndSpawnVirtualPlayer();
         boolean cooldownOk = nowMs - personality.lastStuckTeleportAt > 6_000L;
         net.minecraft.server.world.ServerWorld world = (net.minecraft.server.world.ServerWorld) p.getEntityWorld();
 
-        // V5.163 (修订): 触发用「可观测症状」而非窄 biome 表 —— WOOD_AGE + escalation≥4(本地阶梯已尽) +
-        //   舰队无人报过 LOG_CLUSTER(=全队都没找到木头=真贫瘠) + 冷却 + 无真人观察。不再依赖 isTreelessBiome
-        //   (那表漏 savanna/windswept_hills 等丘陵稀树 biome,实测卡点很可能就在这类,依赖它会漏触发)。
-        //   LOG_CLUSTER 查询短路在便宜 gate 之后:只有 WOOD_AGE+escalation≥4+冷却+无观察 全过才查。
-        //   若已有人找到木头(fleetHasWood),不进本分支 → 落下面 home-clamp teleport 的 shared_resource 档送过去,不盲逃。
-        if (personality.growthPhase == com.maohi.fakeplayer.GrowthPhase.WOOD_AGE
-                && personality.forceExploreEscalation >= 4
-                && cooldownOk
-                && !com.maohi.fakeplayer.ai.MovementController.hasNearbyRealObserver(p, world, 32)
-                && com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().queryNearest(
-                        p.getBlockPos(), p.getUuid(),
-                        com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType.LOG_CLUSTER) == null) {
-            net.minecraft.util.math.BlockPos wSpawn = readWorldSpawnSafe(world);
-            com.maohi.fakeplayer.ai.cognition.SharedResourceMap srm =
-                com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance();
-            net.minecraft.util.math.BlockPos anchor =
-                srm.getOrCreateBarrenEscapeAnchor(wSpawn, p.getBlockPos(), 800);
-            // 已在锚附近还卡 → 这片也贫瘠,外扩一步(硬封顶 ≤800 在 ratchet 内)
-            if (p.getBlockPos().getSquaredDistance(anchor) < 100.0 * 100.0) {
-                net.minecraft.util.math.BlockPos next = srm.ratchetBarrenEscapeAnchor(wSpawn, 800);
-                if (next != null) anchor = next;
-            }
-            int fromX = (int) p.getX(), fromY = (int) p.getY(), fromZ = (int) p.getZ();
-            int ax = anchor.getX() + rng.nextInt(-15, 16);
-            int az = anchor.getZ() + rng.nextInt(-15, 16);
-            int aY = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(world, ax, az, 80);
-            double aNewY = aY + 1.0;
-            float aYaw = rng.nextFloat() * 360f - 180f;
-            p.refreshPositionAndAngles(ax + 0.5, aNewY, az + 0.5, aYaw, p.getPitch());
-            personality.homeAnchor = anchor;               // ★重锚:leash 圆心搬到新家,不再被拽回贫瘠 spawn
-            personality.lastStuckTeleportAt = nowMs;
-            personality.lagFreezeUntil = nowMs + 15_000L;
-            personality.heightFloorY = aNewY - 10.0;
-            personality.forceExploreEscalation = 0;
-            personality.taskFailCount = 0;
-            personality.lastFailedTarget = null;
-            personality.failedTargets.clear();
-            personality.currentTask = TaskType.IDLE;
-            personality.taskTarget = null;
-            personality.currentPath.clear();
-            double distSpawn = Math.sqrt(Math.pow(ax - wSpawn.getX(), 2) + Math.pow(az - wSpawn.getZ(), 2));
-            com.maohi.fakeplayer.TaskLogger.log(p, "biome_escape_rehome",
-                "from", String.format("(%d,%d,%d)", fromX, fromY, fromZ),
-                "to", String.format("(%d,%.1f,%d)", ax, aNewY, az),
-                "anchor", anchor,
-                "distFromSpawn", String.format("%.0f", distSpawn));
-            return;
-        }
-
+        // V5.165: 移除 V5.163/164「贫瘠出生逃生+重锚」—— 实测部署后造成灾难性 server 卡顿(MSPT 300~360ms、
+        //   "Can't keep up 15s behind"、chunk 系统 stall 刷屏)。根因: homeAnchor 重锚让逃生假人脱离 world spawn
+        //   皮筋、进阶后不清 → 铁器假人漂到离 spawn 1100+ 格;逃生假人在远处报 LOG_CLUSTER 又把别的假人 teleport
+        //   过去 → 全队向外迁徙、多 chunk-gen 前沿 → c2me 崩。回退到 V5.162 的紧密皮筋(explorationRadius=200)。
+        //   贫瘠出生问题另行用「不打散舰队」的保守设计再解(见 memory barren_spawn_leash_trap)。
         if (personality.forceExploreEscalation >= 4
                 && cooldownOk
                 && !com.maohi.fakeplayer.ai.MovementController.hasNearbyRealObserver(p, world, 32)) {
@@ -3631,11 +3587,6 @@ prepareAndSpawnVirtualPlayer();
                     if (landmarkType != null) {
                         com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().report(
                             landmarkType, finalMinePos, p.getUuid());
-                        // V5.163: 逃生重锚过的假人在新家砍到木头 → 锁定舰队逃生锚(这片有树=好家,别再 ratchet 走)
-                        if (landmarkType == com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType.LOG_CLUSTER
-                                && personality.homeAnchor != null) {
-                            com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().markBarrenEscapeAnchorGood();
-                        }
                     }
                 }
 

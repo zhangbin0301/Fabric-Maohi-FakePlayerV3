@@ -159,9 +159,9 @@ public class MaohiConfig {
      *  V5.64: 从死字段改为真正约束 setExplore 候选落点的硬上限。
      *  木器/石器期 200 格内树木石头资源充足；如需扩大可改大此值。
      *  铁器期及以后如需更大范围，可在管理员命令中临时调整。 */
-    // V5.163: 200→350 止血 —— 出生在无树 biome 时 200 格皮筋把假人锁死在贫瘠区找不到树(实测 4 只 40min 0 木)。
-    //   放宽一档让假人当场能跑更远找树;根治靠代码「贫瘠逃生+重锚」(homeAnchor),此值仅全局兜底,代码稳后可调回 200。
-    public int explorationRadius = 350;
+    // V5.165: 回退到 200(V5.163 的 350 连同 homeAnchor 逃生一起造成假人漂散到 spawn 1100+ 格 → chunk
+    //   前沿爆炸 → server "Can't keep up" 15s behind)。紧密皮筋是 server 稳定的关键,别放大。
+    public int explorationRadius = 200;
 
     /** 老玩家库最大条目数 */
     public int maxKnownPlayers = 100;
