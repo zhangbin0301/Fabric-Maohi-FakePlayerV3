@@ -178,7 +178,7 @@ public final class PhaseIronAge implements Phase {
                 targetFurnace = personality.smeltingFurnacePos; // V5.167: 熔炼进行中直接守着摆过料的那口炉
             }
             if (targetFurnace == null) {
-                BlockPos found = findFurnace(world, player.getBlockPos(), FURNACE_SCAN_RADIUS);
+                BlockPos found = findFurnace(world, player.getBlockPos(), FURNACE_SCAN_RADIUS, personality); // V5.168: 跳黑名单(够不到)炉,别再扫回
                 if (found != null) {
                     personality.knownFurnacePos = found;
                     targetFurnace = found;
@@ -192,10 +192,22 @@ public final class PhaseIronAge implements Phase {
             //   (见 needsSmelting 块之后),那一刻 bot 就在炉边、立即收得回。
             if (targetFurnace != null) {
                 double fDistSq = player.getBlockPos().getSquaredDistance(targetFurnace);
+                // V5.168: 除「太远>40」「深埋 dy<-10」外,再查 failedTargets 黑名单 —— 根治 GrumpyLazy/MinerLucky
+                //   型死锁: 炉在正上方 6~8 格(dy+、水平贴脸)从两闸中间漏过 → RETURN_TO_BASE 够不到 → VPM
+                //   return_base_unreachable 把炉塞进 failedTargets(V5.137)→ 本熔炉路径此前不查黑名单 → 每周期
+                //   重取同一 knownFurnacePos 重派返航,assigns=1/60s 锁死、fails 不涨(RTB 不计 fail)→ forceExplore/
+                //   卡点救援全旁路。查黑名单忘炉 → 落 else 就地放携带炉/建新炉自愈(脚下放炉比垫塔爬 8 格够旧炉更省)。
+                //   守炉例外(V5.167): 正熔炼那口炉(smeltingFurnacePos)不因黑名单忘,保待收的锭不被打断。
+                boolean furnaceBlacklisted =
+                        com.maohi.fakeplayer.Personality.isFailedTarget(personality, targetFurnace)
+                        && !targetFurnace.equals(personality.smeltingFurnacePos);
                 if (fDistSq > 1600.0
-                        || (targetFurnace.getY() < player.getBlockY() - 10 && fDistSq > 25.0)) {
+                        || (targetFurnace.getY() < player.getBlockY() - 10 && fDistSq > 25.0)
+                        || furnaceBlacklisted) {
                     com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_forget_furnace",
-                        "furnace", targetFurnace, "distSq", (int) fDistSq);
+                        "furnace", targetFurnace, "distSq", (int) fDistSq,
+                        "reason", furnaceBlacklisted ? "blacklisted_unreachable"
+                            : (fDistSq > 1600.0 ? "too_far" : "deep_below"));
                     personality.knownFurnacePos = null;
                     targetFurnace = null;
                 }
@@ -485,7 +497,7 @@ public final class PhaseIronAge implements Phase {
         if (hasIronPickaxe && !hasFullIronArmor && rawIronCount > 0) {
             BlockPos furnacePos = personality.knownFurnacePos;
             if (furnacePos == null) {
-                furnacePos = findFurnace(world, player.getBlockPos(), FURNACE_SCAN_RADIUS);
+                furnacePos = findFurnace(world, player.getBlockPos(), FURNACE_SCAN_RADIUS, personality); // V5.168: 跳黑名单炉
                 if (furnacePos != null) personality.knownFurnacePos = furnacePos;
             }
             if (furnacePos != null) {
@@ -715,6 +727,18 @@ public final class PhaseIronAge implements Phase {
      * 扫描逻辑同 SmeltingBehavior.findFurnace，但半径更大。
      */
     public static BlockPos findFurnace(ServerWorld world, BlockPos center, int radius) {
+        return findFurnace(world, center, radius, null);
+    }
+
+    /**
+     * V5.168: skipBlacklist != null 时,跳过仍在 failedTargets 有效期内的炉。
+     *   根治「炉在正上方 6 格够不到」死锁(GrumpyLazy): forget 忘掉黑名单旧炉后,若本扫描不避让,
+     *   24 格半径 dy±6 会把同一口旧炉一次次扫回、遮蔽脚下刚放的可用新炉 → 忘了等于白忘。跳过后
+     *   扫描直接返回脚下新炉(或 null → 落 else 放携带炉),保证收敛。needsSmelting/Fix-9 传 personality;
+     *   VPM 到营重扫等纯物理探测传 null(如实记录,不受黑名单影响)。
+     */
+    public static BlockPos findFurnace(ServerWorld world, BlockPos center, int radius,
+                                       Personality skipBlacklist) {
         BlockPos.Mutable mut = new BlockPos.Mutable();
         for (int d = 0; d <= radius; d++) {
             for (int dx = -d; dx <= d; dx++) {
@@ -726,7 +750,12 @@ public final class PhaseIronAge implements Phase {
                         if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(
                                 world, mut.getX() >> 4, mut.getZ() >> 4)) continue;
                         if (world.getBlockState(mut).isOf(Blocks.FURNACE)) {
-                            return mut.toImmutable();
+                            BlockPos hit = mut.toImmutable();
+                            if (skipBlacklist != null
+                                    && com.maohi.fakeplayer.Personality.isFailedTarget(skipBlacklist, hit)) {
+                                continue; // V5.168: 黑名单炉(够不到)→ 跳过继续找别的
+                            }
+                            return hit;
                         }
                     }
                 }
@@ -797,7 +826,7 @@ public final class PhaseIronAge implements Phase {
             saFurnace = personality.smeltingFurnacePos; // V5.167: 熔炼进行中直接守着摆过料的那口炉
         }
         if (saFurnace == null) {
-            BlockPos found = PhaseIronAge.findFurnace(saWorld, player.getBlockPos(), 24);
+            BlockPos found = PhaseIronAge.findFurnace(saWorld, player.getBlockPos(), 24, personality); // V5.168: 跳黑名单炉
             if (found != null) {
                 personality.knownFurnacePos = found;
                 saFurnace = found;
@@ -808,13 +837,20 @@ public final class PhaseIronAge implements Phase {
         }
 
         // V5.111/113/115: 深处/超距的熔炉先忘掉 — 免死磕够不到的远炉。
+        // V5.168: 对称 IRON needsSmelting 路径,再查 failedTargets 黑名单(炉在正上方够不到 = return_base_unreachable
+        //   拉黑)。守炉例外: 正熔炼那口炉(smeltingFurnacePos)不因黑名单忘。
         double saFurnDistSq = saFurnace != null ? player.getBlockPos().getSquaredDistance(saFurnace) : 0.0;
+        boolean saFurnaceBlacklisted = saFurnace != null
+                && com.maohi.fakeplayer.Personality.isFailedTarget(personality, saFurnace)
+                && !saFurnace.equals(personality.smeltingFurnacePos);
         if (saFurnace != null
                 && ((saFurnace.getY() < player.getBlockY() - 10 && saFurnDistSq > 25.0)
-                    || saFurnDistSq > 1600.0)) {
+                    || saFurnDistSq > 1600.0
+                    || saFurnaceBlacklisted)) {
             com.maohi.fakeplayer.TaskLogger.log(player, "stone_smelt_forget_furnace",
                 "furnace", saFurnace, "botY", player.getBlockY(), "distSq", (int) saFurnDistSq,
-                "reason", saFurnDistSq > 1600.0 ? "too_far" : "deep_below");
+                "reason", saFurnaceBlacklisted ? "blacklisted_unreachable"
+                    : (saFurnDistSq > 1600.0 ? "too_far" : "deep_below"));
             personality.knownFurnacePos = null;
             saFurnace = null;
         }

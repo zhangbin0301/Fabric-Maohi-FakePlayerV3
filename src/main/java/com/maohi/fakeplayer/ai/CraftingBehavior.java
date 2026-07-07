@@ -887,6 +887,18 @@ public final class CraftingBehavior {
 		}
 
 		PlayerInventory inv = player.getInventory();
+
+		// V5.169: 合成前先清空 2×2 网格残料(PlayerScreenHandler 的 crafting input = slot 1-4)——
+		//   上次合成若在网格留了残料(quickMove 回收不净 / 异常打断),本次 moveOneToHandlerSlot 的
+		//   pickupOne 往非空槽放料会合并/交换错乱,结果槽算不出配方 → quickMove(0) 空转、却仍假报
+		//   craft_done 骗上层「plank 已够」→ plankCount 永远<4、无限重合 oak_planks、建不出工作台
+		//   → 做不了铁器 → 裸奔(SwiftArcher 14h 铁锭卡3 根因)。空网格的 quickMove 是 no-op,无害。
+		for (int g = 1; g <= 4; g++) {
+			if (!handler.getSlot(g).getStack().isEmpty()) {
+				InventoryActionHelper.quickMove(player, g);
+			}
+		}
+
 		boolean allPlaced = true;
 		Item missing = null;
 		for (Placement p : recipe) {
@@ -906,6 +918,18 @@ public final class CraftingBehavior {
 				"reason", "missing_ingredient", "target", targetId,
 				"ingredient", missing == null ? "?"
 					: net.minecraft.registry.Registries.ITEM.getId(missing).getPath());
+			return;
+		}
+
+		// V5.169: 取结果前验证网格真的产出了 —— 结果槽 0(CraftingResultSlot)为空 = 摆料空转
+		//   (发包合成偶发失效 / 清网格后配方仍不匹配)。别假报 craft_done: 回收残料 + craft_fail,
+		//   让上层看到真失败去走退避/换地/补料,而非被骗着对同一件无限重合。
+		if (handler.getSlot(0).getStack().isEmpty()) {
+			for (int g = 1; g <= 4; g++) {
+				InventoryActionHelper.quickMove(player, g);
+			}
+			com.maohi.fakeplayer.TaskLogger.log(player, "craft_fail",
+				"reason", "no_grid_output", "target", targetId);
 			return;
 		}
 
