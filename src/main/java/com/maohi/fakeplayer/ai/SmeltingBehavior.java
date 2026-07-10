@@ -300,17 +300,35 @@ public final class SmeltingBehavior {
 
 	private static void collectFromFurnace(ServerPlayerEntity player, BlockPos furnace) {
 		// V5.112: 复用 openFurnaceScreen 的完整开窗序列(切空手槽 + 发包 + 直调 + openHandledScreen 兜底)。
-		if (openFurnaceScreen(player, furnace) == null) {
+		FurnaceScreenHandler fh = openFurnaceScreen(player, furnace);
+		if (fh == null) {
 			com.maohi.fakeplayer.TaskLogger.log(player, "smelt_fail",
 				"reason", "screen_not_opened", "furnace", furnace);
 			return;
 		}
 
-		// QUICK_MOVE 输出 slot 2 (产物) → vanilla AbstractFurnaceScreenHandler.quickMove
-		// 自动把产物转移到玩家背包(找空槽或合并同物品)
+		// V5.173: 收锭前后验证产物真进背包 —— 背包满时 vanilla quickMove 的 insertItem 失败,铁锭原地留在
+		//   输出槽 2,但原代码照样报 smelt_done + 授 story/smelt_iron → 真实铁锭计数不涨 → 攒不够 24 裸奔
+		//   (断点#3,对称 V5.169/171 合成产物验证)。hadOutput=收前槽2有产物;stillHasOutput=取后仍在(背包满)。
+		boolean hadOutput = !fh.getSlot(2).getStack().isEmpty();
+		// QUICK_MOVE 输出 slot 2 (产物) → vanilla AbstractFurnaceScreenHandler.quickMove 转移到背包
 		InventoryActionHelper.quickMove(player, 2);
+		boolean stillHasOutput = !fh.getSlot(2).getStack().isEmpty();
 
 		InventoryActionHelper.closeScreen(player);
+
+		if (!hadOutput) {
+			// 炉没炼出东西(空烧/无燃料/还没好)—— 别报 done、别授成就
+			com.maohi.fakeplayer.TaskLogger.log(player, "smelt_fail",
+				"reason", "empty_output", "furnace", furnace);
+			return;
+		}
+		if (stillHasOutput) {
+			// 取不走(背包满)→ 铁锭滞留炉里,别假报 done、别授假成就;保留待背包腾空后重收
+			com.maohi.fakeplayer.TaskLogger.log(player, "smelt_fail",
+				"reason", "collect_no_space", "furnace", furnace);
+			return;
+		}
 
 		// 反馈音效(贴合真人成品出炉的视觉/听觉强化)
 		player.getEntityWorld().playSound(null, player.getX(), player.getY(), player.getZ(),

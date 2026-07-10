@@ -376,9 +376,13 @@ public final class CraftingBehavior {
 		//   没铁镐的假人优先补镐,钻石剑等铁镐就绪后下一 tick 即放行。
 		if (countHealthyIronPickaxes(player) == 0) return;
 
-		// 其余工具升级（找 hotbar 对应工具作触发）：石斧→铁斧 / 石剑→铁剑 / 铁剑→钻剑。
+		// 其余工具升级（找对应工具作触发）：石斧→铁斧 / 石剑→铁剑 / 铁剑→钻剑。
 		//   （钻石镐已上移为"直接合"，这里不再走 iron_pickaxe→钻镐，避免已有钻镐时重复合浪费钻石。）
-		for (int i = 0; i < 9; i++) {
+		// V5.173: i<9(仅 hotbar)→ i<inv.size()(全背包),对齐 hasPendingGearCraft(:499)的全背包扫描 —— 修口径
+		//   失配死循环(问题①): 石剑被 quickMove 推入主背包 9-35 时,hasPendingGearCraft(全背包)报「有石剑、缺
+		//   铁剑、料够」→ P4.5 驱动回台,但本处只扫 hotbar 找不到石剑模板 → 不设 CRAFTING → IDLE 空驻台 →
+		//   下周期又回台死循环,铁剑合成滞后 30-60s(靠 HUNTING 偶发把石剑 SWAP 回 hotbar 才解套)。
+		for (int i = 0; i < inv.size(); i++) {
 			ItemStack tool = inv.getStack(i);
 			if (tool.isEmpty()) continue;
 			String id = net.minecraft.registry.Registries.ITEM.getId(tool.getItem()).getPath();
