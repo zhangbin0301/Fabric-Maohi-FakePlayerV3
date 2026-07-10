@@ -139,11 +139,15 @@ public final class EquipmentBehavior {
 
 	/** 自动装备背包中防御值更高的护甲 */
 	public static void autoEquipArmor(ServerPlayerEntity player) {
-		// V4.1 限制触发频率，避免每个 tick 都扫描背包
-		if (ThreadLocalRandom.current().nextInt(100) > 5) return;
-
+		// V5.172: 穿甲根治 —— 裸奔总根因。原实现 SWAP 到手 + PacketHelper.useItem 穿甲,但 useItem 发的是
+		//   PlayerInteractBlockC2SPacket(右键方块),服务端只走 interactBlock → 护甲 useOnBlock(PASS,啥也不做),
+		//   永远到不了 Item.use → EquippableComponent.equip → 甲进不了装备槽、无回读无兜底、100% 静默失败
+		//   → 合出全套铁甲也永远裸奔(玩家列表看装备槽)。改:① 空槽先 QUICK_MOVE(shift点)让 vanilla
+		//   PlayerScreenHandler.quickMove 自动路由甲到护甲槽(拟真);② 回读没穿上(升级替换/quickMove 失效)
+		//   → equipStack 服务端直调强装(同放台/放炉 setBlockState 强放的「假人绕不可靠发包、直改服务端状态」
+		//   思路;穿甲经 EntityEquipmentUpdate 自动广播,旁观者正常可见)。并删原 6% 节流 + 一趟穿齐 4 件
+		//   (原 nextInt(100)>5 return + 每件 return,配 ~1/s 调用 = 整套 68s+ 才穿上,V5.156 同类节流坑)。
 		PlayerInventory inv = player.getInventory();
-		// V5.28: 走右键自然装备链路,真人按住右键空护甲槽时也是这样
 		net.minecraft.entity.EquipmentSlot[] slots = {
 			net.minecraft.entity.EquipmentSlot.FEET,
 			net.minecraft.entity.EquipmentSlot.LEGS,
@@ -152,27 +156,45 @@ public final class EquipmentBehavior {
 		};
 		for (net.minecraft.entity.EquipmentSlot slot : slots) {
 			ItemStack equipped = player.getEquippedStack(slot);
-			int equippedDef = getArmorDefense(equipped);
+			int bestSlot = -1, bestDef = getArmorDefense(equipped);
 			for (int i = 0; i < 36; i++) {
 				ItemStack candidate = inv.getStack(i);
 				if (candidate.isEmpty() || !isArmorForEquipmentSlot(candidate, slot)) continue;
-				if (getArmorDefense(candidate) > equippedDef) {
-					if (i >= 9) {
-						com.maohi.fakeplayer.network.InventoryActionHelper.clickSlot(
-							player, i, 0, net.minecraft.screen.slot.SlotActionType.SWAP);
-						PacketHelper.setSelectedSlot(player, 0);
-					} else {
-						PacketHelper.setSelectedSlot(player, i);
-					}
-					PacketHelper.useItem(player, net.minecraft.util.Hand.MAIN_HAND);
-					// 一次只穿一件,防止发包洪泛;穿完顺手 check shiny_gear(穿钻装最后一件时触发)
-					checkShinyGearAchievement(player);
-					return;
+				int def = getArmorDefense(candidate);
+				if (def > bestDef) { bestDef = def; bestSlot = i; }
+			}
+			if (bestSlot < 0) continue;
+			net.minecraft.item.Item want = inv.getStack(bestSlot).getItem();
+			// ① 拟真: 空槽时 QUICK_MOVE 让 vanilla 自动把甲路由进护甲槽
+			if (equipped.isEmpty()) {
+				int screenSlot = com.maohi.fakeplayer.network.InventoryActionHelper
+					.playerInvSlotToScreenSlot(player.playerScreenHandler, bestSlot);
+				if (screenSlot >= 0) {
+					com.maohi.fakeplayer.network.InventoryActionHelper.quickMove(player, screenSlot);
 				}
 			}
+			// ② 回读 + 兜底: 没穿上(升级替换 / quickMove 失效)→ equipStack 服务端直调强装
+			if (!player.getEquippedStack(slot).isOf(want)) {
+				int si = -1;
+				for (int i = 0; i < 36; i++) {
+					if (inv.getStack(i).isOf(want)) { si = i; break; }
+				}
+				if (si >= 0) {
+					ItemStack newArmor = inv.getStack(si).split(1);
+					ItemStack old = player.getEquippedStack(slot);
+					player.equipStack(slot, newArmor);
+					if (!old.isEmpty()) inv.offerOrDrop(old); // 升级替换: 旧甲回背包
+					com.maohi.fakeplayer.TaskLogger.log(player, "armor_equip_direct",
+						"slot", slot.getName(),
+						"item", net.minecraft.registry.Registries.ITEM.getId(want).getPath());
+				}
+			} else {
+				com.maohi.fakeplayer.TaskLogger.log(player, "armor_equipped",
+					"slot", slot.getName(),
+					"item", net.minecraft.registry.Registries.ITEM.getId(want).getPath());
+			}
 		}
-		// 没新装备可换:也 check 一次 — 防止 bot 上次穿完没 check(autoEquipArmor 100 tick 1 次,
-		//   万一在穿完的同 tick return,下一轮如果没新装备进入 for 循环里的 check 不会跑)
+		// 穿完 check shiny_gear(穿钻装最后一件时触发);无新装备也 check 一次防漏
 		checkShinyGearAchievement(player);
 	}
 
