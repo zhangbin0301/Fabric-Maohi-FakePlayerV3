@@ -795,6 +795,23 @@ public final class CraftingBehavior {
 			return;
 		}
 
+		// V5.171: 取结果前验证结果槽真有产出 —— 3×3 工作台合成(合铁甲/铁镐/铁剑)同样可能摆料空转
+		//   (发包 moveOneToHandlerSlot 未生效 / 结果槽算不出配方),若不验证会假报 craft_done +
+		//   grantCraftMilestone 假给成就(story/obtain_armor 等),铁甲没进背包却「成就+1」→ 攒够 24 铁锭
+		//   也永远裸奔(用户「成就涨却全裸」之谜)。对称 V5.169 的 2×2 executeInInventoryCraft 修法:
+		//   结果槽(CraftingResultSlot = slot 0)空 → 回收网格 1-9 残料 + 关界面 + craft_fail,不假成功、
+		//   不给假成就(autoCraftArmor/autoUpgradeTools 下 tick 会重试真合)。
+		if (handler.getSlot(0).getStack().isEmpty()) {
+			for (int g = 1; g <= 9; g++) {
+				InventoryActionHelper.quickMove(player, g);
+			}
+			InventoryActionHelper.closeScreen(player);
+			com.maohi.fakeplayer.TaskLogger.log(player, "craft_fail",
+				"reason", "no_result", "target",
+				net.minecraft.registry.Registries.ITEM.getId(target).getPath());
+			return;
+		}
+
 		// 4. QUICK_MOVE 槽 0(result) - vanilla CraftingResultSlot 同步:
 		//    - 校验配方匹配
 		//    - 网格 1-9 各扣 1
