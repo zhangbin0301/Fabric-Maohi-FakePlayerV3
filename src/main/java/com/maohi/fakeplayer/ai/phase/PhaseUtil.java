@@ -545,7 +545,54 @@ public final class PhaseUtil {
 
     /** V5.44: 砍树任务派发（含吸附树根/EMPTY/RICH 标注）。
      *  搬 PhaseStoneAge → PhaseUtil 后由 PhaseStoneAge / PhaseWoodAge / PhaseIronAge 任意 phase 调用。 */
+    /** V5.170: 木头囤积目标(log 当量,约 4 棵树)—— 用户要求「一次性挖够木头」。囤到此量退出囤木模式。 */
+    public static final int WOOD_STOCK_TARGET = 16;
+    /** V5.170: 木头补砍线 —— 消耗到低于此量重新进入囤木模式。滞回区间 [REFILL, TARGET) 防频繁抖动。 */
+    public static final int WOOD_STOCK_REFILL = 6;
+
+    /**
+     * V5.170: 木头囤积(滞回)—— 用户要求「一次性挖够木头,不够再补挖」。
+     *   低于 WOOD_STOCK_REFILL 进入囤木模式,连续砍树(assignChopTree,含 V5.170 上爬+高树过滤)囤到
+     *   WOOD_STOCK_TARGET 才退出。免「砍到刚够→合一件耗光→又砍」的频繁小砍(每次都可能撞够不到的高树/
+     *   身在地下),攒一批木撑久,根治木饥饿死循环(Frostgg/BraveSneaky 8h 铁锭3 全裸)。
+     *   调用方: 木头是合镐/建台/燃料的公共前置,放在熔炼之后、挖矿/合成(P4~)之前保证后续不半路木饥饿。
+     *   logEq 由调用方传入(复用其已扫的背包计数,免重复遍历)。
+     *   @return true=已进囤木模式(设了砍树任务,调用方应 return);false=木够,继续原决策。
+     */
+    public static boolean ensureWoodStock(ServerPlayerEntity player, Personality p,
+                                          com.maohi.fakeplayer.ai.phase.PhaseContext ctx, int logEq) {
+        if (!p.woodStockingActive && logEq < WOOD_STOCK_REFILL) {
+            p.woodStockingActive = true;
+        } else if (p.woodStockingActive && logEq >= WOOD_STOCK_TARGET) {
+            p.woodStockingActive = false;
+        }
+        if (p.woodStockingActive) {
+            assignChopTree(player, p, ctx);
+            com.maohi.fakeplayer.TaskLogger.log(player, "wood_stock_chop",
+                "logEq", logEq, "refill", WOOD_STOCK_REFILL, "target", WOOD_STOCK_TARGET);
+            return true;
+        }
+        return false;
+    }
+
     public static void assignChopTree(ServerPlayerEntity player, Personality p, com.maohi.fakeplayer.ai.phase.PhaseContext ctx) {
+        // V5.170: 砍树前若深埋地下(strip-mine 挖矿处 y15 等)先柱式上爬到地表 —— 根治「铁器假人下矿木耗尽,
+        //   要合镐/建台需木却在地下砍不到树」死锁(Frostgg/BraveSneaky 8h+ 铁锭3 全裸): 地下 findLog 恒 null →
+        //   下面直接走 explore 空转;即便找到也是地表够不到的树。复用石器 V5.136 备木同款 ascendToSurfaceIfDeep
+        //   (自带 stripMineState==null + cobble≥8 + 地表-botY>10 守卫,地表 bot 必返 false,不误触发)。
+        //   assignChopTree 是 P4 缺木合镐 / buildTableOrGatherWood 建台 / needsSmelting 补燃料等所有木饥饿路径的
+        //   公共出口,一处加 ascend、全部受益。
+        int cobbleForAscend = 0;
+        net.minecraft.entity.player.PlayerInventory chopInv = player.getInventory();
+        for (int i = 0; i < chopInv.size(); i++) {
+            ItemStack cs = chopInv.getStack(i);
+            if (cs.isOf(Items.COBBLESTONE) || cs.isOf(Items.COBBLED_DEEPSLATE)) cobbleForAscend += cs.getCount();
+        }
+        if (PhaseStoneAge.ascendToSurfaceIfDeep(player, p, cobbleForAscend)) {
+            com.maohi.fakeplayer.TaskLogger.log(player, "chop_tree_ascend_first",
+                "botY", player.getBlockY(), "cobble", cobbleForAscend);
+            return;
+        }
         BlockPos target = ctx.findLog.apply(player.getEntityWorld(), player.getBlockPos());
         if (target != null) {
             target = snapToTreeBase(player.getEntityWorld(), target);
@@ -567,6 +614,14 @@ public final class PhaseUtil {
                 return;
             }
             if (player.getBlockY() - target.getY() > 5) {
+                p.failedTargets.put(target, System.currentTimeMillis() + 60_000L);
+                setExplore(p, player);
+                return;
+            }
+            // V5.170: 树根比 bot 高 >4 格(坎上 / bot 在坑或隧道里)→ VPM targetTooHighVertical(dy>4)必 fail →
+            //   拉黑挪窝找平地的树,别锁到够不到的高树反复 task_fail target_too_high(木饥饿死循环真凶之一,
+            //   与上方「下方>5」闸对称补齐上方向)。
+            if (target.getY() - player.getBlockY() > 4) {
                 p.failedTargets.put(target, System.currentTimeMillis() + 60_000L);
                 setExplore(p, player);
                 return;

@@ -478,6 +478,10 @@ public class Personality {
 	//   transient：不持久化，下次登录重新发现（地图可能被改动）。
 	public transient BlockPos knownFurnacePos = null;    // 最近一次确认存在的熔炉坐标
 	public transient BlockPos knownWorkbenchPos = null;  // 最近一次确认存在的工作台坐标
+	// V5.170: 木头囤积滞回状态 —— 用户要求「一次性挖够木头,不够再补挖」。
+	//   false 时 logEq<WOOD_STOCK_REFILL 置 true 进囤木;true 时 logEq>=WOOD_STOCK_TARGET 置 false 退出。
+	//   滞回区间防抖动,免「砍到刚够→合一件耗光→又砍」频繁小砍。见 PhaseUtil.ensureWoodStock。
+	public transient boolean woodStockingActive = false;
 
 	// V5.117 Fix-5: 本 bot 拍包隆过的炉子坐标集合 — 用于回收销毁(NOT 强制拾起 item 入背包,
 	//   而是 breakBlock(dropLoot=true) → 自动掉成 FURNACE item → pickupAllNearbyDrops 自吸。

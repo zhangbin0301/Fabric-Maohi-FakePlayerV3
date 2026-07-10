@@ -386,6 +386,12 @@ public final class PhaseIronAge implements Phase {
             return;
         }
 
+        // ── V5.170: 木头囤积(滞回)—— 用户要求「一次性挖够木头,不够再补挖」──
+        //   熔炼(needsSmelting,内含补燃料)已在上面优先处理;此处在合镐/建台/挖矿(P4~P4.6)之前保证木充足,
+        //   连续砍树囤到 WOOD_STOCK_TARGET,免半路木饥饿反复卡死(详见 PhaseUtil.ensureWoodStock)。
+        //   logEq = 原木 + 木板/4(同 Digest.logEquivalent 口径),复用上面已扫的计数,免重复遍历背包。
+        if (PhaseUtil.ensureWoodStock(player, personality, ctx, logCount + plankCount / 4)) return;
+
         // ── P4: 工具升级 —— 有铁锭但缺铁镐 ──
         if (ironIngotCount >= 3 && !hasIronPickaxe) {
             // 1. 缺木头做木棍 → 主动砍树
