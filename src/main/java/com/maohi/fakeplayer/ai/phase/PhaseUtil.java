@@ -549,6 +549,12 @@ public final class PhaseUtil {
     public static final int WOOD_STOCK_TARGET = 16;
     /** V5.170: 木头补砍线 —— 消耗到低于此量重新进入囤木模式。滞回区间 [REFILL, TARGET) 防频繁抖动。 */
     public static final int WOOD_STOCK_REFILL = 6;
+    /** V5.174: 铁器阶段专用囤木阈值(补砍线 2 / 目标 8),远低于木-石器的 6/16。铁器 bot 有煤(燃料无忧)、
+     *  木只用于木棍与建台,原 6/16 会把 logEq 3-5 的铁器 bot 死死摁在地表囤木(wood_stock_chop 刷屏、
+     *  assigns 314/60s)、永不下矿 → 铁锭卡 1 全裸(Liam/Mia/DiamondDig 4h 铁锭1)。降到「木见底(<2)才补、
+     *  只补到 8」,平时直接落到 P4.1/P5 去挖铁;地下真缺木仍由 assignChopTree 的 ascendToSurfaceIfDeep 兜底。 */
+    public static final int WOOD_STOCK_TARGET_IRON = 8;
+    public static final int WOOD_STOCK_REFILL_IRON = 2;
 
     /**
      * V5.170: 木头囤积(滞回)—— 用户要求「一次性挖够木头,不够再补挖」。
@@ -570,6 +576,26 @@ public final class PhaseUtil {
             assignChopTree(player, p, ctx);
             com.maohi.fakeplayer.TaskLogger.log(player, "wood_stock_chop",
                 "logEq", logEq, "refill", WOOD_STOCK_REFILL, "target", WOOD_STOCK_TARGET);
+            return true;
+        }
+        return false;
+    }
+
+    /** V5.174: 带显式补砍线/目标阈值的 ensureWoodStock 重载 —— 铁器阶段传 WOOD_STOCK_*_IRON(2/8)避免
+     *  囤木劫持挖铁(详见 WOOD_STOCK_REFILL_IRON)。木/石器阶段仍走上面默认 6/16 的无参版本。逻辑与默认版一致,
+     *  仅阈值来自参数。 */
+    public static boolean ensureWoodStock(ServerPlayerEntity player, Personality p,
+                                          com.maohi.fakeplayer.ai.phase.PhaseContext ctx,
+                                          int logEq, int refill, int target) {
+        if (!p.woodStockingActive && logEq < refill) {
+            p.woodStockingActive = true;
+        } else if (p.woodStockingActive && logEq >= target) {
+            p.woodStockingActive = false;
+        }
+        if (p.woodStockingActive) {
+            assignChopTree(player, p, ctx);
+            com.maohi.fakeplayer.TaskLogger.log(player, "wood_stock_chop",
+                "logEq", logEq, "refill", refill, "target", target);
             return true;
         }
         return false;

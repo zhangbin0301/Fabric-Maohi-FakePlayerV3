@@ -390,7 +390,12 @@ public final class PhaseIronAge implements Phase {
         //   熔炼(needsSmelting,内含补燃料)已在上面优先处理;此处在合镐/建台/挖矿(P4~P4.6)之前保证木充足,
         //   连续砍树囤到 WOOD_STOCK_TARGET,免半路木饥饿反复卡死(详见 PhaseUtil.ensureWoodStock)。
         //   logEq = 原木 + 木板/4(同 Digest.logEquivalent 口径),复用上面已扫的计数,免重复遍历背包。
-        if (PhaseUtil.ensureWoodStock(player, personality, ctx, logCount + plankCount / 4)) return;
+        // V5.174: 铁器阶段用更低的囤木阈值(2/8 而非 6/16)—— 铁器 bot 有煤、木只用于木棍/建台,原阈值把
+        //   logEq 3-5 的 bot 死死摁在地表囤木(wood_stock_chop 刷屏、assigns 314/60s)、永不下矿 → 铁锭卡1 全裸。
+        //   降阈后木见底(<2)才补、只补到 8,平时直接落到下面 P4.1/P5 去挖铁;地下真缺木仍由 assignChopTree 的
+        //   ascendToSurfaceIfDeep 兜底,不回归 8h 木饥饿。
+        if (PhaseUtil.ensureWoodStock(player, personality, ctx, logCount + plankCount / 4,
+                PhaseUtil.WOOD_STOCK_REFILL_IRON, PhaseUtil.WOOD_STOCK_TARGET_IRON)) return;
 
         // ── P4: 工具升级 —— 有铁锭但缺铁镐 ──
         if (ironIngotCount >= 3 && !hasIronPickaxe) {
