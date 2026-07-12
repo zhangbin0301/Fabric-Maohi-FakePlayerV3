@@ -394,7 +394,13 @@ public final class PhaseIronAge implements Phase {
         //   logEq 3-5 的 bot 死死摁在地表囤木(wood_stock_chop 刷屏、assigns 314/60s)、永不下矿 → 铁锭卡1 全裸。
         //   降阈后木见底(<2)才补、只补到 8,平时直接落到下面 P4.1/P5 去挖铁;地下真缺木仍由 assignChopTree 的
         //   ascendToSurfaceIfDeep 兜底,不回归 8h 木饥饿。
-        if (PhaseUtil.ensureWoodStock(player, personality, ctx, logCount + plankCount / 4,
+        // V5.175: 囤木 thrash 死锁根治 —— 仅「真做不出木棍」时才 preemptive 囤木,有木棍直接去挖铁。
+        //   实测 Mia/DiamondDig 88% 时间耗探索+砍木、logEq 卡1 两分钟不动、MINING 仅 3-5% → 装甲永不出。
+        //   根因:够不到树时 assignChopTree 只 setExplore、woodStockingActive 永不解(logEq 爬不到 target 8),
+        //   ensureWoodStock 恒返 true → 全时空转找树、从不挖铁。缺木棍的合镐/建台/补燃料各有 reactive 砍木兜底
+        //   (line 403 / buildTableOrGatherWood / needsSmelting line 159),此 preemptive 囤多余且致死锁,故加门槛。
+        boolean canMakeSticks = stickCount >= 2 || plankCount >= 2 || logCount >= 1;
+        if (!canMakeSticks && PhaseUtil.ensureWoodStock(player, personality, ctx, logCount + plankCount / 4,
                 PhaseUtil.WOOD_STOCK_REFILL_IRON, PhaseUtil.WOOD_STOCK_TARGET_IRON)) return;
 
         // ── P4: 工具升级 —— 有铁锭但缺铁镐 ──
