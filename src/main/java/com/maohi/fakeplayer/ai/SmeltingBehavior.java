@@ -345,7 +345,8 @@ public final class SmeltingBehavior {
 			return;
 		}
 
-		com.maohi.fakeplayer.TaskLogger.log(player, "smelt_done", "furnace", furnace);
+		com.maohi.fakeplayer.TaskLogger.log(player, "smelt_done", "furnace", furnace,
+			"ironIngots", com.maohi.fakeplayer.ai.CraftingBehavior.countIronIngots(player)); // V5.176 铁账本:熔出一锭后的铁锭余额(进账)
 
 		// P23 direct_grant: raw_iron → iron_ingot,smelt_done 等同 story/smelt_iron 的实事求是观测。
 		//   Set.add 自带去重,多次烧只首次记账。
