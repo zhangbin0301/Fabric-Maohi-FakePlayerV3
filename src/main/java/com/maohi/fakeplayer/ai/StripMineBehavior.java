@@ -44,7 +44,20 @@ public class StripMineBehavior {
     public static void abort(Personality pers, ServerPlayerEntity player, String reason) {
         if (pers == null) return;
         int y = player != null ? player.getBlockY() : pers.stripMineStartY;
-        TaskLogger.log(player, "stripmine_abort", "reason", reason, "y", y);
+        // V5.180 账本: abort 印本趟收成+goal+隧道长 —— reason=got_cobble/max_len 且 rawIron 恒低 = 这趟没挖到铁(空跑);
+        //   goal=cobble = 这趟根本在为圆石 strip-mine(不是奔铁)。定位"挖了半天没铁"到底卡哪。
+        int abRawIron = 0, abIngot = 0;
+        if (player != null) {
+            net.minecraft.entity.player.PlayerInventory ainv = player.getInventory();
+            for (int ai = 0; ai < ainv.size(); ai++) {
+                ItemStack as = ainv.getStack(ai);
+                if (as.isOf(Items.RAW_IRON)) abRawIron += as.getCount();
+                else if (as.isOf(Items.IRON_INGOT)) abIngot += as.getCount();
+            }
+        }
+        TaskLogger.log(player, "stripmine_abort", "reason", reason, "y", y,
+            "rawIron", abRawIron, "ironIngot", abIngot, "tunnelLen", pers.stripMineTunnelLen,
+            "goal", pers.stripMineForDiamond ? "diamond" : (pers.stripMineForCobble ? "cobble" : "iron"));
         
         if (!"got_iron".equals(reason) && !"got_diamond".equals(reason)) {
             pers.stripMineState = PhaseStoneAge.SubPhase.STRIP_MINE_ASCEND;
@@ -97,7 +110,19 @@ public class StripMineBehavior {
         //   tickWorldInteraction 调度)。每 5 tick 一次,开销可忽略。
         int picked = ActionSimulator.pickupAllNearbyDrops(player);
         if (picked > 0) {
-            TaskLogger.log(player, "stripmine_pickup", "count", picked, "y", player.getBlockY());
+            // V5.180 账本: 加背包 rawIron/ironIngot/cobble 实时余额 —— 原来只 count=N 看不出捡的是铁还是圆石。
+            //   下份日志若 count 一直刷但 rawIron 恒 0 = 只在捡圆石、根本没挖到铁矿(区别于"挖到了没熔")。
+            int rawIron = 0, ironIngot = 0, cob = 0;
+            net.minecraft.entity.player.PlayerInventory pinv = player.getInventory();
+            for (int pi = 0; pi < pinv.size(); pi++) {
+                ItemStack ps = pinv.getStack(pi);
+                if (ps.isOf(Items.RAW_IRON)) rawIron += ps.getCount();
+                else if (ps.isOf(Items.IRON_INGOT)) ironIngot += ps.getCount();
+                else if (ps.isOf(Items.COBBLESTONE) || ps.isOf(Items.COBBLED_DEEPSLATE)) cob += ps.getCount();
+            }
+            TaskLogger.log(player, "stripmine_pickup", "count", picked, "y", player.getBlockY(),
+                "rawIron", rawIron, "ironIngot", ironIngot, "cobble", cob,
+                "goal", pers.stripMineForDiamond ? "diamond" : (pers.stripMineForCobble ? "cobble" : "iron"));
         }
 
         switch (pers.stripMineState) {
