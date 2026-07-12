@@ -182,31 +182,37 @@ public class StripMineBehavior {
             return;
         }
 
-        // V5.181 (A+B): 下探也顺路挖铁 —— 铁 goal 下挖时,别只顾埋头到 y15 才找铁,把沿途 y16-56 最密的铁捡了。
-        //   先扫 24 格(新鲜 3s 缓存)找铁:近(≤4格)直接隔空 breakBlock 挖掉(不移动身体、不碰楼梯脊柱 =
-        //   上爬照走),远则把楼梯朝它的水平主轴拐;24 内没铁再大扫 48(B)朝更远已知铁脉拐。挖完/拐完照常挖楼梯
-        //   一步一格下行(walkable)。木镐圆石 goal(采不了铁)/钻石 goal 不顺路挖铁。
-        if (!requireIron && !pers.stripMineForCobble) {
+        // V5.181/183 (A+B+C): 下探也顺路挖铁 —— 别只顾埋头到 y15 才找铁,把沿途 y16-56 最密的铁捡了。
+        //   V5.183 修(审计 BUG1/2/3):① 只近挖「脚面及以上」的铁(iron.getY() >= 脚下 y = 墙/顶),绝不挖脚下/下一级
+        //   地板(y-1/y-2)→ 楼梯地板脊柱不破、始终 walkable(用户约束);地板处的铁交给楼梯自然穿过/LAYER 收。
+        //   ② (y&1)==0 每下 2 格才扫一次,省 MSPT(48 大扫+洞穴扫每 tick 跑太费;LAYER 本就 %4 节流)。
+        //   ③ 正下方铁(dx=dz=0)不乱拐朝向。近隔空挖、远把楼梯朝它拐、没铁朝洞穴拐;挖完照常一步一格下行。
+        //   木镐圆石 goal(采不了铁)/钻石 goal 不顺路挖。
+        if (!requireIron && !pers.stripMineForCobble && (pos.getY() & 1) == 0) {
             com.maohi.fakeplayer.VirtualPlayerManager mgr = Maohi.getVirtualPlayerManager();
             if (mgr != null) {
                 BlockPos iron = mgr.findNearestBlock(world, pos, 24, "iron_ore", player.getUuid());
                 if (iron == null) iron = mgr.findNearestBlockBig(world, pos, IRON_SEEK_RADIUS, "iron_ore");
                 if (iron != null) {
-                    if (pos.getSquaredDistance(iron) <= 16.0) {
+                    // 只隔空挖「脚面及以上、≤4 格」的墙/顶铁 —— 脚下/下级地板(y<脚)的铁不挖,保楼梯脊柱可走
+                    if (pos.getSquaredDistance(iron) <= 16.0 && iron.getY() >= pos.getY()) {
                         com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().report(
                             com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType.IRON_DEPOSIT,
                             iron, player.getUuid());
-                        mineBlock(player, world, iron); // 隔空挖沿途铁,不移动、不破坏楼梯脊柱
+                        mineBlock(player, world, iron); // 隔空挖墙/顶铁,不移动、不破坏楼梯地板脊柱
                         pers.stoneStableCyclesNoIron = 0;
                     } else {
+                        // 远的 / 脚下地板的铁 → 把楼梯朝它水平主轴拐,让楼梯自然穿过去挖(不破坏脊柱)
                         int dx = iron.getX() - pos.getX(), dz = iron.getZ() - pos.getZ();
-                        pers.stripMineFacing = Math.abs(dx) >= Math.abs(dz)
-                            ? (dx >= 0 ? Direction.EAST : Direction.WEST)
-                            : (dz >= 0 ? Direction.SOUTH : Direction.NORTH);
+                        if (dx != 0 || dz != 0) {
+                            pers.stripMineFacing = Math.abs(dx) >= Math.abs(dz)
+                                ? (dx >= 0 ? Direction.EAST : Direction.WEST)
+                                : (dz >= 0 ? Direction.SOUTH : Direction.NORTH);
+                        }
                     }
                 } else {
-                    // V5.182 (C): 下探没探到铁 → 朝最近洞穴拐(1.21 洞壁裸露大量铁,走近后 A 的扫铁又锁定它);
-                    //   楼梯仍一步一格下行(walkable),只是斜着朝洞穴走 —— 不横着停下不下潜。LAYER 早有此兜底(V5.141)。
+                    // V5.182 (C): 没探到铁 → 朝最近洞穴拐(1.21 洞壁裸露大量铁,走近后 A 的扫铁又锁定它);
+                    //   楼梯仍一步一格下行(walkable),只是斜着朝洞穴走。LAYER 早有此兜底(V5.141)。
                     Direction caveDir = findCaveDirection(world, pos, 16);
                     if (caveDir != null) pers.stripMineFacing = caveDir;
                 }

@@ -468,6 +468,12 @@ public final class SmeltingBehavior {
 					// V5.154: 垂直 ±3 → ±6,与 CraftingBehavior.findBlockNearby 同因(park 闸 COLLECT_DIST_SQ/
 					//   FURNACE_NEAR_SQ=25→5 格欧氏,下方 4~5 格的炉算贴脸却扫不到 → 永 park 炼不动)。详见 facility_park_scan_metric。
 					for (int dy = -6; dy <= 6; dy++) {
+						mut.set(center.getX() + dx, center.getY() + dy, center.getZ() + dz);
+						// V5.183: 恢复被 V5.154 误删的循环体(此前空体恒返 null = 死代码,熔炼找炉兜底失效,一直靠
+						//   knownFurnacePos 预填遮住;拆炉回收清了 knownFurnacePos 站炉边就"不熔炼"暴露)。照 PhaseIronAge.findFurnace。
+						if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(
+								world, mut.getX() >> 4, mut.getZ() >> 4)) continue;
+						if (isFurnaceBlock(world, mut)) return mut.toImmutable();
 					}
 				}
 			}
