@@ -204,6 +204,11 @@ public class StripMineBehavior {
                             ? (dx >= 0 ? Direction.EAST : Direction.WEST)
                             : (dz >= 0 ? Direction.SOUTH : Direction.NORTH);
                     }
+                } else {
+                    // V5.182 (C): 下探没探到铁 → 朝最近洞穴拐(1.21 洞壁裸露大量铁,走近后 A 的扫铁又锁定它);
+                    //   楼梯仍一步一格下行(walkable),只是斜着朝洞穴走 —— 不横着停下不下潜。LAYER 早有此兜底(V5.141)。
+                    Direction caveDir = findCaveDirection(world, pos, 16);
+                    if (caveDir != null) pers.stripMineFacing = caveDir;
                 }
             }
         }
