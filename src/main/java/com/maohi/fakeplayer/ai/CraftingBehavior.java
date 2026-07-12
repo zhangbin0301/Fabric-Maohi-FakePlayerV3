@@ -383,6 +383,15 @@ public final class CraftingBehavior {
 		//   没铁镐的假人优先补镐,钻石剑等铁镐就绪后下一 tick 即放行。
 		if (countHealthyIronPickaxes(player) == 0) return;
 
+		// V5.178: 预扫「是否已有铁+剑/斧」—— 供下方升级循环加守卫,根治攒甲期最大漏铁点:石剑/石斧常驻背包
+		//   (升级不消耗它、也永不进垃圾表)→ 每次贴台反复复合铁剑(-2)/铁斧(-3)→ 8 锭新铁在造甲前被榨干。
+		boolean hasIronSwordOrBetter = false, hasIronAxeOrBetter = false;
+		for (int i = 0; i < inv.size(); i++) {
+			Item it2 = inv.getStack(i).getItem();
+			if (it2 == Items.IRON_SWORD || it2 == Items.DIAMOND_SWORD || it2 == Items.NETHERITE_SWORD) hasIronSwordOrBetter = true;
+			if (it2 == Items.IRON_AXE || it2 == Items.DIAMOND_AXE || it2 == Items.NETHERITE_AXE) hasIronAxeOrBetter = true;
+		}
+
 		// 其余工具升级（找对应工具作触发）：石斧→铁斧 / 石剑→铁剑 / 铁剑→钻剑。
 		//   （钻石镐已上移为"直接合"，这里不再走 iron_pickaxe→钻镐，避免已有钻镐时重复合浪费钻石。）
 		// V5.173: i<9(仅 hotbar)→ i<inv.size()(全背包),对齐 hasPendingGearCraft(:499)的全背包扫描 —— 修口径
@@ -395,9 +404,11 @@ public final class CraftingBehavior {
 			String id = net.minecraft.registry.Registries.ITEM.getId(tool.getItem()).getPath();
 
 			// V5.82: 补木棍守卫（镐/斧 +2 木棍、剑 +1 木棍）。
+			// V5.178: 加「已有铁+版本」守卫(!hasIronAxeOrBetter / !hasIronSwordOrBetter)—— 只合一把,不再反复复合漏铁。
+			//   对齐 hasPendingGearCraft:526 驱动侧已有的同款检查(原驱动不为剑驻台、执行器却照合=口径失配,同 V5.169/171 类)。
 			Item target = null;
-			if (id.startsWith("stone_axe") && hasMaterial(inv, Items.IRON_INGOT, 3) && hasMaterial(inv, Items.STICK, 2)) target = Items.IRON_AXE;
-			else if (id.startsWith("stone_sword") && hasMaterial(inv, Items.IRON_INGOT, 2) && hasMaterial(inv, Items.STICK, 1)) target = Items.IRON_SWORD;
+			if (id.startsWith("stone_axe") && !hasIronAxeOrBetter && hasMaterial(inv, Items.IRON_INGOT, 3) && hasMaterial(inv, Items.STICK, 2)) target = Items.IRON_AXE;
+			else if (id.startsWith("stone_sword") && !hasIronSwordOrBetter && hasMaterial(inv, Items.IRON_INGOT, 2) && hasMaterial(inv, Items.STICK, 1)) target = Items.IRON_SWORD;
 			else if (id.startsWith("iron_sword") && hasMaterial(inv, Items.DIAMOND, 2) && hasMaterial(inv, Items.STICK, 1)) target = Items.DIAMOND_SWORD;
 
 			if (target != null) {
