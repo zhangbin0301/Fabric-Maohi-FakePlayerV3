@@ -107,6 +107,22 @@ public final class PhaseIronAge implements Phase {
             if (it == Items.FURNACE) hasFurnaceItem = true;
         }
 
+        // V5.184 诊断: 铁器 bot 状态心跳(每 ~10s 一条)—— 专为定位"发呆不挖铁"卡在哪,不用再猜:
+        //   task(当前任务,是不是 IDLE)、smState(在不在 strip-mine)、smCdSec(strip-mine 冷却剩余秒 =
+        //   >0 就是正被锁不能下矿)、noIronCycles(P4.1 预热计数,<5 则还没触发下矿)、rawIron/ironIngot、
+        //   hasFurnaceItem/knownFurnace(能不能熔)、hp、y。发呆的 bot 一眼看出被哪个闸拦住。
+        if (player.getEntityWorld().getServer().getTicks() % 200 < 20) {
+            long cdMs = personality.stripMineCooldownUntil - System.currentTimeMillis();
+            com.maohi.fakeplayer.TaskLogger.log(player, "iron_status",
+                "task", personality.currentTask,
+                "smState", personality.stripMineState,
+                "smCdSec", cdMs > 0 ? (int) (cdMs / 1000) : 0,
+                "noIronCycles", personality.stoneStableCyclesNoIron,
+                "rawIron", rawIronCount, "ironIngot", ironIngotCount,
+                "hasFurnaceItem", hasFurnaceItem, "knownFurnace", personality.knownFurnacePos != null,
+                "hp", (int) player.getHealth(), "y", player.getBlockY());
+        }
+
         // ── P1: 工具缺失回退 ──
         // 没有石镐（或更好的镐）→ 无法正常挖铁矿，降级执行石器时代逻辑补齐工具
         if (!hasStonePickaxe && !hasIronPickaxe) {
