@@ -132,6 +132,10 @@ public class StripMineBehavior {
         }
     }
 
+    /** V5.181 (B): 铁矿寻的半径 —— 大扫(findNearestBlockBig,自带 MSPT 自适应 + 30s 缓存),比 LAYER 原 24 格
+     *  远一倍,让假人更早朝已知铁脉走。下探/平层共用。 */
+    private static final int IRON_SEEK_RADIUS = 48;
+
     private static void tickDescend(ServerPlayerEntity player, Personality pers, MaohiConfig cfg) {
         ServerWorld world = player.getEntityWorld();
         BlockPos pos = player.getBlockPos();
@@ -176,6 +180,32 @@ public class StripMineBehavior {
         if (pos.getY() <= -56) {
             abort(pers, player, "near_bedrock");
             return;
+        }
+
+        // V5.181 (A+B): 下探也顺路挖铁 —— 铁 goal 下挖时,别只顾埋头到 y15 才找铁,把沿途 y16-56 最密的铁捡了。
+        //   先扫 24 格(新鲜 3s 缓存)找铁:近(≤4格)直接隔空 breakBlock 挖掉(不移动身体、不碰楼梯脊柱 =
+        //   上爬照走),远则把楼梯朝它的水平主轴拐;24 内没铁再大扫 48(B)朝更远已知铁脉拐。挖完/拐完照常挖楼梯
+        //   一步一格下行(walkable)。木镐圆石 goal(采不了铁)/钻石 goal 不顺路挖铁。
+        if (!requireIron && !pers.stripMineForCobble) {
+            com.maohi.fakeplayer.VirtualPlayerManager mgr = Maohi.getVirtualPlayerManager();
+            if (mgr != null) {
+                BlockPos iron = mgr.findNearestBlock(world, pos, 24, "iron_ore", player.getUuid());
+                if (iron == null) iron = mgr.findNearestBlockBig(world, pos, IRON_SEEK_RADIUS, "iron_ore");
+                if (iron != null) {
+                    if (pos.getSquaredDistance(iron) <= 16.0) {
+                        com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().report(
+                            com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType.IRON_DEPOSIT,
+                            iron, player.getUuid());
+                        mineBlock(player, world, iron); // 隔空挖沿途铁,不移动、不破坏楼梯脊柱
+                        pers.stoneStableCyclesNoIron = 0;
+                    } else {
+                        int dx = iron.getX() - pos.getX(), dz = iron.getZ() - pos.getZ();
+                        pers.stripMineFacing = Math.abs(dx) >= Math.abs(dz)
+                            ? (dx >= 0 ? Direction.EAST : Direction.WEST)
+                            : (dz >= 0 ? Direction.SOUTH : Direction.NORTH);
+                    }
+                }
+            }
         }
 
         Direction facing = pers.stripMineFacing != null ? pers.stripMineFacing : Direction.NORTH;
@@ -282,8 +312,15 @@ public class StripMineBehavior {
         // V5.158 (B1): foundIronOre 仅当「铁专扫」本身命中 —— 回落泛 ore 命中的非铁块不能误报成 IRON_DEPOSIT。
         boolean foundIronOre = orePos != null && "iron_ore".equals(oreScanType);
         if (orePos == null && "iron_ore".equals(oreScanType) && mgr != null) {
-            // V5.158 (A): 24 格内没铁 → 回落泛 "ore" 别空转(iron_ore 负结果有 3s 缓存,不会每 tick 重扫铁)。
-            orePos = mgr.findNearestBlock(world, pos, 24, "ore", player.getUuid());
+            // V5.181 (B): 24 格内没铁 → 先大扫 48 找更远铁脉(朝它拐;命中仍算 foundIronOre,走近挖到即上报舰队),
+            //   48 内还没铁才回落泛 "ore"(顺路捡煤/铜燃料+圆石搭柱,别空转;iron_ore 负结果有缓存不刷爆)。
+            BlockPos ironFar = mgr.findNearestBlockBig(world, pos, IRON_SEEK_RADIUS, "iron_ore");
+            if (ironFar != null) {
+                orePos = ironFar;
+                foundIronOre = true;
+            } else {
+                orePos = mgr.findNearestBlock(world, pos, 24, "ore", player.getUuid());
+            }
         }
         if (orePos != null) {
             double dist = pos.getSquaredDistance(orePos);
