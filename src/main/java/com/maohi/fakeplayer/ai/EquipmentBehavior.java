@@ -50,9 +50,13 @@ public final class EquipmentBehavior {
 				// V5.84: 按品级优选镐（钻>铁>石>木），而非取 hotbar 第一把。
 				//   关键：用石/木镐挖钻石矿(需铁镐+)会破坏掉、0 掉落 —— 必须确保手持最好的镐,
 				//   否则铁器假人挖到钻石矿也拿不到钻石,永远升不了 DIAMOND_AGE。
-				net.minecraft.item.Item[] pickOrder = {
-					Items.NETHERITE_PICKAXE, Items.DIAMOND_PICKAXE, Items.IRON_PICKAXE, Items.STONE_PICKAXE, Items.WOODEN_PICKAXE
-				};
+				// V5.177: 攒甲期(裸奔)优先石镐挖矿,保住铁镐耐久 → 不磨到维护阈值 → 不触发 3 铁重合备镐 → 铁攒给甲
+				//   (用户「合出铁镐后优先用石镐、石镐爆了再用铁镐」)。石镐照挖 iron_ore;满甲后(进钻石期)才优选
+				//   铁/钻镐(钻石矿需铁镐+,避免石镐挖钻 0 掉落)。石镐耗尽自动回落铁镐(下方 order 里 IRON 紧随 STONE)。
+				net.minecraft.item.Item[] pickOrder =
+					com.maohi.fakeplayer.ai.CraftingBehavior.hasFullIronArmor(player)
+						? new net.minecraft.item.Item[]{ Items.NETHERITE_PICKAXE, Items.DIAMOND_PICKAXE, Items.IRON_PICKAXE, Items.STONE_PICKAXE, Items.WOODEN_PICKAXE }
+						: new net.minecraft.item.Item[]{ Items.STONE_PICKAXE, Items.IRON_PICKAXE, Items.DIAMOND_PICKAXE, Items.NETHERITE_PICKAXE, Items.WOODEN_PICKAXE };
 				if (selectBestTool(player, inv, pickOrder)) return;
 				// V5.43.3 P-3.F: 没镐 → 切到空手槽(空手挖石头出不了 cobble,但至少能挖 stone_age 起始的泥土)
 				switchToEmptySlotIfBetter(player, inv);

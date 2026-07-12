@@ -361,10 +361,12 @@ public final class CraftingBehavior {
 		//   两个断点一起根治。铁镐配方 3 铁锭 + 2 木棍,与升级路径产物一致,executeCraft 已支持该 target。
 		// V5.124: 铁甲未满前只保 1 把健康镐(省铁给造甲);满甲后才囤到 2 把(下钻一趟到底的耐久预算)。
 		//   必须与 hasPendingGearCraft 补镐分支(下方同款 wantPicks)一致,否则 P4.5 会为永不合的第 2 把镐空驻台。
-		// V5.176: 断"挖铁→全喂替换镐"空转 —— 裸奔期保 0 把铁镐(原 V5.124 保 1),铁镐用到断也不用铁重合,
-		//   石镐照挖铁矿、铁 100% 攒给甲(实测每次都卡铁剑铁镐=挖到的 3 铁全赔给耐久掉到 35 的镐、净增≈0)。
-		//   满甲后才恢复维护到 2 把(下钻一趟耐久预算)。必须与 hasPendingGearCraft:524 同款 wantPicks 一致。
-		if (countHealthyIronPickaxes(player) < (hasFullIronArmor(player) ? 2 : 0)
+		// V5.124: 铁甲未满前只保 1 把健康镐;满甲后才囤到 2 把(下钻一趟到底的耐久预算)。
+		// V5.177: 铁镐照做(「先铁镐铁剑再造甲」=用户要求),但攒甲期改用石镐挖矿(见 StripMineBehavior
+		//   .ensurePickaxeInMainHand / EquipmentBehavior MINING 的「优先石镐」)保住铁镐耐久 → 铁镐不磨到维护
+		//   阈值 → count 恒 ≥1 → 本条不触发 3 铁重合备镐 → 铁攒给甲。即「留着铁镐但平时少用它」而非不做。
+		//   必须与 hasPendingGearCraft:524 同款 wantPicks 一致。
+		if (countHealthyIronPickaxes(player) < (hasFullIronArmor(player) ? 2 : 1)
 				&& hasMaterial(inv, Items.IRON_INGOT, 3) && hasMaterial(inv, Items.STICK, 2)) {
 			if (findCraftingTable(player, 6) == null) return;
 			pers.currentTask = com.maohi.fakeplayer.TaskType.CRAFTING;
@@ -524,7 +526,7 @@ public final class CraftingBehavior {
 		if (countHealthyIronPickaxes(player) > 0 && hasStoneSwordExact && !hasIronSwordOrBetter && iron >= 2 && stick >= 1) return true;
 		// 耐久：健康铁镐（耐久 ≥ IRON_PICK_MAINTAIN_DUR）不足 2 把 + 料够 → 回工作台补镐。
 		//   （对应 autoUpgradeTools 的直接补镐；不再依赖石镐模板，残镐也触发补新镐，根治"有镐却用不了不补"死锁）
-		if (countHealthyIronPickaxes(player) < (hasFullIronArmor(player) ? 2 : 0) && iron >= 3 && stick >= 2) return true; // V5.176: 裸奔期0把(不再为镐驻台),同 autoUpgradeTools:364
+		if (countHealthyIronPickaxes(player) < (hasFullIronArmor(player) ? 2 : 1) && iron >= 3 && stick >= 2) return true;
 		// V5.88: 盾牌 —— 无盾牌 + 1 铁锭 + 6 木板 → 需要回工作台合（同 autoCraftArmor 盾牌分支口径）
 		boolean hasShield2 = false;
 		int planks2 = 0;

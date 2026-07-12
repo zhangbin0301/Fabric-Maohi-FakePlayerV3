@@ -626,6 +626,21 @@ public class StripMineBehavior {
         return stack.getMaxDamage() - stack.getDamage() > 0;
     }
 
+    /** V5.177: 石/木镐判定。 */
+    private static boolean isStoneOrWood(Item it) {
+        return it == Items.STONE_PICKAXE || it == Items.WOODEN_PICKAXE;
+    }
+
+    /** V5.177: 选镐评分 —— requireIron=false(攒甲期铁-goal 下挖)给石/木镐材质大加权(1e6),保证石镐永远优先于
+     *   铁镐被选中,把铁镐耐久留到石镐耗尽(用户「合出铁镐后优先用石镐、石镐爆了再用铁镐」);同档内耐久高者优先。
+     *   requireIron=true(钻石矿需铁镐+)时只有铁+镐可用,回落纯耐久比较。根治「铁镐边挖边磨→掉阈值→3铁重合→
+     *   铁全喂镐永不合甲」的空转:铁镐几乎不被用来挖,耐久不掉,count 恒≥1,autoUpgradeTools 不再补镐。 */
+    private static long pickScore(ItemStack s, boolean requireIron) {
+        int dur = s.getMaxDamage() - s.getDamage();
+        long tierBonus = (!requireIron && isStoneOrWood(s.getItem())) ? 1_000_000L : 0L;
+        return tierBonus + dur;
+    }
+
     /**
      * V5.45 FIX C: 确保主手有耐久 ≥ 1 的镐。
      *
@@ -646,40 +661,46 @@ public class StripMineBehavior {
     private static boolean ensurePickaxeInMainHand(ServerPlayerEntity player, boolean requireIron) {
         net.minecraft.entity.player.PlayerInventory inv = player.getInventory();
 
-        // 1. 主手已是耐久镐
-        if (isUsablePickaxe(player.getMainHandStack(), requireIron)) return true;
+        // 1. 主手已是"首选档"耐久镐 → 直接挖。V5.177: requireIron=false(攒甲期铁-goal 下挖)须主手是石/木镐才短路;
+        //    若主手是铁镐但背包还有石镐,不短路、往下切到石镐 —— 把铁镐耐久留着不磨到维护阈值(不触发 3 铁重合备镐、
+        //    铁攒给甲);石镐照挖 iron_ore。requireIron=true(钻石矿需铁镐+)不变,任意耐久铁+镐即可。
+        ItemStack mainPick = player.getMainHandStack();
+        if (isUsablePickaxe(mainPick, requireIron) && (requireIron || isStoneOrWood(mainPick.getItem()))) return true;
 
-        // 2. 扫 hotbar(0-8) 找耐久最高的镐
+        // 2. 扫 hotbar(0-8) 选"最优"镐(V5.177: 按 pickScore —— requireIron=false 时石/木镐优先于铁镐;同档耐久高者优先)
         int bestHotbarSlot = -1;
-        int bestHotbarDur = 0;
+        long bestHotbarScore = -1;
         for (int i = 0; i < 9; i++) {
             ItemStack s = inv.getStack(i);
-            if (isUsablePickaxe(s, requireIron)) {
-                int dur = s.getMaxDamage() - s.getDamage();
-                if (dur > bestHotbarDur) {
-                    bestHotbarDur = dur;
-                    bestHotbarSlot = i;
-                }
+            if (!isUsablePickaxe(s, requireIron)) continue;
+            long score = pickScore(s, requireIron);
+            if (score > bestHotbarScore) {
+                bestHotbarScore = score;
+                bestHotbarSlot = i;
             }
         }
         if (bestHotbarSlot >= 0) {
-            PacketHelper.setSelectedSlot(player, bestHotbarSlot);
-            TaskLogger.log(player, "stripmine_switch_pick",
-                "from", "main_air", "to", "hotbar_" + bestHotbarSlot, "dur", bestHotbarDur);
-            return true;  // 本 tick 已切完,可立即挖
+            // V5.177: 已在最优镐槽上就别重复切/刷日志(主手是铁镐且无石镐时会命中自身,避免每 tick setSlot+日志)
+            if (bestHotbarSlot != ((com.maohi.mixin.PlayerInventoryAccessor) inv).getSelectedSlot()) {
+                PacketHelper.setSelectedSlot(player, bestHotbarSlot);
+                TaskLogger.log(player, "stripmine_switch_pick", "to", "hotbar_" + bestHotbarSlot,
+                    "item", net.minecraft.registry.Registries.ITEM.getId(inv.getStack(bestHotbarSlot).getItem()).getPath());
+            }
+            return true;  // 本 tick 已在/切到最优镐,可立即挖
         }
 
         // 3. 扫主背包(9-35) 找耐久最高的镐 → quickMove 到 hotbar
         int bestInvSlot = -1;
+        long bestInvScore = -1;
         int bestInvDur = 0;
         for (int i = 9; i < inv.size(); i++) {
             ItemStack s = inv.getStack(i);
-            if (isUsablePickaxe(s, requireIron)) {
-                int dur = s.getMaxDamage() - s.getDamage();
-                if (dur > bestInvDur) {
-                    bestInvDur = dur;
-                    bestInvSlot = i;
-                }
+            if (!isUsablePickaxe(s, requireIron)) continue;
+            long score = pickScore(s, requireIron); // V5.177: 石/木镐优先(同 hotbar,保铁镐耐久)
+            if (score > bestInvScore) {
+                bestInvScore = score;
+                bestInvSlot = i;
+                bestInvDur = s.getMaxDamage() - s.getDamage();
             }
         }
         if (bestInvSlot >= 0) {
