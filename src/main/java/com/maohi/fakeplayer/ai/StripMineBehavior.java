@@ -626,19 +626,26 @@ public class StripMineBehavior {
         return stack.getMaxDamage() - stack.getDamage() > 0;
     }
 
-    /** V5.177: 石/木镐判定。 */
-    private static boolean isStoneOrWood(Item it) {
-        return it == Items.STONE_PICKAXE || it == Items.WOODEN_PICKAXE;
+    /** V5.179: 石镐判定(仅 stone,不含 wooden)。木镐挖 iron_ore = 0 掉落,不能与石镐同享挖矿优先级
+     *   —— V5.177 误把二者并列(isStoneOrWood)→ 满耐久木镐分数压过磨损石镐被选去 strip-mine 铁矿、0 收
+     *   (SeaBuilder2024 实测 stripmine_switch_pick item=wooden_pickaxe)。 */
+    private static boolean isStonePick(Item it) {
+        return it == Items.STONE_PICKAXE;
     }
 
-    /** V5.177: 选镐评分 —— requireIron=false(攒甲期铁-goal 下挖)给石/木镐材质大加权(1e6),保证石镐永远优先于
-     *   铁镐被选中,把铁镐耐久留到石镐耗尽(用户「合出铁镐后优先用石镐、石镐爆了再用铁镐」);同档内耐久高者优先。
-     *   requireIron=true(钻石矿需铁镐+)时只有铁+镐可用,回落纯耐久比较。根治「铁镐边挖边磨→掉阈值→3铁重合→
-     *   铁全喂镐永不合甲」的空转:铁镐几乎不被用来挖,耐久不掉,count 恒≥1,autoUpgradeTools 不再补镐。 */
+    /** V5.177/V5.179: 选镐评分。requireIron=false(攒甲期铁-goal 下挖)分三档:石镐 > 铁/钻/下界 > 木镐。
+     *   石镐最高 = 既保住铁镐耐久(不磨到阈值触发 3 铁重合)又能挖 iron_ore;铁+次之 = 石镐耗尽的后备
+     *   (照样挖 iron_ore);木镐垫底 = 挖 iron_ore 零掉落,只在没别的镐时兜底。同档耐久高者优先。
+     *   requireIron=true(钻石矿需铁镐+)时只有铁+镐可用,回落纯耐久比较。 */
     private static long pickScore(ItemStack s, boolean requireIron) {
         int dur = s.getMaxDamage() - s.getDamage();
-        long tierBonus = (!requireIron && isStoneOrWood(s.getItem())) ? 1_000_000L : 0L;
-        return tierBonus + dur;
+        if (requireIron) return dur;
+        Item it = s.getItem();
+        long tier;
+        if (it == Items.STONE_PICKAXE) tier = 2_000_000L;      // 首选:保铁镐 + 能挖 iron_ore
+        else if (it == Items.WOODEN_PICKAXE) tier = 0L;        // 末选:木镐挖 iron_ore = 0 掉落
+        else tier = 1_000_000L;                                // 铁/钻/下界合金:能挖 iron_ore,作后备
+        return tier + dur;
     }
 
     /**
@@ -665,7 +672,7 @@ public class StripMineBehavior {
         //    若主手是铁镐但背包还有石镐,不短路、往下切到石镐 —— 把铁镐耐久留着不磨到维护阈值(不触发 3 铁重合备镐、
         //    铁攒给甲);石镐照挖 iron_ore。requireIron=true(钻石矿需铁镐+)不变,任意耐久铁+镐即可。
         ItemStack mainPick = player.getMainHandStack();
-        if (isUsablePickaxe(mainPick, requireIron) && (requireIron || isStoneOrWood(mainPick.getItem()))) return true;
+        if (isUsablePickaxe(mainPick, requireIron) && (requireIron || isStonePick(mainPick.getItem()))) return true;
 
         // 2. 扫 hotbar(0-8) 选"最优"镐(V5.177: 按 pickScore —— requireIron=false 时石/木镐优先于铁镐;同档耐久高者优先)
         int bestHotbarSlot = -1;
