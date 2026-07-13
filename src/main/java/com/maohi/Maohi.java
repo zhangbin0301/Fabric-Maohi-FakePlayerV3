@@ -294,7 +294,7 @@ public class Maohi implements ModInitializer {
     //   ① needsSmelting 增「熔炼进行中(smeltingFurnacePos!=null || smeltingTicks>0)」项 → 料在炉里就死守炉边
     //   park,直到 tickSmelting 收锭清状态才放行;② 补燃料前置加 rawIron>0 守卫(纯待收时料已在炉、别走开砍树);
     //   ③ targetFurnace 记忆为空时回落 smeltingFurnacePos(熔炼中直接守那口炉)。
-    public static final String VERSION = "V5.187";
+    public static final String VERSION = "V5.188";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

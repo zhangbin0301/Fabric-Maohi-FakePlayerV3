@@ -191,28 +191,31 @@ public class StripMineBehavior {
             return;
         }
 
-        // V5.181/183 (A+B+C): 下探也顺路挖铁 —— 别只顾埋头到 y15 才找铁,把沿途 y16-56 最密的铁捡了。
-        //   V5.183 修(审计 BUG1/2/3):① 只近挖「脚面及以上」的铁(iron.getY() >= 脚下 y = 墙/顶),绝不挖脚下/下一级
-        //   地板(y-1/y-2)→ 楼梯地板脊柱不破、始终 walkable(用户约束);地板处的铁交给楼梯自然穿过/LAYER 收。
-        //   ② (y&1)==0 每下 2 格才扫一次,省 MSPT(48 大扫+洞穴扫每 tick 跑太费;LAYER 本就 %4 节流)。
-        //   ③ 正下方铁(dx=dz=0)不乱拐朝向。近隔空挖、远把楼梯朝它拐、没铁朝洞穴拐;挖完照常一步一格下行。
-        //   木镐圆石 goal(采不了铁)/钻石 goal 不顺路挖。
-        if (!requireIron && !pers.stripMineForCobble && !pers.stripMineForCoal && (pos.getY() & 1) == 0) {
+        // V5.181/183 (A+B+C): 下探也顺路挖矿 —— 别只顾埋头到 y15 才找矿,把沿途最密的目标矿捡了。
+        //   V5.188: 目标矿自适应 —— 煤 goal(缺燃料专程挖煤)顺路找 coal_ore,铁 goal 找 iron_ore;
+        //   煤边下边朝煤拐 + 隔空挖沿途煤,配合 got_coal 早退往往不必挖到 y15(煤在 y16-56 也遍地,净挖石大减)。
+        //   V5.183 修(审计):① 只近挖「脚面及以上」的矿(ore.getY() >= 脚下 y = 墙/顶),绝不挖脚下/下级
+        //   地板(y-1/y-2)→ 楼梯地板脊柱不破、始终 walkable。② (y&1)==0 每下 2 格才扫一次省 MSPT。
+        //   ③ 正下方矿(dx=dz=0)不乱拐。近隔空挖、远把楼梯朝它拐、没矿朝洞穴拐。木镐圆石/钻石 goal 不顺路挖。
+        if (!requireIron && !pers.stripMineForCobble && (pos.getY() & 1) == 0) {
+            String seekType = pers.stripMineForCoal ? "coal_ore" : "iron_ore";
             com.maohi.fakeplayer.VirtualPlayerManager mgr = Maohi.getVirtualPlayerManager();
             if (mgr != null) {
-                BlockPos iron = mgr.findNearestBlock(world, pos, 24, "iron_ore", player.getUuid());
-                if (iron == null) iron = mgr.findNearestBlockBig(world, pos, IRON_SEEK_RADIUS, "iron_ore");
-                if (iron != null) {
-                    // 只隔空挖「脚面及以上、≤4 格」的墙/顶铁 —— 脚下/下级地板(y<脚)的铁不挖,保楼梯脊柱可走
-                    if (pos.getSquaredDistance(iron) <= 16.0 && iron.getY() >= pos.getY()) {
-                        com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().report(
-                            com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType.IRON_DEPOSIT,
-                            iron, player.getUuid());
-                        mineBlock(player, world, iron); // 隔空挖墙/顶铁,不移动、不破坏楼梯地板脊柱
+                BlockPos ore = mgr.findNearestBlock(world, pos, 24, seekType, player.getUuid());
+                if (ore == null) ore = mgr.findNearestBlockBig(world, pos, IRON_SEEK_RADIUS, seekType);
+                if (ore != null) {
+                    // 只隔空挖「脚面及以上、≤4 格」的墙/顶矿 —— 脚下/下级地板(y<脚)的矿不挖,保楼梯脊柱可走
+                    if (pos.getSquaredDistance(ore) <= 16.0 && ore.getY() >= pos.getY()) {
+                        if (!pers.stripMineForCoal) { // 仅铁上报舰队 IRON_DEPOSIT,煤不报
+                            com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().report(
+                                com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType.IRON_DEPOSIT,
+                                ore, player.getUuid());
+                        }
+                        mineBlock(player, world, ore); // 隔空挖墙/顶矿,不移动、不破坏楼梯地板脊柱
                         pers.stoneStableCyclesNoIron = 0;
                     } else {
-                        // 远的 / 脚下地板的铁 → 把楼梯朝它水平主轴拐,让楼梯自然穿过去挖(不破坏脊柱)
-                        int dx = iron.getX() - pos.getX(), dz = iron.getZ() - pos.getZ();
+                        // 远的 / 脚下地板的矿 → 把楼梯朝它水平主轴拐,让楼梯自然穿过去挖(不破坏脊柱)
+                        int dx = ore.getX() - pos.getX(), dz = ore.getZ() - pos.getZ();
                         if (dx != 0 || dz != 0) {
                             pers.stripMineFacing = Math.abs(dx) >= Math.abs(dz)
                                 ? (dx >= 0 ? Direction.EAST : Direction.WEST)
@@ -220,7 +223,7 @@ public class StripMineBehavior {
                         }
                     }
                 } else {
-                    // V5.182 (C): 没探到铁 → 朝最近洞穴拐(1.21 洞壁裸露大量铁,走近后 A 的扫铁又锁定它);
+                    // V5.182 (C): 没探到目标矿 → 朝最近洞穴拐(1.21 洞壁裸露大量矿,走近后扫矿又锁定它);
                     //   楼梯仍一步一格下行(walkable),只是斜着朝洞穴走。LAYER 早有此兜底(V5.141)。
                     Direction caveDir = findCaveDirection(world, pos, 16);
                     if (caveDir != null) pers.stripMineFacing = caveDir;
@@ -352,6 +355,10 @@ public class StripMineBehavior {
             } else {
                 orePos = mgr.findNearestBlock(world, pos, 24, "ore", player.getUuid());
             }
+        }
+        // V5.188: 煤 goal —— 24 内没煤则大扫 48 找更远煤脉朝它拐(镜像铁的 B),避免在层里盲挖净出石头。
+        if (orePos == null && "coal_ore".equals(oreScanType) && mgr != null) {
+            orePos = mgr.findNearestBlockBig(world, pos, IRON_SEEK_RADIUS, "coal_ore");
         }
         if (orePos != null) {
             double dist = pos.getSquaredDistance(orePos);
