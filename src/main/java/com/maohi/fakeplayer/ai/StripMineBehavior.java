@@ -57,7 +57,7 @@ public class StripMineBehavior {
         }
         TaskLogger.log(player, "stripmine_abort", "reason", reason, "y", y,
             "rawIron", abRawIron, "ironIngot", abIngot, "tunnelLen", pers.stripMineTunnelLen,
-            "goal", pers.stripMineForDiamond ? "diamond" : (pers.stripMineForCobble ? "cobble" : "iron"));
+            "goal", pers.stripMineForCoal ? "coal" : (pers.stripMineForDiamond ? "diamond" : (pers.stripMineForCobble ? "cobble" : "iron")));
         
         if (!"got_iron".equals(reason) && !"got_diamond".equals(reason)) {
             pers.stripMineState = PhaseStoneAge.SubPhase.STRIP_MINE_ASCEND;
@@ -69,7 +69,8 @@ public class StripMineBehavior {
             MaohiConfig cfg = MaohiConfig.getInstance();
             boolean benign = "max_len".equals(reason) || "blocked_layer".equals(reason)
                 || "disabled".equals(reason) || "low_durability".equals(reason)
-                || "got_cobble".equals(reason);  // V5.98: 圆石目标达成属成功,短冷却(合出石镐转 STONE_STABLE 后不再走圆石 strip-mine)
+                || "got_cobble".equals(reason)  // V5.98: 圆石目标达成属成功,短冷却(合出石镐转 STONE_STABLE 后不再走圆石 strip-mine)
+                || "got_coal".equals(reason);   // V5.187: 煤目标达成属成功,短冷却(拿到燃料就回炉熔铁,别长锁)
             int cooldownMin = benign
                 ? (cfg != null ? cfg.stripMineBenignCooldownMinutes : 2)
                 : (cfg != null ? cfg.stripMineCooldownMinutes : 10);
@@ -86,6 +87,8 @@ public class StripMineBehavior {
         }
         pers.stripMineTunnelLen = 0;
         pers.stoneStableCyclesNoIron = 0;
+        // V5.187: 单点复位煤目标标志 —— trip 结束即清,下趟铁/钻/圆石入口无需各自清,永不残留。
+        pers.stripMineForCoal = false;
     }
 
     public static void tick(ServerPlayerEntity player, Personality pers) {
@@ -122,7 +125,7 @@ public class StripMineBehavior {
             }
             TaskLogger.log(player, "stripmine_pickup", "count", picked, "y", player.getBlockY(),
                 "rawIron", rawIron, "ironIngot", ironIngot, "cobble", cob,
-                "goal", pers.stripMineForDiamond ? "diamond" : (pers.stripMineForCobble ? "cobble" : "iron"));
+                "goal", pers.stripMineForCoal ? "coal" : (pers.stripMineForDiamond ? "diamond" : (pers.stripMineForCobble ? "cobble" : "iron")));
         }
 
         switch (pers.stripMineState) {
@@ -168,6 +171,12 @@ public class StripMineBehavior {
             return;
         }
 
+        // V5.187: 煤目标早退 —— 缺燃料挖煤,下探途中凑够 COAL_FUEL_TARGET 即 got_coal 上爬,不必拖到 Y15。
+        if (pers.stripMineForCoal && countCoal(player) >= COAL_FUEL_TARGET) {
+            abort(pers, player, "got_coal");
+            return;
+        }
+
         // 到达目标层(V5.84: 钻石 goal 用更深的 stripMineDiamondTargetY)
         // V5.152: 目标层走资源公知单一入口(config 优先,回落 ResourceKnowledge 表),钻石/铁层取值不变。
         int targetY = com.maohi.fakeplayer.ai.cognition.ResourceKnowledge.stripMineTargetY(pers, cfg);
@@ -188,7 +197,7 @@ public class StripMineBehavior {
         //   ② (y&1)==0 每下 2 格才扫一次,省 MSPT(48 大扫+洞穴扫每 tick 跑太费;LAYER 本就 %4 节流)。
         //   ③ 正下方铁(dx=dz=0)不乱拐朝向。近隔空挖、远把楼梯朝它拐、没铁朝洞穴拐;挖完照常一步一格下行。
         //   木镐圆石 goal(采不了铁)/钻石 goal 不顺路挖。
-        if (!requireIron && !pers.stripMineForCobble && (pos.getY() & 1) == 0) {
+        if (!requireIron && !pers.stripMineForCobble && !pers.stripMineForCoal && (pos.getY() & 1) == 0) {
             com.maohi.fakeplayer.VirtualPlayerManager mgr = Maohi.getVirtualPlayerManager();
             if (mgr != null) {
                 BlockPos iron = mgr.findNearestBlock(world, pos, 24, "iron_ore", player.getUuid());
@@ -257,14 +266,22 @@ public class StripMineBehavior {
 
         // 检查是否已拿到目标矿物(V5.84: 钻石 goal 收手于 got_diamond,铁 goal 收手于 got_iron)
         boolean forDiamond = pers.stripMineForDiamond;
-        boolean haveMineral = forDiamond ? hasDiamondInInventory(player) : hasMinedEnoughRawIron(player);
-        // V5.119 主动挖煤: 铁目标够铁后还想凑够煤再上爬(地表熔铁用煤、不掏空木料);煤够 / 钻石目标即收手。
-        //   煤不够则不早退,继续用满 max_len(=64)预算找煤(见下「换向找煤」),到 max_len 仍无煤由 line221
-        //   兜底带铁上爬,地表木料熔(WOOD_LOGS_TARGET=12 够烧)。
-        boolean haveFuel = forDiamond || countCoal(player) >= COAL_FUEL_TARGET;
-        if (haveMineral && haveFuel) {
-            abort(pers, player, forDiamond ? "got_diamond" : "got_iron");
-            return;
+        // V5.187: 煤目标 —— 缺熔炼燃料专程挖煤,够 COAL_FUEL_TARGET 即 got_coal 收手上爬回炉,不看铁/钻的 got 条件。
+        if (pers.stripMineForCoal) {
+            if (countCoal(player) >= COAL_FUEL_TARGET) {
+                abort(pers, player, "got_coal");
+                return;
+            }
+        } else {
+            boolean haveMineral = forDiamond ? hasDiamondInInventory(player) : hasMinedEnoughRawIron(player);
+            // V5.119 主动挖煤: 铁目标够铁后还想凑够煤再上爬(地表熔铁用煤、不掏空木料);煤够 / 钻石目标即收手。
+            //   煤不够则不早退,继续用满 max_len(=64)预算找煤(见下「换向找煤」),到 max_len 仍无煤由 line221
+            //   兜底带铁上爬。
+            boolean haveFuel = forDiamond || countCoal(player) >= COAL_FUEL_TARGET;
+            if (haveMineral && haveFuel) {
+                abort(pers, player, forDiamond ? "got_diamond" : "got_iron");
+                return;
+            }
         }
 
         // V5.98: 圆石目标兜底 —— 一般已在 DESCEND 早退;若到了层仍够圆石即上爬(木镐采不了铁,别在层里空耗)。
@@ -307,7 +324,10 @@ public class StripMineBehavior {
         // V5.143: 「专门挖煤」—— 铁已够、就差煤(炼铁缺燃料)时专扫 coal_ore 直奔煤,别再朝用不到的铁绕路
         //   /靠 V5.119 瞎转。同钻石思路;煤短缺解除后回落通用 "ore"。其余铁阶段仍通用 "ore"(顺路捡铁+煤)。
         String oreScanType;
-        if (pers.stripMineForDiamond) {
+        if (pers.stripMineForCoal) {
+            // V5.187: 煤目标(缺熔炼燃料就地挖煤,不砍树)—— 全程专扫 coal_ore 直奔煤,够即 got_coal 上爬。
+            oreScanType = "coal_ore";
+        } else if (pers.stripMineForDiamond) {
             oreScanType = "diamond_ore";
         } else if (hasMinedEnoughRawIron(player) && countCoal(player) < COAL_FUEL_TARGET) {
             oreScanType = "coal_ore";

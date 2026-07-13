@@ -35,6 +35,10 @@ public class Personality {
 	// V5.98: strip-mine「圆石目标」—— STONE_START 木镐采不了铁,只为取圆石下挖;够数即 abort got_cobble 上爬
 	//   回地表台合石镐,不再奔 Y15(深陷无台 → 几十圆石也合不出石镐)。仅 STONE_START 入口置 true,铁/钻入口 false。
 	public transient boolean stripMineForCobble = false;
+	// V5.187: strip-mine「煤目标」—— 铁器/石器缺熔炼燃料时,就地下挖煤(coal_ore)而非爬回地表砍树烧炭。
+	//   煤是正牌燃料、地下管够、bot 已在矿层,避免导航抽风+烧掉后面要用的木料。够 COAL_FUEL_TARGET 即 abort got_coal
+	//   上爬回炉熔铁。仅缺燃料入口(tryCoalStripMineForFuel)置 true,铁/钻/圆石入口 false,abort() 单点复位。
+	public transient boolean stripMineForCoal = false;
 	public transient BlockPos stripMineStartPos = null;
 	public transient int stripMineStartY = 64;
 	public int stoneStableCyclesNoIron = 0;

@@ -173,6 +173,13 @@ public final class PhaseIronAge implements Phase {
             //   V5.167: 仅在「还有生铁要摆」(rawIron>0)时才去补燃料;若只是熔炼进行中(rawIron==0,料已在炉)
             //   则燃料早在炉里、无需再砍 → 跳过直接下去 park 守炉,别因缺手持燃料又走开导致 walked_away。
             if (rawIronCount > 0 && !com.maohi.fakeplayer.ai.SmeltingBehavior.hasSmeltFuel(player)) {
+                // V5.187: 缺燃料优先「就地下挖煤」—— 煤是铁器正牌燃料、地下管够、bot 已在矿层,避免爬回地表
+                //   砍树(导航抽风 + 烧掉后面要用的木料)。strip-mine 不可用(冷却/血低/禁用)才回落砍树烧炭。
+                if (tryCoalStripMineForFuel(player, personality)) {
+                    com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_fuel_mine_coal",
+                        "rawIron", rawIronCount, "ironIngot", ironIngotCount, "botY", player.getBlockY());
+                    return;
+                }
                 // V5.117 Fix-1: 深井 bot 砍不到 log → 先柱式上爬回地表（同 PhaseStoneAge SA-P0 V5.111 改造）。
                 //   ascendToSurfaceIfDeep 自带 stripMineState==null + cobble≥8 守卫，安全前置。
                 if (PhaseStoneAge.ascendToSurfaceIfDeep(player, personality, cobbleCount)) {
@@ -836,6 +843,32 @@ public final class PhaseIronAge implements Phase {
     }
 
     /**
+     * V5.187: 缺熔炼燃料时优先「就地下挖煤」而非爬回地表砍树烧炭 —— 煤是铁器正牌燃料、地下管够、bot 已在矿层,
+     *   避免导航抽风 + 烧掉后面要用的木料(用户铁律:缺燃料就下挖煤;木器时代囤的木留给工具/建台,不是当燃料烧)。
+     *   strip-mine 可用(未激活/未冷却/血足/开关开)才发起 coal-goal 下挖,发起失败(冷却/血低/禁用)由调用方
+     *   回落原砍树烧炭路径(石镐/铁镐都能挖煤,requireIron=false,不占铁镐耐久走 pickScore 石镐优先)。
+     */
+    private static boolean tryCoalStripMineForFuel(ServerPlayerEntity player, Personality personality) {
+        com.maohi.MaohiConfig cfg = com.maohi.MaohiConfig.getInstance();
+        if (personality.stripMineState != null) return false;          // 已在 strip-mine
+        if (cfg == null || !cfg.enableStripMine) return false;
+        if (personality.stripMineCooldownUntil > System.currentTimeMillis()) return false;
+        if (player.getHealth() <= 14.0f) return false;
+        personality.stripMineForDiamond = false;
+        personality.stripMineForCobble = false;
+        personality.stripMineForCoal = true;
+        personality.stripMineState = PhaseStoneAge.SubPhase.STRIP_MINE_DESCEND;
+        personality.stripMineStartPos = player.getBlockPos().toImmutable();
+        personality.stripMineStartY = player.getBlockY();
+        personality.stripMineTunnelLen = 0;
+        personality.stripMineConsecutiveFails = 0;
+        personality.currentTask = TaskType.STRIP_MINE;
+        com.maohi.fakeplayer.TaskLogger.log(player, "stripmine_enter",
+            "goal", "coal_for_fuel", "startY", personality.stripMineStartY);
+        return true;
+    }
+
+    /**
      * V5.86 SA-P1~P6+V5.111~115 主动冶炼决策块搬迁自 PhaseStoneAge.STONE_STABLE case。
      *   触发条件: 灰火>有石镐(确保能挖铁) + 背包有 raw_iron + 铁锭不足 smeltTarget 锭(进 IRON_AGE 门槛)。
      *   优先级高于 strip-mine + 砍/挖默认随机: 有铁矿先炼比下挖找钻石更快升阶。
@@ -858,6 +891,11 @@ public final class PhaseIronAge implements Phase {
         // SA-P0: 冶炼前置 —— 有铁矿但无燃料 → 先砍树补燃料;深处砍不到 → 柱式上爬。
         //   V5.167: 仅在还有生铁要摆(rawIron>0)时补燃料;纯熔炼进行中(料已在炉)跳过,别走开导致 walked_away。
         if (d.rawIronCount > 0 && !com.maohi.fakeplayer.ai.SmeltingBehavior.hasSmeltFuel(player)) {
+            // V5.187: 缺燃料优先就地下挖煤(同 IRON_AGE 主路),strip-mine 不可用才回落砍树烧炭。
+            if (tryCoalStripMineForFuel(player, personality)) {
+                com.maohi.fakeplayer.TaskLogger.log(player, "stone_smelt_mine_coal", "rawIron", d.rawIronCount);
+                return true;
+            }
             if (PhaseStoneAge.ascendToSurfaceIfDeep(player, personality, d.cobbleCount)) return true;
             com.maohi.fakeplayer.TaskLogger.log(player, "stone_smelt_need_fuel",
                 "logs", d.logCount, "planks", d.plankCount, "rawIron", d.rawIronCount);
