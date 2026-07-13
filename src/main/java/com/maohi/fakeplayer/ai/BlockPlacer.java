@@ -587,6 +587,29 @@ public class BlockPlacer {
 	public static void tryPlaceFurnace(ServerPlayerEntity player, Personality personality) {
 		long now = player.getEntityWorld().getTime();
 
+		// V5.185 诊断: 定位「揣炉却放不下」硬死锁 —— Tom/Tiny 实测 iron_place_own_furnace 刷屏、
+		//   hasFurnaceItem=true knownFurnace=false 数分钟不动,且本方法零日志(no_place_pos/forced/recorded
+		//   全无)→ 必在下面 590~636 某个无日志早返闸卡住。这里在所有闸之前把每个闸的判定值一次打全,
+		//   下条 furnace_place_gate 即定死是哪个(stage>0 状态机卡 / screenOpen GUI 卡 / carrying 标志卡 /
+		//   nearby6=true 检测口径不一致「有炉不放却又熔不了」/ fSlot>8 炉滞留背包换槽没生效)。IDLE + 手握炉才打,节流 2s。
+		if (personality.currentTask == TaskType.IDLE && now % 40L == 0L) {
+			PlayerInventory dbgInv = player.getInventory();
+			int dbgSlot = -1;
+			for (int i = 0; i < dbgInv.size(); i++) {
+				if (dbgInv.getStack(i).isOf(Items.FURNACE)) { dbgSlot = i; break; }
+			}
+			if (dbgSlot >= 0) {
+				com.maohi.fakeplayer.TaskLogger.log(player, "furnace_place_gate",
+					"stage", personality.furnacePlaceStage,
+					"screenOpen", player.currentScreenHandler != player.playerScreenHandler,
+					"carrying", personality.carryingFurnaceForReuse,
+					"eating", personality.isEating, "sparring", personality.isSparring,
+					"nearby6", findFurnaceNearby(player, 6),
+					"fSlot", dbgSlot,
+					"retryCdMs", Math.max(0L, personality.furnacePlaceRetryCooldownUntil - now));
+			}
+		}
+
 		if (personality.furnacePlaceStage > 0) {
 			advanceFurnacePlaceStateMachine(player, personality, now);
 			return;
