@@ -839,4 +839,61 @@ public class BlockPlacer {
 		p.furnacePlaceAtTick = 0L;
 		p.furnaceRestoreAtTick = 0L;
 	}
+
+	/**
+	 * V5.186: 强制解锁「揣炉却放不下」死锁 —— 绕开 tryPlaceFurnace 的所有脆弱早返闸
+	 *   (状态机 stuck / GUI 卡开 617 / carrying 标志 622 / 背包换槽 636 没生效),直接 setBlockState
+	 *   把炉拍地上。由 PhaseIronAge 在连续多个 assignTask 周期仍放不下炉时调(furnacePlaceStuckAssigns 超阈值)。
+	 *   一并关掉可能卡着的非玩家 GUI(它会同时噎住 tryPlaceFurnace:617 与 autoSmeltOres 的开炉窗)+ 清
+	 *   carrying + reset 状态机,把熔炼侧同源阻塞一起解开。落点/扣 item/记账镜像状态机 stage1/stage2。
+	 *   Tom/Tiny 型「挖到 6 粗铁爬回地表、揣炉两小时放不下、永远裸奔」的兜底根治。
+	 *   @return true=已强拍炉并记录 knownFurnacePos(上游随即 park 熔铁)。
+	 */
+	public static boolean forcePlaceFurnaceNow(ServerPlayerEntity player, Personality personality) {
+		net.minecraft.server.world.ServerWorld world = player.getEntityWorld();
+
+		// ① 关掉卡着的非玩家 GUI(熔炉/工作台开了没关 → 同时噎住放炉与熔炼)
+		if (player.currentScreenHandler != player.playerScreenHandler) {
+			InventoryActionHelper.closeScreen(player);
+		}
+		// ② 清掉可能卡住的标志 + 中断脆弱状态机
+		personality.carryingFurnaceForReuse = false;
+		resetFurnacePlaceState(personality);
+
+		// ③ 背包任意位置找炉 item(强放不经手持/换槽,slot>8 也无妨)
+		PlayerInventory inv = player.getInventory();
+		int furnaceSlot = -1;
+		for (int i = 0; i < inv.size(); i++) {
+			if (inv.getStack(i).isOf(Items.FURNACE)) { furnaceSlot = i; break; }
+		}
+		if (furnaceSlot == -1) return false;
+
+		// ④ 落点:脚周 4 邻 → 头顶 → 脚下,第一个 air/可替换(chunk-ready)即用(炉可悬空,无需支撑)
+		BlockPos foot = player.getBlockPos();
+		BlockPos[] cands = { foot.north(), foot.south(), foot.east(), foot.west(), foot.up(), foot.down() };
+		BlockPos placeAt = null;
+		for (BlockPos c : cands) {
+			if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(world, c.getX() >> 4, c.getZ() >> 4)) continue;
+			net.minecraft.block.BlockState st = world.getBlockState(c);
+			if (st.isAir() || st.isReplaceable()) { placeAt = c; break; }
+		}
+		if (placeAt == null) return false; // 四周全实心(地表几乎不可能)→ 留给上游挪窝
+
+		// ⑤ 强放 + 扣 item + 记账(镜像状态机 stage1 强放 + stage2 记录)
+		boolean placed = world.setBlockState(placeAt, net.minecraft.block.Blocks.FURNACE.getDefaultState());
+		if (!placed) return false;
+		ItemStack fs = inv.getStack(furnaceSlot);
+		if (!fs.isEmpty() && fs.isOf(Items.FURNACE)) fs.decrement(1);
+		world.playSound(null, placeAt,
+			net.minecraft.block.Blocks.FURNACE.getDefaultState().getSoundGroup().getPlaceSound(),
+			net.minecraft.sound.SoundCategory.BLOCKS, 1.0f, 1.0f);
+		personality.knownFurnacePos = placeAt;
+		personality.furnacesOwned.add(placeAt);
+		com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().report(
+			com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType.FURNACE,
+			placeAt, player.getUuid());
+		com.maohi.fakeplayer.TaskLogger.log(player, "furnace_unstick_forced",
+			"pos", placeAt, "stuckAssigns", personality.furnacePlaceStuckAssigns);
+		return true;
+	}
 }

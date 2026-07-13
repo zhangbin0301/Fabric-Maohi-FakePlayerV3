@@ -368,6 +368,11 @@ public class Personality {
 	// V5.155: 熔炉放置失败(四邻无空位/被围/坏点)挪窝冷却,对称 tablePlaceRetryCooldownUntil。
 	//   tryPlaceFurnace 在 no_place_pos 时武装;smelt 建炉分支据此 setExplore 换地重试,根治「揣炉却放不下」死循环。
 	public long furnacePlaceRetryCooldownUntil = 0L;
+	// V5.186: 连续几个 assignTask 周期都卡在 iron_place_own_furnace(揣炉、无炉、放不下)的计数。
+	//   tryPlaceFurnace 有一整个派发周期(~5-6s)机会仍没把炉放上 → 计数++;超阈值 → PhaseIronAge
+	//   调 BlockPlacer.forcePlaceFurnaceNow 绕开所有脆弱闸强拍炉,根治 Tom/Tiny 型「揣炉两小时放不下」死锁。
+	//   贴到炉(park 分支)即清零。transient:纯运行时状态,无需存档。
+	public transient int furnacePlaceStuckAssigns = 0;
 	// planA P-1 诊断:tryPlaceCraftingTable 节流日志锚点(避免每 tick 刷屏)。
 	public transient long lastTablePlaceDiagAt = 0L;
 	// V5.45 OPT: no_inv_table 是木器时代常态,单独延长节流到 5min(6000 tick),

@@ -230,6 +230,7 @@ public final class PhaseIronAge implements Phase {
             }
 
             if (targetFurnace != null) {
+                personality.furnacePlaceStuckAssigns = 0; // V5.186: 已有可用炉(知/找到)→ 清「揣炉放不下」卡死计数
                 double distSq = player.getBlockPos().getSquaredDistance(targetFurnace);
                 if (distSq > FURNACE_NEAR_SQ) {
                     // P3: 不在熔炼范围（5 格）→ 走过去贴炉
@@ -265,10 +266,22 @@ public final class PhaseIronAge implements Phase {
                     personality.carryingFurnaceForReuse = false; // 解 tryPlaceFurnace 放置闸
                     if (player.getEntityWorld().getTime() < personality.furnacePlaceRetryCooldownUntil) {
                         setExplore(personality, player);
+                        personality.furnacePlaceStuckAssigns = 0; // 挪窝换地重来,卡死计数清零
                         com.maohi.fakeplayer.TaskLogger.log(player, "iron_relocate_furnace", "reason", "no_place_pos");
                     } else {
-                        PhaseUtil.setIdle(personality, player, 60); // 驻留让 tryPlaceFurnace 落地复用/新建
-                        com.maohi.fakeplayer.TaskLogger.log(player, "iron_place_own_furnace", "cobble", cobbleCount);
+                        // V5.186: tryPlaceFurnace 有一整个派发周期(~5-6s)机会仍没把炉放上 → 计数;连续 ≥2 周期
+                        //   (~10s,诊断已打数条 furnace_place_gate)判定「揣炉却放不下」死锁 → 绕开所有脆弱闸
+                        //   (状态机/GUI卡开/carrying标志/背包换槽)直接强拍炉,根治 Tom/Tiny 揣 6 粗铁两小时放不下裸奔。
+                        personality.furnacePlaceStuckAssigns++;
+                        if (personality.furnacePlaceStuckAssigns >= 2
+                                && com.maohi.fakeplayer.ai.BlockPlacer.forcePlaceFurnaceNow(player, personality)) {
+                            personality.furnacePlaceStuckAssigns = 0;
+                            PhaseUtil.setIdle(personality, player, 40); // 炉已落地 → 短驻留让 autoSmeltOres 贴炉熔铁
+                        } else {
+                            PhaseUtil.setIdle(personality, player, 60); // 驻留让 tryPlaceFurnace 落地复用/新建
+                            com.maohi.fakeplayer.TaskLogger.log(player, "iron_place_own_furnace",
+                                "cobble", cobbleCount, "stuckAssigns", personality.furnacePlaceStuckAssigns);
+                        }
                     }
                     return;
                 }
