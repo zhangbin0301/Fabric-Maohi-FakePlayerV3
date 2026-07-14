@@ -126,7 +126,18 @@ public class PlayerSpawner {
 		//   范围内随机 (dx, dz),然后在该列找 MOTION_BLOCKING 顶部作为 Y。多次尝试找安全位置。
 		//   旧实现把所有新假人钉死 (base.x+0.5, base.y, base.z+0.5) → 100 个 bot 全在一个点 = 致命指纹。
 		//   老假人(saved != null)的位置由 onPlayerConnect → loadPlayerData 从 NBT 覆写,这里散得多没关系。
-		net.minecraft.util.math.BlockPos basePos = readWorldSpawnPos(overworld);
+		// V5.189: 新假人优先在 fleetHome 出生(整队已搬去有树的地方),而非贫瘠 world-spawn 再长途奔袭
+		//   967 格 → 消掉「spawn 区 + fleetHome 区 + 中间走廊」三片虚拟区块生成(4G 内存爆主因)。
+		//   仅 saved==null(全新 bot);老 bot 位置由 onPlayerConnect→loadPlayerData 从 NBT 覆写、不受影响。
+		//   守卫:① fleetHome 已设(整队搬过家) ② 其 chunk 已加载(=整队正在那儿,零新区块加载,只是并进已加载簇)。
+		//   任一不满足(首只 bot / 全队登出 / 未搬家)→ 回落 world-spawn,行为与原来一致。
+		net.minecraft.util.math.BlockPos fleetHome = (saved == null)
+			? com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().getFleetHome()
+			: null;
+		boolean bornAtFleet = fleetHome != null
+			&& com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(
+				overworld, fleetHome.getX() >> 4, fleetHome.getZ() >> 4);
+		net.minecraft.util.math.BlockPos basePos = bornAtFleet ? fleetHome : readWorldSpawnPos(overworld);
 		int spawnRadius = readSpawnRadius(server, overworld);
 		net.minecraft.util.math.BlockPos finalPos = pickScatteredSpawn(overworld, basePos, spawnRadius);
 		player.refreshPositionAndAngles(
@@ -140,6 +151,7 @@ public class PlayerSpawner {
 		TaskLogger.logRaw(name, "spawn_pos",
 			"base", "(" + basePos.getX() + "," + basePos.getY() + "," + basePos.getZ() + ")",
 			"radius", spawnRadius,
+			"atFleetHome", bornAtFleet,
 			"final", "(" + finalPos.getX() + "," + finalPos.getY() + "," + finalPos.getZ() + ")",
 			"playerPos", "(" + player.getX() + "," + player.getY() + "," + player.getZ() + ")");
 	}
