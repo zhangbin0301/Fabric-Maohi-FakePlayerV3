@@ -490,26 +490,27 @@ public final class PhaseIronAge implements Phase {
                     && personality.stripMineState == null
                     && personality.stripMineCooldownUntil <= System.currentTimeMillis()
                     && player.getHealth() > 14.0f) {
-                personality.stoneStableCyclesNoIron++;
-                if (personality.stoneStableCyclesNoIron >= ironCfg.stripMineTriggerCycles) {
-                    personality.stripMineForDiamond = false;
-                    personality.stripMineForCobble = false;
-                    personality.stripMineState = PhaseStoneAge.SubPhase.STRIP_MINE_DESCEND;
-                    personality.stripMineStartPos = player.getBlockPos().toImmutable();
-                    personality.stripMineStartY = player.getBlockY();
-                    personality.stripMineTunnelLen = 0;
-                    personality.stripMineConsecutiveFails = 0;
-                    personality.stoneStableCyclesNoIron = 0;
-                    personality.currentTask = TaskType.STRIP_MINE;
-                    // V5.158: 铁目标 → 把下挖楼梯朝最可能有铁的方向瞄准(共享图/开天眼大扫/洞穴)
-                    com.maohi.fakeplayer.ai.StripMineBehavior.aimIronDescend(player, personality);
-                    com.maohi.fakeplayer.TaskLogger.log(player, "stripmine_enter",
-                        "goal", p41PickResupply ? "iron_resupply" : "armor_iron",
-                        "startY", personality.stripMineStartY,
-                        "ironIngots", ironIngotCount, "rawIron", rawIronCount,
-                        "armorNeed", p41ArmorIronShort ? p41ArmorNeed : 0, "phase", "IRON_AGE");
-                    return;
-                }
+                // V5.190: 铁荒 bot 死盯挖铁 —— 删 5 周期 warm-up 空转,冷却一过立即下矿。
+                //   warm-up(stoneStableCyclesNoIron>=stripMineTriggerCycles=5)本为 STONE_STABLE 圆石错峰,
+                //   对"急需甲铁/补镐铁"的目标驱动 bot 是纯浪费:每攒一周期就掉进 P5 随机池抽风(砍不到的树/
+                //   够不到的矿 → 快失败 → 每秒重 roll 3~4 次 = 217 assigns/60s 的元凶)。目标明确的挖铁无需错峰。
+                personality.stripMineForDiamond = false;
+                personality.stripMineForCobble = false;
+                personality.stripMineState = PhaseStoneAge.SubPhase.STRIP_MINE_DESCEND;
+                personality.stripMineStartPos = player.getBlockPos().toImmutable();
+                personality.stripMineStartY = player.getBlockY();
+                personality.stripMineTunnelLen = 0;
+                personality.stripMineConsecutiveFails = 0;
+                personality.stoneStableCyclesNoIron = 0;
+                personality.currentTask = TaskType.STRIP_MINE;
+                // V5.158: 铁目标 → 把下挖楼梯朝最可能有铁的方向瞄准(共享图/开天眼大扫/洞穴)
+                com.maohi.fakeplayer.ai.StripMineBehavior.aimIronDescend(player, personality);
+                com.maohi.fakeplayer.TaskLogger.log(player, "stripmine_enter",
+                    "goal", p41PickResupply ? "iron_resupply" : "armor_iron",
+                    "startY", personality.stripMineStartY,
+                    "ironIngots", ironIngotCount, "rawIron", rawIronCount,
+                    "armorNeed", p41ArmorIronShort ? p41ArmorNeed : 0, "phase", "IRON_AGE");
+                return;
             }
         }
 
@@ -607,9 +608,14 @@ public final class PhaseIronAge implements Phase {
         }
 
         // ── P5: 正常挖矿任务 ──
+        // V5.190: 铁荒 bot(有铁镐 + 没满甲)唯一目标是挖铁凑甲 —— P5 不再给它 20% 砍不到的树 + 15% 打怪
+        //   的抽风机会,全部走"找矿 / 下挖 / 有界漂移"。把随机砍木/打怪从它的可能状态里摘掉(消掉抽风需求本身,
+        //   非调阈值):木料它已有(铁镐在手 + 木棍),不缺;缺的是铁,就该一门心思找铁。满甲后 ironFocused=false
+        //   恢复正常随机 roll(砍木/打怪/探索照旧)。
+        boolean ironFocused = hasIronPickaxe && !hasFullIronArmor;
         int roll = ThreadLocalRandom.current().nextInt(100);
 
-        if (roll < 55) {
+        if (ironFocused || roll < 55) {
             // 优先找矿石（iron / coal 层）
             BlockPos target = ctx.findOre.apply(world, player.getBlockPos());
             if (target != null) {

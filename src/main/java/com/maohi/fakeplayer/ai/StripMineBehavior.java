@@ -74,7 +74,17 @@ public class StripMineBehavior {
             int cooldownMin = benign
                 ? (cfg != null ? cfg.stripMineBenignCooldownMinutes : 2)
                 : (cfg != null ? cfg.stripMineCooldownMinutes : 10);
-            pers.stripMineCooldownUntil = System.currentTimeMillis() + cooldownMin * 60_000L;
+            long cooldownMs = cooldownMin * 60_000L;
+            // V5.190: 铁荒 bot 死盯挖铁 —— 没满甲的「铁目标」trip 撞 max_len/blocked(这趟没找到铁)时,
+            //   把 2min benign 冷却砍到 40s:naked bot 没撞见铁就该换个方向马上再挖,静坐 2min = 掉进 P5 随机池抽风。
+            //   近基地重下矿复用已加载 chunk(内存安全,不同于 spawn↔fleetHome 远征走廊 churn)。仅对 iron 目标 +
+            //   没满甲生效;圆石/煤/钻石目标、已满甲的补锭 trip 仍走常规 2min,不激进(避免 tunnel-spam / chunk churn)。
+            boolean ironGoalTrip = !pers.stripMineForDiamond && !pers.stripMineForCobble && !pers.stripMineForCoal;
+            if (benign && ironGoalTrip && player != null
+                    && !com.maohi.fakeplayer.ai.CraftingBehavior.hasFullIronArmor(player)) {
+                cooldownMs = 40_000L;
+            }
+            pers.stripMineCooldownUntil = System.currentTimeMillis() + cooldownMs;
         } else {
             // V5.109: got_iron/got_diamond 也走 ASCEND 爬回地表,而非原地 IDLE(stays at depth)。
             //   旧 IDLE-at-depth 让 PhaseStoneAge 冶炼驱动从 Y15 对地表 furnace 发 RETURN_TO_BASE,
