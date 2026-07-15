@@ -201,8 +201,14 @@ public class EnvironmentSensor {
 	 */
 	public static boolean interactBedAt(ServerPlayerEntity player, BlockPos bedPos) {
 		net.minecraft.server.world.ServerWorld world = player.getEntityWorld();
-		net.minecraft.block.BlockState state = world.getBlockState(bedPos);
-		if (state.getBlock() instanceof BedBlock) {
+		// V5.191: chunk-ready 前置(崩服修)—— 原 raw world.getBlockState(bedPos) 在床所在 chunk 已卸载时
+		//   触发 vanilla getChunk(FULL,true) → getChunkBlocking 主线程 park → 60s tick → watchdog 强制崩服
+		//   (2026-07-15 08:18 thread_stall_dump 精确卡此行 → 08:19 单 tick 60s 崩)。本文件 findBed 扫描早有
+		//   isChunkReady 守卫,唯独这个执行入口漏了。改 safeGetBlockState 非阻塞读:未就绪返 null → 视为床
+		//   不可达返 false 交还上游重选,绝不阻塞主线程(项目铁律:主线程禁 raw getBlockState)。
+		net.minecraft.block.BlockState state =
+			com.maohi.fakeplayer.ai.PathfindingNavigation.safeGetBlockState(world, bedPos);
+		if (state != null && state.getBlock() instanceof BedBlock) {
 			// ★ V3.3: 走真实发包 — 反作弊能看到 PlayerInteractBlockC2SPacket
 			net.minecraft.util.hit.BlockHitResult hitResult = 
 				new net.minecraft.util.hit.BlockHitResult(
