@@ -62,6 +62,11 @@ public final class PhaseIronAge implements Phase {
     /** 扫描附近熔炉的半径 */
     private static final int FURNACE_SCAN_RADIUS = 24;
 
+    /** V5.192 (B — 舰队铁匠铺): 距 fleetHome 圆心此半径内的炉视为「基地固定炉」,不自砸回收 —— 留作 per-bot
+     *  专属稳定熔炉,整队回基地冶炼,根除「烧完砸炉带走→到处放不下」的 furnace_craft_skip/揣炉死锁 churn。
+     *  仅回收超出此半径的野外遗留炉(整队搬家后的旧炉)。64²:bot 在 fleetHome ±spawnRadius 簇内建炉,足够覆盖。 */
+    private static final double FLEET_SMITHY_RADIUS_SQ = 64.0 * 64.0;
+
     /** 扫描附近工作台的半径（判断能否原地合熔炉） */
     private static final int WORKBENCH_SCAN_RADIUS = 6;
 
@@ -368,7 +373,12 @@ public final class PhaseIronAge implements Phase {
 
                 // P2c: 什么都没有 → 先查共享地图找别的 bot 放的炉，否则朝 spawn 方向探索
                 // V5.117 Fix-2: 错峰查 SharedResourceMap FURNACE, 比朝 spawn 几何搜索快 4-5 倍
-                if (com.maohi.fakeplayer.ai.cognition.SharedResourceMap.shouldQueryThisTick(
+                // V5.192 (B — 专属炉不抢): 仅「从没建过炉」的 bootstrap bot 才蹭邻居炉起步 —— 已 owned 过炉的
+                //   bot 绝不导航去共用别 bot 的炉(熔炉输入/输出槽是共享物理库存,两 bot 一炉=混料抢锭、
+                //   A 的锭被 B 收走,破坏 per-bot 铁账本 smeltingFurnacePos)。owned 过的回自己的炉 / 就地重建
+                //   (下方 bootstrap 分支);此蹭炉仅留给真·零炉起步,起步后建了自己的炉即永不再走这条。
+                if (personality.furnacesOwned.isEmpty()
+                        && com.maohi.fakeplayer.ai.cognition.SharedResourceMap.shouldQueryThisTick(
                         player.getEntityWorld().getServer().getTicks(),
                         personality.triggerPhaseSeed, personality.taskFailCount)) {
                     com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkNode peerFurnace =
@@ -407,6 +417,13 @@ public final class PhaseIronAge implements Phase {
         // V5.117 Fix-5(重做): 熔炼已了结(无生铁可炼)且 bot 还贴在自己拍过的炉边 → 趁 ≤5 格把炉敲回带走,
         //   离开后炉变远就只能丢弃/重建;FURNACE item 进包后由上面建炉分支复用(省 8 圆石、不留炉子垃圾)。
         //   仅收 owned(不拆别人/共享炉);收走即清 knownFurnacePos,furnacesOwned 留给 RecycleFurnaceTask 成功时清。
+        // V5.192 (B — 舰队铁匠铺): 炉在 fleetHome 附近 → 不砸,留作 per-bot 专属固定炉。整队回基地冶炼、
+        //   炉常驻已加载簇 —— 根除「烧完砸炉带走→furnace_craft_skip 揣着炉放不下」的反复重建 churn(用户实测
+        //   PigTraderhd 揣炉 furnaceNearby=false 死锁即此)。仅野外遗留炉(距 fleetHome >64,整队搬家后旧炉)才回收。
+        BlockPos smithyHome = com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().getFleetHome();
+        boolean furnaceIsBaseSmithy = smithyHome != null
+                && personality.knownFurnacePos != null
+                && personality.knownFurnacePos.getSquaredDistance(smithyHome) <= FLEET_SMITHY_RADIUS_SQ;
         if (rawIronCount == 0
                 && personality.smeltingTicks <= 0
                 && personality.smeltingFurnacePos == null
@@ -414,6 +431,7 @@ public final class PhaseIronAge implements Phase {
                 && !personality.carryingFurnaceForReuse
                 && personality.knownFurnacePos != null
                 && personality.furnacesOwned.contains(personality.knownFurnacePos)
+                && !furnaceIsBaseSmithy
                 && player.getBlockPos().getSquaredDistance(personality.knownFurnacePos) <= FURNACE_NEAR_SQ) {
             personality.recycleTarget = personality.knownFurnacePos;
             personality.knownFurnacePos = null;

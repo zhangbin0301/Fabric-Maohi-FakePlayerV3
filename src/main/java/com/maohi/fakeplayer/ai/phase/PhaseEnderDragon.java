@@ -262,7 +262,13 @@ public final class PhaseEnderDragon implements Phase {
         ScanCache c = SCAN_CACHE.computeIfAbsent(player.getUuid(), k -> new ScanCache());
         long now = System.currentTimeMillis();
         if (c.portalFrame != null && now - c.portalFrameCachedAt < SCAN_CACHE_TTL_MS) {
-            if (world.getBlockState(c.portalFrame).isOf(Blocks.END_PORTAL_FRAME)) return c.portalFrame;
+            // V5.192: safeGetBlockState 非阻塞读(崩服修,同 interactBedAt/V5.191)—— 原 raw
+            //   getBlockState(c.portalFrame) 读的是最长 5s 前缓存的远坐标,该 chunk 若已卸载 →
+            //   getChunkBlocking park 主线程 → 60s tick → watchdog 崩服。null(未就绪/已卸载)= 缓存
+            //   失效 → 清缓存,落下面 findEndPortalFrame 重扫(那条自带 isChunkReady 守卫)。
+            net.minecraft.block.BlockState fs =
+                com.maohi.fakeplayer.ai.PathfindingNavigation.safeGetBlockState(world, c.portalFrame);
+            if (fs != null && fs.isOf(Blocks.END_PORTAL_FRAME)) return c.portalFrame;
             c.portalFrame = null;
         }
         BlockPos found = findEndPortalFrame(world, player.getBlockPos());
