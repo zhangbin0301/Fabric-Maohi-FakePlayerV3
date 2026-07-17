@@ -1037,9 +1037,17 @@ public final class PhaseIronAge implements Phase {
             }
         }
         // SA-P5: 有营地工作台记录 + ≤ 长途上限 → 回营建炉
+        // V5.195 thrash 修: 加两道守卫,根治 TinySneaky 型「回营空返」死循环(RETURN_TO_BASE=1305/60s=23次/秒):
+        //   ① cobble≥8 —— 回营是为了「贴台合炉」,没 8 圆石回去也合不出炉 → 该落 SA-P6 先挖圆石,别空返。
+        //   ② 不在营地(距 base >WORKBENCH_NEARBY_SQ)才返 —— bot 已在营地却没炉没料时,RETURN_TO_BASE 目标=
+        //      自身位置、秒完成 → 重派 → 秒完成…每 46ms 一次。已在营就落下面 SA-P6/建台,绝不返航到脚下。
         BlockPos saBase = personality.knownWorkbenchPos;
+        double saBaseDistSq = (saBase != null)
+            ? player.getBlockPos().getSquaredDistance(saBase) : Double.MAX_VALUE;
         if (saBase != null
-                && player.getBlockPos().getSquaredDistance(saBase) <= PhaseUtil.SMELT_TRAVEL_MAX_SQ) {
+                && d.cobbleCount >= 8
+                && saBaseDistSq > PhaseUtil.WORKBENCH_NEARBY_SQ
+                && saBaseDistSq <= PhaseUtil.SMELT_TRAVEL_MAX_SQ) {
             PhaseUtil.set(personality, player, TaskType.RETURN_TO_BASE, saBase);
             com.maohi.fakeplayer.TaskLogger.log(player, "stone_smelt_return_base",
                 "reason", "need_furnace", "base", saBase);
