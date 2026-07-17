@@ -147,6 +147,27 @@ public final class PhaseIronAge implements Phase {
         // V5.83: 缺整套铁甲时把熔炼目标抬到 8 锭（够合胸甲），让假人在"未披甲"阶段持续炼铁攒料
         //   → 铁甲快速成型；备齐铁甲后回落到 4（只维持工具铁锭），释放假人去挖钻石不被熔炼拖住。
         boolean hasFullIronArmor = com.maohi.fakeplayer.ai.CraftingBehavior.hasFullIronArmor(player);
+
+        // ── V5.196 裸奔保底(最高优先级,谁都挤不掉)──
+        //   改 30+ 版还裸奔的真因:铁料/铁锭够了,却被「揣炉放不下 / 合台空转 / 回营空返」等设施放置死锁
+        //   卡住,永远走不完「熔炼→合甲→穿」。补丁堵每个分支堵不完 → 这里加终极兜底:铁器 bot 有够料
+        //   (粗铁+铁锭 ≥ 下一件甲所需)却持续 ~40 个派发周期(~40s)仍穿不上甲 → 服务端直接把这条链走完
+        //   (粗铁→锭→合缺甲→穿,见 CraftingBehavior.forceCompleteArmorFromStock;铁料自己挖的,只保证结果)。
+        //   现实路径(下面熔炼/合甲/回基地铁匠铺)照跑;兜底只在真卡住时兜,穿上一件即清零、逐件凑满。
+        if (!hasFullIronArmor) {
+            int nextArmorCost = com.maohi.fakeplayer.ai.CraftingBehavior.ironTargetForNextArmorPiece(player);
+            if (nextArmorCost > 0 && (rawIronCount + ironIngotCount) >= nextArmorCost) {
+                if (++personality.armorSafetyNetCycles >= 40) {
+                    personality.armorSafetyNetCycles = 0;
+                    if (com.maohi.fakeplayer.ai.CraftingBehavior.forceCompleteArmorFromStock(player)) {
+                        return; // 已穿上一件 → 下周期重评估(继续凑下一件 / 已满甲)
+                    }
+                }
+            } else {
+                personality.armorSafetyNetCycles = 0; // 料不够 → 清零,靠挖矿攒够再兜
+            }
+        }
+
         // V5.117 Fix-7: smeltTarget 自适应。Sam2024 卡死主因之一：ironIngot=1 时 smeltTarget=8，
         //   需要连炼 8 炉（每炉 200tick ≈ 10s + 走路 ≈ 80s 才能首次再合成）→ 卡 80s+ 才再 craft_done。
         //   解：锭数已 1/2/3 接近目标时不再坚持 8，降低底线让铁甲快速成型。

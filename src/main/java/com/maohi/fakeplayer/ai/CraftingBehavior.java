@@ -602,6 +602,70 @@ public final class CraftingBehavior {
 		return 0;
 	}
 
+	/**
+	 * V5.196 裸奔保底 —— 绕开放炉/合台/穿甲发包的所有死锁,服务端直接把「粗铁→铁锭→合缺甲→穿上」走完。
+	 *   仅由 PhaseIronAge 在「有够料(粗铁+铁锭 ≥ 下一件甲)却持续 armorSafetyNetCycles 周期穿不上甲」时调
+	 *   (最高优先级兜底,谁都挤不掉)。铁料是 bot 自己挖的,本方法只保证结果、绝不凭空造料:
+	 *     ① 粗铁 1:1 直炼成锭(守恒,绕熔炉/燃料);
+	 *     ② 按 boots4→helmet5→leggings7→chest8 便宜优先扣锭、直接 equipStack 穿上缺的件(绕工作台 + V5.172 穿甲);
+	 *     ③ 无健康铁镐时留 PICK_IRON_RESERVE 给镐,不夺镐的铁(口径同 autoCraftArmor / ironTargetForNextArmorPiece)。
+	 *   现实路径(回基地铁匠铺熔炼/合甲)照跑;本兜底只在真卡住时兜,消灭「改 30 版还裸奔」的所有设施放置死锁。
+	 * @return true = 至少穿上一件(上游清零计数、下周期重评估继续凑下一件 / 已满甲)。
+	 */
+	public static boolean forceCompleteArmorFromStock(ServerPlayerEntity player) {
+		if (hasFullIronArmor(player)) return false;
+		PlayerInventory inv = player.getInventory();
+
+		// ① 粗铁 → 铁锭(服务端直炼,1:1 守恒)
+		int raw = 0;
+		for (int i = 0; i < inv.size(); i++) {
+			ItemStack s = inv.getStack(i);
+			if (s.isOf(Items.RAW_IRON)) { raw += s.getCount(); inv.setStack(i, ItemStack.EMPTY); }
+		}
+		if (raw > 0) inv.offerOrDrop(new ItemStack(Items.IRON_INGOT, raw));
+
+		// ② 统计铁锭 + 无健康铁镐时预留 PICK_IRON_RESERVE
+		int ingots = 0;
+		for (int i = 0; i < inv.size(); i++) {
+			if (inv.getStack(i).isOf(Items.IRON_INGOT)) ingots += inv.getStack(i).getCount();
+		}
+		int avail = (countHealthyIronPickaxes(player) == 0) ? Math.max(0, ingots - PICK_IRON_RESERVE) : ingots;
+
+		// ③ 便宜优先逐件:扣锭 + 服务端直接穿(缺件或非铁级才穿)
+		net.minecraft.entity.EquipmentSlot[] slots = {
+			net.minecraft.entity.EquipmentSlot.FEET, net.minecraft.entity.EquipmentSlot.HEAD,
+			net.minecraft.entity.EquipmentSlot.LEGS, net.minecraft.entity.EquipmentSlot.CHEST };
+		Item[] pieces = { Items.IRON_BOOTS, Items.IRON_HELMET, Items.IRON_LEGGINGS, Items.IRON_CHESTPLATE };
+		int[] cost = { 4, 5, 7, 8 };
+		int equippedCount = 0;
+		for (int k = 0; k < 4; k++) {
+			ItemStack eq = player.getEquippedStack(slots[k]);
+			boolean needs = eq.isEmpty() || getArmorLevel(eq) < 2;
+			if (!needs || avail < cost[k]) continue;
+			int toRemove = cost[k];
+			for (int i = 0; i < inv.size() && toRemove > 0; i++) {
+				ItemStack s = inv.getStack(i);
+				if (s.isOf(Items.IRON_INGOT)) {
+					int take = Math.min(toRemove, s.getCount());
+					s.decrement(take);
+					toRemove -= take;
+				}
+			}
+			ItemStack old = player.getEquippedStack(slots[k]);
+			player.equipStack(slots[k], new ItemStack(pieces[k]));
+			if (!old.isEmpty()) inv.offerOrDrop(old); // 升级替换(石/皮甲)→ 旧件回背包
+			avail -= cost[k];
+			equippedCount++;
+		}
+
+		if (equippedCount > 0) {
+			com.maohi.fakeplayer.TaskLogger.log(player, "armor_safety_net_forced",
+				"pieces", equippedCount, "rawSmelted", raw, "ingotsLeft", avail);
+			return true;
+		}
+		return false;
+	}
+
 	private static void autoCraftRangedGear(ServerPlayerEntity player, com.maohi.fakeplayer.Personality pers, PlayerInventory inv) {
 		int stick = 0, string = 0, flint = 0, feather = 0, arrow = 0;
 		boolean hasBow = false;
