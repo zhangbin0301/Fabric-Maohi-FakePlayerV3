@@ -82,7 +82,15 @@ public class StripMineBehavior {
             boolean ironGoalTrip = !pers.stripMineForDiamond && !pers.stripMineForCobble && !pers.stripMineForCoal;
             if (benign && ironGoalTrip && player != null
                     && !com.maohi.fakeplayer.ai.CraftingBehavior.hasFullIronArmor(player)) {
-                cooldownMs = 40_000L;
+                // V5.193 (review 修): 40s 快速重挖只给「近基地」的铁荒 bot —— 原 V5.190 无距离守卫,
+                //   strayed bot(追远炉/探索到远处)撞 max_len 也 40s 就重下矿 = 每 40s 一片新 Y15 chunk 前沿
+                //   churn(正是当前崩服机制)。加 fleetHome 距离闸:≤128 格(复用已加载簇,安全)才 40s;
+                //   strayed / fleetHome 未设 → 走常规 benign 冷却(2min),绝不喂远处 chunk-gen churn。
+                net.minecraft.util.math.BlockPos fh =
+                    com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().getFleetHome();
+                boolean nearBase = fh != null
+                    && player.getBlockPos().getSquaredDistance(fh) <= 128.0 * 128.0;
+                if (nearBase) cooldownMs = 40_000L;
             }
             pers.stripMineCooldownUntil = System.currentTimeMillis() + cooldownMs;
         } else {

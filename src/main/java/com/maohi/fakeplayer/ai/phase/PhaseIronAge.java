@@ -122,7 +122,7 @@ public final class PhaseIronAge implements Phase {
                 "task", personality.currentTask,
                 "smState", personality.stripMineState,
                 "smCdSec", cdMs > 0 ? (int) (cdMs / 1000) : 0,
-                "noIronCycles", personality.stoneStableCyclesNoIron,
+                "hasIronPick", hasIronPickaxe,
                 "rawIron", rawIronCount, "ironIngot", ironIngotCount,
                 "hasFurnaceItem", hasFurnaceItem, "knownFurnace", personality.knownFurnacePos != null,
                 "hp", (int) player.getHealth(), "y", player.getBlockY());
