@@ -323,7 +323,17 @@ public class MovementController {
 					//   日志证据(09:07~09:13): 5 bot 6 分钟反复 sink_guard 60+ 次,yaw 已覆盖 360°,
 					//     bot 全 0 mined。说明 spawn 周围方圆几十格都是 cave 海,就地救没用。
 					//   远征跨度 500-1500 格 = 30+ chunk,触发 chunk gen 主线程负载,但比死循环可接受。
-					if (pers.sinkGuardConsecutiveCount >= 3) {
+					// V5.194 (①海洋 spawn churn 修): 木器时代「整队迁移」是激活的 escape 机制时(未锁家 + 开启),
+					//   深水连沉的 bot 不做各自 500-1500 格远传 —— 那会把整队打散成 4 个 chunk-gen 前沿(散射
+					//   churn = 当前海洋 spawn 崩服机制)、违背 fleet 迁移「单 chunk 前沿」不变量。改落到下面
+					//   near-rescue 原地上浮(同 x,z 不生成新 chunk),bob 原地等整队迁移(V5.166)把全员一起
+					//   搬到陆地。远传只留给「已锁家 / 非木器」的真·孤立卡死(那时整队迁移不接管)。
+					com.maohi.MaohiConfig sinkFleetCfg = com.maohi.MaohiConfig.getInstance();
+					boolean fleetEscapeActive =
+						pers.growthPhase == GrowthPhase.WOOD_AGE
+						&& sinkFleetCfg != null && sinkFleetCfg.fleetRelocateEnabled
+						&& !com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().isFleetHomeLocked();
+					if (pers.sinkGuardConsecutiveCount >= 3 && !fleetEscapeActive) {
 						double angle = ThreadLocalRandom.current().nextDouble(0, 2 * Math.PI);
 						double dist = 500.0 + ThreadLocalRandom.current().nextDouble(0, 1000.0);
 						int farX = (int) (pos.x + Math.cos(angle) * dist);

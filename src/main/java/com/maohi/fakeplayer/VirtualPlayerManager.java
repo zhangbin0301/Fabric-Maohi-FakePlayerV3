@@ -2091,7 +2091,18 @@ prepareAndSpawnVirtualPlayer();
             return;
         }
 
+        // V5.194 ①: 整队迁移是这批 bot 的指定 escape(木器 + 未锁家 + 开启 + 全队没人知道任何木头)时,别让
+        //   per-bot force_explore_teleport 在迁移冷却间隙把 bot 散射 647 格走(chunk churn + 破坏「单 chunk 前沿」)。
+        //   迁移每冷却周期整体搬一次,间隙 bot 原地等即可。已知木头时不在此列(迁移不触发、force_explore 去取木有用)。
+        //   forceExploreEscalation>=4 放首位短路 → snapshotLandmarks 仅真升级时扫,常态零开销。同 sink_guard 的 fleetEscapeActive。
+        boolean fleetMigrationDesignated = personality.forceExploreEscalation >= 4
+                && fleetCfg != null && fleetCfg.fleetRelocateEnabled
+                && personality.growthPhase == GrowthPhase.WOOD_AGE
+                && !srmFleet.isFleetHomeLocked()
+                && srmFleet.snapshotLandmarks(
+                       com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType.LOG_CLUSTER).isEmpty();
         if (personality.forceExploreEscalation >= 4
+                && !fleetMigrationDesignated
                 && cooldownOk
                 && !com.maohi.fakeplayer.ai.MovementController.hasNearbyRealObserver(p, world, 32)) {
             // V5.62 reworked: 紧急救援 teleport 优先级链 (放弃反同步指纹换 server 稳定 + 成就率):
