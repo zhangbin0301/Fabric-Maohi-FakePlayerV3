@@ -298,7 +298,12 @@ public class Maohi implements ModInitializer {
     //   受 reassign 5s 底放大到 ≥200s 且被长任务压制(同 smeltingTicks 调用计数教训),改 1200 tick 稳 ~60s;
     //   ②兜底穿甲补 story/obtain_armor 里程碑 + lastProgressAt(现实 craft 路径有、兜底原漏);
     //   ③recoverBaseSmithyFurnace 跳黑名单炉(免 recover→forget 每周期空刷)。钻石闸=物理 hasFullIronArmor 不受影响。
-    public static final String VERSION = "V5.198";
+    // V5.199 (崩服修): travel 主线程阻塞 chunk 加载崩服 —— doSmartMove:670 p.travel() 内 vanilla 碰撞/
+    //   落地读方块,bot 移动后在新位置边界读到距原守卫中心 ±2 的 chunk(旧 3x3 只覆盖 ±1)→ 未生成 →
+    //   getChunkBlocking park(c2me 全局并行度=1+慢盘+换页 → 一次 park 满 60s)→ Server Watchdog 判崩。
+    //   修:areTravelChunksReady 守卫 3x3→5x5(±2),覆盖 travel 移动后读的最远 chunk。环境(2CPU/并行度1/
+    //   换页)是把常态 1s chunk 加载放大成 60s 崩的乘数,同步建议用户调 simulation-distance/c2me 并行度。
+    public static final String VERSION = "V5.199";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 
