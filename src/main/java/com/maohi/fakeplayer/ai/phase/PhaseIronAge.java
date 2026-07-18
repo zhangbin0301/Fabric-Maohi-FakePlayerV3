@@ -226,6 +226,16 @@ public final class PhaseIronAge implements Phase {
             if (targetFurnace == null && smeltInProgress) {
                 targetFurnace = personality.smeltingFurnacePos; // V5.167: 熔炼进行中直接守着摆过料的那口炉
             }
+            // V5.197 (B v2): knownFurnacePos 被 forget / 从没记过 → 先从 furnacesOwned 找回「base 铁匠铺炉」
+            //   (距 fleetHome ≤64、chunk-ready 且仍是炉),回那口固定炉用,而不是漫游到远处/地下就地建残废新炉
+            //   (揣炉放不下死锁的根)。找到 → 下面 setReturnToBase 走回去炼;找不到才落 findFurnace 世界扫描 / 建新。
+            if (targetFurnace == null) {
+                BlockPos baseFurnace = recoverBaseSmithyFurnace(world, personality);
+                if (baseFurnace != null) {
+                    personality.knownFurnacePos = baseFurnace;
+                    targetFurnace = baseFurnace;
+                }
+            }
             if (targetFurnace == null) {
                 BlockPos found = findFurnace(world, player.getBlockPos(), FURNACE_SCAN_RADIUS, personality); // V5.168: 跳黑名单(够不到)炉,别再扫回
                 if (found != null) {
@@ -250,7 +260,13 @@ public final class PhaseIronAge implements Phase {
                 boolean furnaceBlacklisted =
                         com.maohi.fakeplayer.Personality.isFailedTarget(personality, targetFurnace)
                         && !targetFurnace.equals(personality.smeltingFurnacePos);
-                if (fDistSq > 1600.0
+                // V5.197 (B v2): base 铁匠铺炉(距 fleetHome ≤64)不因「太远>40」forget —— 它是家,漫游远了也
+                //   记得、走回去用(下面 setReturnToBase),别就地建残废新炉。deep_below 对地表 base 炉天然不触发
+                //   (炉在下挖 bot 的上方);blacklist(RTB 真够不到)仍忘 → 回落建新/兜底(V5.196 保底穿甲,不裸奔)。
+                BlockPos fhForget = com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().getFleetHome();
+                boolean isBaseSmithyFurnace = fhForget != null
+                        && targetFurnace.getSquaredDistance(fhForget) <= FLEET_SMITHY_RADIUS_SQ;
+                if ((fDistSq > 1600.0 && !isBaseSmithyFurnace)
                         || (targetFurnace.getY() < player.getBlockY() - 10 && fDistSq > 25.0)
                         || furnaceBlacklisted) {
                     com.maohi.fakeplayer.TaskLogger.log(player, "phase_iron_forget_furnace",
@@ -818,6 +834,25 @@ public final class PhaseIronAge implements Phase {
         p.taskTarget   = new BlockPos(tx, ty, tz);
         p.taskExpireTime = player.getEntityWorld().getServer().getTicks()
                 + TimingConstants.TICK_TIMEOUT_EXPLORE;
+    }
+
+    /**
+     * V5.197 (B v2): 从 furnacesOwned 找一口「base 铁匠铺炉」—— 距 fleetHome ≤ FLEET_SMITHY_RADIUS_SQ、
+     *   chunk 就绪且现场仍是熔炉的 owned 炉。让漫游远 / knownFurnacePos 被 forget 的 bot 回基地那口固定炉炼铁,
+     *   而非在远处/地下就地建残废新炉(furnace_place_gate 揣炉放不下死锁的根)。null = 无(落 findFurnace / 建新)。
+     *   主线程安全:isChunkReady + safeGetBlockState 非阻塞读,未就绪保守跳过绝不误取。
+     */
+    private static BlockPos recoverBaseSmithyFurnace(ServerWorld world, Personality personality) {
+        BlockPos fh = com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().getFleetHome();
+        if (fh == null || personality.furnacesOwned.isEmpty()) return null;
+        for (BlockPos f : personality.furnacesOwned) {
+            if (f == null || f.getSquaredDistance(fh) > FLEET_SMITHY_RADIUS_SQ) continue;
+            if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(world, f.getX() >> 4, f.getZ() >> 4)) continue;
+            net.minecraft.block.BlockState st =
+                com.maohi.fakeplayer.ai.PathfindingNavigation.safeGetBlockState(world, f);
+            if (st != null && st.isOf(Blocks.FURNACE)) return f;
+        }
+        return null;
     }
 
     /**
