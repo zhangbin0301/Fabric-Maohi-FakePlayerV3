@@ -604,7 +604,7 @@ public final class CraftingBehavior {
 
 	/**
 	 * V5.196 裸奔保底 —— 绕开放炉/合台/穿甲发包的所有死锁,服务端直接把「粗铁→铁锭→合缺甲→穿上」走完。
-	 *   仅由 PhaseIronAge 在「有够料(粗铁+铁锭 ≥ 下一件甲)却持续 armorSafetyNetCycles 周期穿不上甲」时调
+	 *   仅由 PhaseIronAge 在「有够料(粗铁+铁锭 ≥ 下一件甲)却持续 ~60s(armorSafetyNetSince 墙钟)穿不上甲」时调
 	 *   (最高优先级兜底,谁都挤不掉)。铁料是 bot 自己挖的,本方法只保证结果、绝不凭空造料:
 	 *     ① 粗铁 1:1 直炼成锭(守恒,绕熔炉/燃料);
 	 *     ② 按 boots4→helmet5→leggings7→chest8 便宜优先扣锭、直接 equipStack 穿上缺的件(绕工作台 + V5.172 穿甲);
@@ -659,6 +659,10 @@ public final class CraftingBehavior {
 		}
 
 		if (equippedCount > 0) {
+			// V5.198: 兜底穿甲也补 story/obtain_armor 里程碑 —— 现实 executeCraft 路径有、兜底原先漏了。
+			//   同步 lastProgressAt 让 idle-rescue 认账 + 成就一致。注:钻石闸是物理 hasFullIronArmor(非此成就),
+			//   此为一致性/指标,非闸门;且这里 equipStack 真穿了甲,不是「假给成就」(见 obtain_armor 空给教训)。
+			grantCraftMilestone(player, Items.IRON_CHESTPLATE);
 			com.maohi.fakeplayer.TaskLogger.log(player, "armor_safety_net_forced",
 				"pieces", equippedCount, "rawSmelted", raw, "ingotsLeft", avail);
 			return true;

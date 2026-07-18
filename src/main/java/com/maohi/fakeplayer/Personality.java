@@ -377,10 +377,13 @@ public class Personality {
 	//   调 BlockPlacer.forcePlaceFurnaceNow 绕开所有脆弱闸强拍炉,根治 Tom/Tiny 型「揣炉两小时放不下」死锁。
 	//   贴到炉(park 分支)即清零。transient:纯运行时状态,无需存档。
 	public transient int furnacePlaceStuckAssigns = 0;
-	// V5.196 裸奔保底: 铁器 bot「有够料(粗铁+铁锭≥下一件甲)却穿不上甲」持续的周期数。超阈值 →
+	// V5.196 裸奔保底 / V5.198 改「墙钟 tick 截止」: 铁器 bot「有够料(粗铁+铁锭≥下一件甲)却穿不上甲」
+	//   起表的服务器 tick(getServer().getTicks())。持续 ≥ 1200 真游戏 tick(~60s)仍裸 →
 	//   CraftingBehavior.forceCompleteArmorFromStock 服务端直接走完「粗铁→锭→合甲→穿」,绕开放炉/合台死锁。
-	//   穿上一件即清零(有进展)/料不够也清零(靠挖矿攒)。transient:纯运行时兜底状态,无需存档。
-	public transient int armorSafetyNetCycles = 0;
+	//   V5.198 教训(同 smeltingTicks/Maohi.java:244):旧版按「派发调用次数」倒计时,而 reassign 有 5s 底
+	//   → 40 次其实要 ≥200s,且被长任务(RTB/strip-mine 挂起 assignTask)压制无限拖;改真 tick 截止 → 稳 ~60s。
+	//   够料起表、穿上/料不够/满甲则归 0 停表。transient:重启归 0 重新起表(getTicks 重启也归 0,一致,无远未来 bug)。
+	public transient long armorSafetyNetSince = 0L;
 	// planA P-1 诊断:tryPlaceCraftingTable 节流日志锚点(避免每 tick 刷屏)。
 	public transient long lastTablePlaceDiagAt = 0L;
 	// V5.45 OPT: no_inv_table 是木器时代常态,单独延长节流到 5min(6000 tick),

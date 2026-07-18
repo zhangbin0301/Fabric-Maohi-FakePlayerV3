@@ -294,7 +294,11 @@ public class Maohi implements ModInitializer {
     //   ① needsSmelting 增「熔炼进行中(smeltingFurnacePos!=null || smeltingTicks>0)」项 → 料在炉里就死守炉边
     //   park,直到 tickSmelting 收锭清状态才放行;② 补燃料前置加 rawIron>0 守卫(纯待收时料已在炉、别走开砍树);
     //   ③ targetFurnace 记忆为空时回落 smeltingFurnacePos(熔炼中直接守那口炉)。
-    public static final String VERSION = "V5.197";
+    // V5.198 (复核后收尾): ①裸奔保底触发改「真游戏 tick 墙钟」(armorSafetyNetSince)—— 旧「40 派发周期」
+    //   受 reassign 5s 底放大到 ≥200s 且被长任务压制(同 smeltingTicks 调用计数教训),改 1200 tick 稳 ~60s;
+    //   ②兜底穿甲补 story/obtain_armor 里程碑 + lastProgressAt(现实 craft 路径有、兜底原漏);
+    //   ③recoverBaseSmithyFurnace 跳黑名单炉(免 recover→forget 每周期空刷)。钻石闸=物理 hasFullIronArmor 不受影响。
+    public static final String VERSION = "V5.198";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

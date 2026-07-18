@@ -67,6 +67,11 @@ public final class PhaseIronAge implements Phase {
      *  仅回收超出此半径的野外遗留炉(整队搬家后的旧炉)。64²:bot 在 fleetHome ±spawnRadius 簇内建炉,足够覆盖。 */
     private static final double FLEET_SMITHY_RADIUS_SQ = 64.0 * 64.0;
 
+    /** V5.198 裸奔保底触发阈值(真游戏 tick):「够料却裸」持续此久 → 服务端强制走完粗铁→锭→合甲→穿。
+     *  1200 tick = ~60s。改自 V5.196 的「40 派发周期」—— 按调用计数受 reassign 5s 底放大到 ≥200s、
+     *  且被长任务(RTB/strip-mine)压制无限拖(同 tick_rate 教训),故切真 tick 墙钟截止。 */
+    private static final long ARMOR_SAFETY_NET_TICKS = 1200L;
+
     /** 扫描附近工作台的半径（判断能否原地合熔炉） */
     private static final int WORKBENCH_SCAN_RADIUS = 6;
 
@@ -151,20 +156,24 @@ public final class PhaseIronAge implements Phase {
         // ── V5.196 裸奔保底(最高优先级,谁都挤不掉)──
         //   改 30+ 版还裸奔的真因:铁料/铁锭够了,却被「揣炉放不下 / 合台空转 / 回营空返」等设施放置死锁
         //   卡住,永远走不完「熔炼→合甲→穿」。补丁堵每个分支堵不完 → 这里加终极兜底:铁器 bot 有够料
-        //   (粗铁+铁锭 ≥ 下一件甲所需)却持续 ~40 个派发周期(~40s)仍穿不上甲 → 服务端直接把这条链走完
-        //   (粗铁→锭→合缺甲→穿,见 CraftingBehavior.forceCompleteArmorFromStock;铁料自己挖的,只保证结果)。
-        //   现实路径(下面熔炼/合甲/回基地铁匠铺)照跑;兜底只在真卡住时兜,穿上一件即清零、逐件凑满。
+        //   (粗铁+铁锭 ≥ 下一件甲所需)却持续 ~60s(真游戏 tick 墙钟,见 ARMOR_SAFETY_NET_TICKS)仍穿不上甲
+        //   → 服务端直接把这条链走完(粗铁→锭→合缺甲→穿,见 CraftingBehavior.forceCompleteArmorFromStock;
+        //   铁料自己挖的,只保证结果)。现实路径(下面熔炼/合甲/回基地铁匠铺)照跑;兜底只在真卡住时兜。
         if (!hasFullIronArmor) {
             int nextArmorCost = com.maohi.fakeplayer.ai.CraftingBehavior.ironTargetForNextArmorPiece(player);
             if (nextArmorCost > 0 && (rawIronCount + ironIngotCount) >= nextArmorCost) {
-                if (++personality.armorSafetyNetCycles >= 40) {
-                    personality.armorSafetyNetCycles = 0;
+                // V5.198: 真游戏 tick 墙钟截止(非派发计数)—— 免 reassign 5s 底放大 + 免长任务压制无限拖。
+                long nowTick = player.getEntityWorld().getServer().getTicks();
+                if (personality.armorSafetyNetSince == 0L) {
+                    personality.armorSafetyNetSince = nowTick; // 首次「够料却裸」→ 起表
+                } else if (nowTick - personality.armorSafetyNetSince >= ARMOR_SAFETY_NET_TICKS) {
+                    personality.armorSafetyNetSince = nowTick; // 兜完重起表:再给现实路径 ~60s 凑下一件
                     if (com.maohi.fakeplayer.ai.CraftingBehavior.forceCompleteArmorFromStock(player)) {
-                        return; // 已穿上一件 → 下周期重评估(继续凑下一件 / 已满甲)
+                        return; // 已穿上缺件 → 下周期重评估(继续凑下一件 / 已满甲)
                     }
                 }
             } else {
-                personality.armorSafetyNetCycles = 0; // 料不够 → 清零,靠挖矿攒够再兜
+                personality.armorSafetyNetSince = 0L; // 料不够 / 已满甲 → 停表,靠挖矿攒够再起
             }
         }
 
@@ -847,6 +856,9 @@ public final class PhaseIronAge implements Phase {
         if (fh == null || personality.furnacesOwned.isEmpty()) return null;
         for (BlockPos f : personality.furnacesOwned) {
             if (f == null || f.getSquaredDistance(fh) > FLEET_SMITHY_RADIUS_SQ) continue;
+            // V5.197: 跳黑名单炉 —— base 炉若被 RTB 拉黑(够不到),recover 回它下面 forget 块又立刻按 blacklist
+            //   清掉,每周期空做一次 recover+forget 刷噪音。拉黑=真够不到 → 别 recover,落 findFurnace/建新/兜底。
+            if (com.maohi.fakeplayer.Personality.isFailedTarget(personality, f)) continue;
             if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(world, f.getX() >> 4, f.getZ() >> 4)) continue;
             net.minecraft.block.BlockState st =
                 com.maohi.fakeplayer.ai.PathfindingNavigation.safeGetBlockState(world, f);
