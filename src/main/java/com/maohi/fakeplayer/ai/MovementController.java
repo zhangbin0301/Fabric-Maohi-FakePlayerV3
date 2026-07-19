@@ -660,12 +660,25 @@ public class MovementController {
 			//     moved30s=0.00,17 分钟内 logs/sticks/cobble 全 0,完全无成就。
 			//   参数顺序:Vec3d(sideways=x, vertical=y, forward=z) 与 V5.28.6 之前一致,
 			//     vanilla LivingEntity.travel 的入参语义就是 (sideways, vertical, forward)。
+			// V5.200 崩服根因修:travel → travelMidAir → getVelocityAffectingPos → getPosWithYOffset 会读
+			//   Entity.supportingBlockPos(上一 tick 脚下支撑块坐标,跨 tick 缓存)。teleport / 舰队迁移后它
+			//   仍指向旧位置(可能几百格外、chunk 未加载)→ getBlockState(旧坐标) → getChunkBlocking park 60s
+			//   → Server Watchdog 判崩(2026-07-18 两次崩栈完全一致,顶部都是 getPosWithYOffset→getBlockState)。
+			//   旧坐标可任意远,下面 5x5 环守卫够不到 → 必须在 travel 之前把陈旧 supportingBlockPos 清掉:
+			//   其 chunk 未就绪就 setEmpty,让 vanilla 回退"脚下本 pos"(本 chunk,已被 5x5 守卫确保 ready)。
+			java.util.Optional<BlockPos> sbp =
+				((com.maohi.mixin.EntityAccessor) p).maohi$getSupportingBlockPos();
+			if (sbp != null && sbp.isPresent()) {
+				BlockPos sb = sbp.get();
+				if (!com.maohi.fakeplayer.ai.PathfindingNavigation.isChunkReady(world, sb.getX() >> 4, sb.getZ() >> 4)) {
+					((com.maohi.mixin.EntityAccessor) p).maohi$setSupportingBlockPos(java.util.Optional.empty());
+				}
+			}
 			// V5.62/V5.199 travel 前置守卫:vanilla LivingEntity.travel → Entity.move →
 			//   BlockCollisionSpliterator 扫 boundingBox+movement 经过的所有方块,跨未加载
 			//   chunk 边界时调 World.getBlockState → ServerChunkManager.getChunk(create=true)
-			//   → server thread park。2026-07-18 18:02 watchdog 实抓 doSmartMove:670 → travel →
-			//   getChunkBlocking park(c2me 并行度=1+慢盘 → 1032ms→60s 崩)。V5.199:3x3 守卫已 PASS
-			//   仍崩 → 读到 ±2 chunk,放宽到 5x5 才推 travel,否则跳过本帧让 chunk 异步加载(下一 tick 重试)。
+			//   → server thread park。V5.200 已消掉主因(陈旧 supportingBlockPos),此 5x5 环守卫
+			//   继续兜"走进未生成前沿"(travel 移动后在新位置边界读 ±2 chunk)的次要情形。
 			if (areTravelChunksReady(p)) {
 				p.travel(new Vec3d(side, 0, fwd));
 			} else {

@@ -6,6 +6,7 @@
   "mixins": [
     "BeehiveBlockEntityMixin",
     "CommandManagerMixin",
+    "EntityAccessor",
     "EntityTrackerEntryMixin",
     "MinecraftServerMixin",
     "PlayerManagerMixin",
