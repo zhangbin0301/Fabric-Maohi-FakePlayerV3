@@ -305,7 +305,12 @@ public class Maohi implements ModInitializer {
     //   次 travel 读它 → getChunkBlocking park 60s 崩。旧坐标可任意远,V5.199 的 5x5 环守卫根本够不到(读的不是
     //   当前周围 chunk,是陈旧远坐标)。修:新增 EntityAccessor mixin,doSmartMove 在 travel 前若 supportingBlockPos
     //   的 chunk 未就绪就 setEmpty(vanilla 回退脚下本 pos=本 chunk 必 ready)。5x5 环守卫保留兜"走进未生成前沿"。
-    public static final String VERSION = "V5.200";
+    // V5.201 (裸奔"0防"根因修): 全甲已穿但 getArmor()=0 —— 根因是假人从不跑 LivingEntity.tick()
+    //   (FakeClientConnection 未进 ServerNetworkIo → playerTick 链不执行,ServerPlayerEntity.tick 不 super.tick),
+    //   而"装备→属性修饰符"施加只在 LivingEntity.tick 内的 sendEquipmentChanges 做 → 护甲/攻击/附魔属性全 0。
+    //   修:新增 LivingEntityInvoker mixin,每 heavy-AI tick 手动补调 sendEquipmentChanges()(补缺失 tick 段,
+    //   施加/移除装备属性,复用 vanilla diff)。顺带修好假人攻击力/附魔(同根)。非死亡/重生/加载/equipStack 问题。
+    public static final String VERSION = "V5.201";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

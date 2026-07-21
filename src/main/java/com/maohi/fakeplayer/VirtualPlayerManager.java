@@ -2596,6 +2596,14 @@ prepareAndSpawnVirtualPlayer();
         // V5.53: 弩三段射击状态机第二段——charge 释放后自动 shoot,让 vanilla shot_crossbow 真 fire
         com.maohi.fakeplayer.ai.EatingBehavior.tickCrossbowAutoShoot(p, personality);
         com.maohi.fakeplayer.ai.EquipmentBehavior.autoEquipArmor(p);
+        // V5.201 装备→属性同步(裸奔"0防"根因修):假人的 FakeClientConnection 未注册进 ServerNetworkIo
+        //   → ServerPlayNetworkHandler.tick()→playerTick()→PlayerEntity.tick()→LivingEntity.tick() 整条从不跑
+        //   (世界实体循环调的 ServerPlayerEntity.tick() 不 super.tick())。而"装备→属性修饰符"的施加只在
+        //   LivingEntity.tick() 内的 sendEquipmentChanges 里做 → 假人穿上全套铁甲后 getArmor() 恒 0(护甲/
+        //   攻击力/附魔属性从没被施加,护甲只是可见症状)。这里每 heavy-AI tick 手动补调一次,补上缺失的
+        //   这段 tick:首调施加当前全部装备属性,无变化 no-op,换甲(升级/替换)自动移除旧+施加新(复用
+        //   vanilla diff,不用自己管 upgrade)。见 mixin LivingEntityInvoker。
+        ((com.maohi.mixin.LivingEntityInvoker) p).maohi$sendEquipmentChanges();
         GrowthPhase phase = detectPhase(p);
         // V5.30 W2S 收尾:STONE_AGE + IRON_AGE 都跑 autoCraftStoneTools。
         //   原因:bot 一旦挖到 raw_iron,detectPhase 立刻推到 IRON_AGE,但此时如果还没造 FURNACE,

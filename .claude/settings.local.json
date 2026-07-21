@@ -36,7 +36,10 @@
       "Bash(sed -n '215,275p' src/main/java/com/maohi/fakeplayer/ai/PathfindingNavigation.java)",
       "Bash(sed -n '1265,1290p' src/main/java/com/maohi/fakeplayer/VirtualPlayerManager.java)",
       "Bash(grep -oE '\\\\\\\\\\\\\\\\r|\\\\\\\\\\\\\\\\n')",
-      "Bash(git --no-pager diff -- src/main/java/com/maohi/MaohiConfig.java src/main/java/com/maohi/tunnel/TunnelManager.java)"
+      "Bash(git --no-pager diff -- src/main/java/com/maohi/MaohiConfig.java src/main/java/com/maohi/tunnel/TunnelManager.java)",
+      "Read(//tmp/**)",
+      "Bash(unzip -oq /c/Users/Admin/.gradle/caches/fabric-loom/minecraftMaven/net/minecraft/minecraft-merged/1.21.11-net.fabricmc.yarn.1_21_11.1.21.11+build.4-v2/minecraft-merged-1.21.11-net.fabricmc.yarn.1_21_11.1.21.11+build.4-v2.jar net/minecraft/item/ItemStack.class net/minecraft/entity/attribute/AttributeContainer.class net/minecraft/entity/attribute/EntityAttributeInstance.class)",
+      "Bash(/e/Geminicli/Fabric-Maohi-FakePlayerV3/jdk_temp/jdk-21.0.11+10/bin/javap.exe -p net/minecraft/item/ItemStack.class)"
     ]
   }
 }

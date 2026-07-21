@@ -8,6 +8,7 @@
     "CommandManagerMixin",
     "EntityAccessor",
     "EntityTrackerEntryMixin",
+    "LivingEntityInvoker",
     "MinecraftServerMixin",
     "PlayerManagerMixin",
     "PlayerSaveHandlerMixin",
