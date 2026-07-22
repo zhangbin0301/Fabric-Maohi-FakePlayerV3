@@ -307,6 +307,69 @@ public final class SharedResourceMap {
         fleetHomeLocked = true;
     }
 
+    // ==================== V5.202 舰队「船」: 挖矿共享锚点(所有阶段 strip-mine 前集结到此,4 前沿→1) ====================
+    //   与 fleetHome 分开(fleetHome 管地表 leash + 木器整队搬家,不耦合);此锚点只管 strip-mine 下矿点聚拢:
+    //   ① 所有 bot 下矿前先集结到锚点 MINING_CLUSTER_RADIUS 内(PhaseUtil.rallyToMiningAnchor)→ 4 条散落深隧道
+    //      前沿收拢成 1 片共享簇 → chunk 生成/流体 tick 负载 4×→1×(减卡)。
+    //   ② 簇内资源见底(反复 benign 铁 max_len 空返)→ 小步沿 flock 方向推进锚点(bot 下趟自己走过去,绝不传送)
+    //      = 「船在动」。小步 + 走路(非传送)保证任意时刻只有 ~1 个 chunk 前沿。
+    private volatile BlockPos fleetMiningAnchor = null;   // null = 未初始化(首次下矿用 effectiveHome 落定)
+    private volatile BlockPos miningAnchorOrigin = null;  // 封顶距离基准
+    private volatile long lastMiningAdvanceAt = 0L;
+    private final java.util.concurrent.atomic.AtomicInteger miningDepletionCount =
+        new java.util.concurrent.atomic.AtomicInteger(0);
+
+    private static final int MINING_ANCHOR_STEP = 24;              // 每次推进 24 格(~1.5 chunk,单前沿慢爬)
+    private static final int MINING_ANCHOR_MAX_DIST = 768;         // 距原点硬封顶,到顶切向旋转 60° 不外推
+    private static final int MINING_DEPLETION_THRESHOLD = 8;       // 簇内累计 8 次 max_len 空返 = 资源见底
+    private static final long MINING_ADVANCE_COOLDOWN_MS = 90_000L; // 每 90s 最多推进一次(防瞬时贫矿把船带跑)
+
+    /** 挖矿共享锚点;首次调用用 fallback(effectiveHome)落定。仅主线程读写。 */
+    public BlockPos getOrInitMiningAnchor(BlockPos fallback) {
+        BlockPos a = fleetMiningAnchor;
+        if (a == null) {
+            fleetMiningAnchor = fallback;
+            miningAnchorOrigin = fallback;
+            return fallback;
+        }
+        return a;
+    }
+
+    public BlockPos getMiningAnchor() { return fleetMiningAnchor; }
+
+    /**
+     * 簇内又一次 benign 铁 max_len 空返(资源见底信号)。累计够阈值 + 冷却过 → 沿 dirYaw 小步推进锚点。
+     * 只在 botPos 确实在簇内(距锚点 ≤ clusterRadius+48)才计数,strayed bot 的 max_len 不算(不误把船带跑)。
+     * 不传送任何 bot —— 锚点一移,各 bot 下趟 rally 时自己走过去。仅主线程调用。
+     */
+    public void reportMiningDepletion(BlockPos botPos, float dirYaw, double clusterRadius) {
+        BlockPos a = fleetMiningAnchor;
+        if (a == null) return;
+        double ddx = botPos.getX() - a.getX(), ddz = botPos.getZ() - a.getZ();
+        double margin = clusterRadius + 48.0;
+        if (ddx * ddx + ddz * ddz > margin * margin) return; // 不在簇内 → 不算簇资源见底
+        if (miningDepletionCount.incrementAndGet() < MINING_DEPLETION_THRESHOLD) return;
+        long now = System.currentTimeMillis();
+        if (now - lastMiningAdvanceAt < MINING_ADVANCE_COOLDOWN_MS) {
+            miningDepletionCount.set(MINING_DEPLETION_THRESHOLD); // 封顶,等冷却过再推进
+            return;
+        }
+        miningDepletionCount.set(0);
+        BlockPos origin = (miningAnchorOrigin != null) ? miningAnchorOrigin : a;
+        double rad = Math.toRadians(dirYaw);
+        int nx = a.getX() + (int) Math.round(-Math.sin(rad) * MINING_ANCHOR_STEP);
+        int nz = a.getZ() + (int) Math.round(Math.cos(rad) * MINING_ANCHOR_STEP);
+        double dx = nx - origin.getX(), dz = nz - origin.getZ();
+        if (Math.sqrt(dx * dx + dz * dz) > MINING_ANCHOR_MAX_DIST) { // 到封顶 → 切向旋转,绝不外推
+            double bearing = Math.atan2(dz, dx) + Math.PI / 3.0;
+            nx = origin.getX() + (int) (Math.cos(bearing) * MINING_ANCHOR_MAX_DIST);
+            nz = origin.getZ() + (int) (Math.sin(bearing) * MINING_ANCHOR_MAX_DIST);
+        }
+        fleetMiningAnchor = new BlockPos(nx, a.getY(), nz);
+        lastMiningAdvanceAt = now;
+        miningAnchorOrigin = (miningAnchorOrigin != null) ? miningAnchorOrigin : a;
+    }
+
     // ==================== 维护 ====================
 
     /** 清理过期节点，防内存泄漏（由 report() 触发，也可外部定期调用）。 */

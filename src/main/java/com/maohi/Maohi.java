@@ -310,7 +310,13 @@ public class Maohi implements ModInitializer {
     //   而"装备→属性修饰符"施加只在 LivingEntity.tick 内的 sendEquipmentChanges 做 → 护甲/攻击/附魔属性全 0。
     //   修:新增 LivingEntityInvoker mixin,每 heavy-AI tick 手动补调 sendEquipmentChanges()(补缺失 tick 段,
     //   施加/移除装备属性,复用 vanilla diff)。顺带修好假人攻击力/附魔(同根)。非死亡/重生/加载/equipStack 问题。
-    public static final String VERSION = "V5.201";
+    // V5.202 (减卡·舰队"船"通用化): 铁器后连续卡顿根因 = 4 只 bot 各自在散落位置往下 strip-mine,4 条深隧道
+    //   前沿同时砸 c2me 单 worldgen 线程 → 主线程 getChunkBlocking park → 2000ms 落后。修:把"船"(共享圆心
+    //   一起干活)从木器时代延伸到所有挖矿阶段 —— 所有 strip-mine 下矿入口(铁/钻/圆石/tryDescendForOre)先调
+    //   PhaseUtil.rallyToMiningAnchor 集结到共享挖矿锚点(48 格簇)再下矿 → 4 前沿→1(chunk 生成/流体 tick 4×→1×)。
+    //   簇内资源见底(反复 benign 铁 max_len)→ SharedResourceMap 小步(24 格/90s)沿 flock 方向推进锚点、走路不传送
+    //   =「船在动」。总开关 PhaseUtil.MINING_SHIP_ENABLED。与 Chunky 预生成组合最省(锚点始终在已生成簇内挖)。
+    public static final String VERSION = "V5.202";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

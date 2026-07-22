@@ -80,6 +80,40 @@ public final class PhaseUtil {
         return (fh != null) ? fh : getWorldSpawnCached(world);
     }
 
+    // ==================== V5.202 舰队「船」通用化: strip-mine 下矿前集结到共享挖矿锚点 ====================
+    //   所有阶段(石/铁/钻)的 strip-mine 下矿入口统一先调 rallyToMiningAnchor:4 条散落深隧道前沿收拢成 1 片
+    //   共享簇 → chunk 生成/流体 tick 负载 4×→1×(减卡)。出问题即把 MINING_SHIP_ENABLED 翻 false 回老行为。
+    public static final boolean MINING_SHIP_ENABLED = true;
+    public static final double MINING_CLUSTER_RADIUS = 48.0;   // 集结半径(簇直径 ~96 格 = 几 chunk)
+
+    /**
+     * V5.202 集结到共享挖矿锚点。离锚点 > (半径+8) → 先走过去(setMoveTo,不传送)、本 cycle 不下矿;
+     *   已在簇内返 false(照常下矿)。所有 strip-mine 下矿入口(PhaseIronAge 铁/钻/圆石/tryDescendForOre)
+     *   统一先调此闸 → 全队在一片共享簇里挖,而非各自开新深隧道前沿(那是铁器后连续卡顿的机制)。
+     * @return true = 还没到锚点(已派"走过去")→ 调用方 return(void 入口)/ return true(boolean 入口);
+     *         false = 已在簇内 → 照常下矿。
+     */
+    public static boolean rallyToMiningAnchor(ServerPlayerEntity player, Personality p) {
+        if (!MINING_SHIP_ENABLED) return false;
+        ServerWorld world = player.getEntityWorld();
+        BlockPos anchor = com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance()
+            .getOrInitMiningAnchor(effectiveHome(p, world));
+        double dx = anchor.getX() - player.getBlockX();
+        double dz = anchor.getZ() - player.getBlockZ();
+        double distSq = dx * dx + dz * dz;
+        double gate = MINING_CLUSTER_RADIUS + 8.0;   // 滞回,防 walk↔descend ping-pong
+        if (distSq <= gate * gate) return false;      // 已在簇内 → 可下矿
+        // 太远 → 走向锚点(±6 fuzz 免全挤一格),不传送;到了下趟再下矿
+        ThreadLocalRandom rng = ThreadLocalRandom.current();
+        int fx = anchor.getX() + rng.nextInt(-6, 7);
+        int fz = anchor.getZ() + rng.nextInt(-6, 7);
+        int fy = com.maohi.fakeplayer.ai.PathfindingNavigation.getSafeTopY(world, fx, fz, player.getBlockY());
+        setMoveTo(p, player, new BlockPos(fx, fy, fz));
+        com.maohi.fakeplayer.TaskLogger.log(player, "mining_rally_to_anchor",
+            "anchorX", anchor.getX(), "anchorZ", anchor.getZ(), "distSq", (int) distSq);
+        return true;
+    }
+
     // ==================== Yaw 工具 ====================
 
     /** yaw 加权混合，取短角差避免 -180/+180 边界 wrap。weight∈[0,1] */

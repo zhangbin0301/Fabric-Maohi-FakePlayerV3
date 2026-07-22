@@ -92,6 +92,17 @@ public class StripMineBehavior {
                     && player.getBlockPos().getSquaredDistance(fh) <= 128.0 * 128.0;
                 if (nearBase) cooldownMs = 40_000L;
             }
+            // V5.202 船: 簇内铁目标撞 max_len(没找到铁)= 该片资源见底信号 → 上报;累计够 + 冷却过就沿 flock
+            //   方向小步推进共享挖矿锚点(bot 下趟自己走过去,不传送)= 「船前进」。reportMiningDepletion 内部
+            //   自查"确在簇内"才计数,strayed bot 的 max_len 不误把船带跑。
+            if (com.maohi.fakeplayer.ai.phase.PhaseUtil.MINING_SHIP_ENABLED
+                    && "max_len".equals(reason) && ironGoalTrip && player != null) {
+                float shipYaw = com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance()
+                    .getOrUpdateFlockYaw(player.getYaw());
+                com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().reportMiningDepletion(
+                    player.getBlockPos(), shipYaw,
+                    com.maohi.fakeplayer.ai.phase.PhaseUtil.MINING_CLUSTER_RADIUS);
+            }
             pers.stripMineCooldownUntil = System.currentTimeMillis() + cooldownMs;
         } else {
             // V5.109: got_iron/got_diamond 也走 ASCEND 爬回地表,而非原地 IDLE(stays at depth)。

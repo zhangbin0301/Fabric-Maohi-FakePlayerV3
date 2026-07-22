@@ -393,6 +393,8 @@ public final class PhaseIronAge implements Phase {
                         && player.getHealth() > 14.0f) {
                     personality.stripMineForDiamond = false;
                     personality.stripMineForCobble = true;
+                    // V5.202 船: 圆石下矿也先集结到共享锚点(减卡)
+                    if (PhaseUtil.rallyToMiningAnchor(player, personality)) return;
                     personality.stripMineState = PhaseStoneAge.SubPhase.STRIP_MINE_DESCEND;
                     personality.stripMineStartPos = player.getBlockPos().toImmutable();
                     personality.stripMineStartY = player.getBlockY();
@@ -560,6 +562,8 @@ public final class PhaseIronAge implements Phase {
                 //   够不到的矿 → 快失败 → 每秒重 roll 3~4 次 = 217 assigns/60s 的元凶)。目标明确的挖铁无需错峰。
                 personality.stripMineForDiamond = false;
                 personality.stripMineForCobble = false;
+                // V5.202 船: 下矿前先集结到共享挖矿锚点,别在散落位置各自开深隧道前沿(4 前沿→1,减卡)
+                if (PhaseUtil.rallyToMiningAnchor(player, personality)) return;
                 personality.stripMineState = PhaseStoneAge.SubPhase.STRIP_MINE_DESCEND;
                 personality.stripMineStartPos = player.getBlockPos().toImmutable();
                 personality.stripMineStartY = player.getBlockY();
@@ -659,6 +663,8 @@ public final class PhaseIronAge implements Phase {
                 && healthyPicks >= 1) {
             personality.stripMineForDiamond = true;
             personality.stripMineForCobble = false;  // V5.98: 钻石目标,不走圆石早退
+            // V5.202 船: 钻石下矿也先集结到共享锚点(4 前沿→1,减卡)
+            if (PhaseUtil.rallyToMiningAnchor(player, personality)) return;
             personality.stripMineState = PhaseStoneAge.SubPhase.STRIP_MINE_DESCEND;
             personality.stripMineStartPos = player.getBlockPos().toImmutable();
             personality.stripMineStartY = player.getBlockY();
@@ -742,6 +748,8 @@ public final class PhaseIronAge implements Phase {
         }
         personality.stripMineForDiamond = false;
         personality.stripMineForCobble = false;   // 目标=铁,got_iron 收手(口径同 P4.1/SA 下挖)
+        // V5.202 船: tryDescendForOre 也先集结到共享锚点(减卡);还没到锚点返 true(已派走过去,别落 setExplore 散开)
+        if (PhaseUtil.rallyToMiningAnchor(player, personality)) return true;
         personality.stripMineState = PhaseStoneAge.SubPhase.STRIP_MINE_DESCEND;
         personality.stripMineStartPos = player.getBlockPos().toImmutable();
         personality.stripMineStartY = player.getBlockY();
