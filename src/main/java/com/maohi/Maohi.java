@@ -316,7 +316,10 @@ public class Maohi implements ModInitializer {
     //   PhaseUtil.rallyToMiningAnchor 集结到共享挖矿锚点(48 格簇)再下矿 → 4 前沿→1(chunk 生成/流体 tick 4×→1×)。
     //   簇内资源见底(反复 benign 铁 max_len)→ SharedResourceMap 小步(24 格/90s)沿 flock 方向推进锚点、走路不传送
     //   =「船在动」。总开关 PhaseUtil.MINING_SHIP_ENABLED。与 Chunky 预生成组合最省(锚点始终在已生成簇内挖)。
-    public static final String VERSION = "V5.202";
+    // V5.203 (钻石层调优): 钻石 strip-mine 目标层 -54 → -59(1.18+ 钻石峰值层,密度更高;-59 恰在底岩梯度顶
+    //   几乎无底岩)。配套把 StripMineBehavior near_bedrock 守卫 -56 → -60(否则 descend 到 -56 就 abort、够不到
+    //   -59)。LAYER 脚在 -59 且不破地板 → pos 恒 -59 不误触发守卫;铁层 y15 不受影响。嫌 -59 岩浆多可回调 -54。
+    public static final String VERSION = "V5.203";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

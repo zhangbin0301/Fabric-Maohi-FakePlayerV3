@@ -214,8 +214,9 @@ public class StripMineBehavior {
             return;
         }
 
-        // 防底岩
-        if (pos.getY() <= -56) {
+        // 防底岩 (V5.203: -56→-60 配合钻石层 -59 —— 底岩梯度 -64~-59,-59 几乎无底岩、-60 才 ~20%;
+        //   LAYER 脚在 -59 且不破地板(V5.183)→ pos 恒 -59 不触发,仅真下探/dip 到 -60 才 abort。铁层 y15 不受影响)
+        if (pos.getY() <= -60) {
             abort(pers, player, "near_bedrock");
             return;
         }

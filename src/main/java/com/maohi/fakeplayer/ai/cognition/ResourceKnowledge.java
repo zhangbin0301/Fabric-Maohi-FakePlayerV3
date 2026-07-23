@@ -27,8 +27,8 @@ import com.maohi.fakeplayer.Personality;
  *   铁         山地 / Y16     山地露天           DIG Y15, biome→IRON(与 cfg.stripMineTargetY 一致)
  *   金         Y-16 恶地       恶地(Mesa)        DIG Y-16, biome→恶地(进度暂不需)
  *   红石       Y-59 深层洞穴    深层              DIG Y-59(进度暂不需)
- *   钻石       Y-59 深板岩      深板岩           DIG —— *取 -54 不取 -59*:StripMine 底岩守卫在 Y≤-56
- *                                              abort,target 必须高于守卫,故 cfg.stripMineDiamondTargetY=-54
+ *   钻石       Y-59 深板岩      深板岩           DIG —— V5.203 取峰值 -59(配套 StripMine 底岩守卫
+ *                                              -56→-60,让 descend 能到 -59 再转 LAYER;-59 恰在底岩梯度顶几乎无底岩)
  *   下界合金    Y15 下界        下界岩浆区         NETHER Y15(PhaseNether 专属链处理)
  *
  * 工程原则(不盲从表):
@@ -70,7 +70,7 @@ public final class ResourceKnowledge {
         GOLD     (Strategy.DIG,     -16, null),
         REDSTONE (Strategy.DIG,     -59, null),
         LAPIS    (Strategy.DIG,      -1, null),
-        DIAMOND  (Strategy.DIG,     -54, null),  // 表 -59;取 -54 避 StripMine 底岩守卫(Y≤-56 abort)
+        DIAMOND  (Strategy.DIG,     -59, null),  // V5.203: 取峰值 -59(配套 StripMine 底岩守卫 -56→-60)
         NETHERITE(Strategy.NETHER,   15, null);
 
         public final Strategy strategy;
