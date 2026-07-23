@@ -319,7 +319,11 @@ public class Maohi implements ModInitializer {
     // V5.203 (钻石层调优): 钻石 strip-mine 目标层 -54 → -59(1.18+ 钻石峰值层,密度更高;-59 恰在底岩梯度顶
     //   几乎无底岩)。配套把 StripMineBehavior near_bedrock 守卫 -56 → -60(否则 descend 到 -56 就 abort、够不到
     //   -59)。LAYER 脚在 -59 且不破地板 → pos 恒 -59 不误触发守卫;铁层 y15 不受影响。嫌 -59 岩浆多可回调 -54。
-    public static final String VERSION = "V5.203";
+    // V5.204 (钻石更易挖到): 诊断"钻石怎么挖" —— LAYER 每步 X-ray 扫 diamond_ore 直奔它,但独钻石只有 24 格扫、
+    //   没有大扫兜底(铁/煤都有 24→48 大扫,唯钻石漏了)→ 钻石稀 ~8×、24 半径常空 → 只能靠 cave-steer 碰运气。
+    //   修:钻石 24 内没命中即 findNearestBlockBig 大扫 DIAMOND_SEEK_RADIUS=64(稀 8× 需 ~2× 半径补,覆盖 ~19× 体积),
+    //   命中更远钻石就直奔它挖。findNearestBlockBig 自带 MSPT 自适应(卡时自缩)不加重卡顿。配 V5.203 的 -59 峰值层。
+    public static final String VERSION = "V5.204";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

@@ -168,6 +168,10 @@ public class StripMineBehavior {
      *  远一倍,让假人更早朝已知铁脉走。下探/平层共用。 */
     private static final int IRON_SEEK_RADIUS = 48;
 
+    /** V5.204: 钻石大扫半径 —— 钻石比铁稀 ~8×,体积随半径立方增长,要 ~2× 铁半径才有相当命中率(48×2^⅓≈60),
+     *  取 64。findNearestBlockBig 自带 MSPT 自适应(卡时自动缩)+ 30s 缓存,卡服不会被这更大扫拖垮。 */
+    private static final int DIAMOND_SEEK_RADIUS = 64;
+
     private static void tickDescend(ServerPlayerEntity player, Personality pers, MaohiConfig cfg) {
         ServerWorld world = player.getEntityWorld();
         BlockPos pos = player.getBlockPos();
@@ -389,6 +393,12 @@ public class StripMineBehavior {
         // V5.188: 煤 goal —— 24 内没煤则大扫 48 找更远煤脉朝它拐(镜像铁的 B),避免在层里盲挖净出石头。
         if (orePos == null && "coal_ore".equals(oreScanType) && mgr != null) {
             orePos = mgr.findNearestBlockBig(world, pos, IRON_SEEK_RADIUS, "coal_ore");
+        }
+        // V5.204: 钻石 goal —— 24 内没钻石则大扫 DIAMOND_SEEK_RADIUS(64)找更远钻石脉朝它拐(镜像铁 V5.181/煤 V5.188)。
+        //   钻石稀 ~8×,24 半径常空 → 原本直接落 cave-steer 靠运气;大扫 X-ray 覆盖 ~19× 体积(64³/24³),命中更远
+        //   钻石就直奔它挖。原来「钻石只有 24 扫、没大扫兜底」是钻石难挖到的主因(铁/煤都有、独钻石漏了)。
+        if (orePos == null && pers.stripMineForDiamond && mgr != null) {
+            orePos = mgr.findNearestBlockBig(world, pos, DIAMOND_SEEK_RADIUS, "diamond_ore");
         }
         if (orePos != null) {
             double dist = pos.getSquaredDistance(orePos);
