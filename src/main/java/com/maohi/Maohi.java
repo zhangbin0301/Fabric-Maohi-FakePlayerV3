@@ -323,7 +323,12 @@ public class Maohi implements ModInitializer {
     //   没有大扫兜底(铁/煤都有 24→48 大扫,唯钻石漏了)→ 钻石稀 ~8×、24 半径常空 → 只能靠 cave-steer 碰运气。
     //   修:钻石 24 内没命中即 findNearestBlockBig 大扫 DIAMOND_SEEK_RADIUS=64(稀 8× 需 ~2× 半径补,覆盖 ~19× 体积),
     //   命中更远钻石就直奔它挖。findNearestBlockBig 自带 MSPT 自适应(卡时自缩)不加重卡顿。配 V5.203 的 -59 峰值层。
-    public static final String VERSION = "V5.204";
+    // V5.205 (钻石三连,均不增卡): ①共享钻石点 —— 挖到 diamond_ore 上报 DIAMOND_DEPOSIT(±5模糊+限频),
+    //   其它 bot 下钻石层 aimDiamondDescend 朝它瞄准 → 稀疏钻石"社会化"整队围着已知钻脉挖。②一趟多挖几颗 ——
+    //   got_diamond 阈值 1→DIAMOND_TRIP_TARGET(5)raw diamond(撞 max_len 兜底,不死钻),减下钻/上爬往返
+    //   (往返本身也是 churn,故此项反而"减卡")。③扫描 Y 带修偏 —— 钻石大扫原用铁的 -20~+2(对 y=-59 是
+    //   -79~-57:大半在底岩下纯浪费、又漏 -57 以上密集带),改钻石专用 ±8(-67~-51),17 层<铁 23 层=更省。
+    public static final String VERSION = "V5.205";
 
     private static MaohiConfig config() { return MaohiConfig.getInstance(); }
 

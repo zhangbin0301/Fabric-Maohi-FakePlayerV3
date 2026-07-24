@@ -671,6 +671,8 @@ public final class PhaseIronAge implements Phase {
             personality.stripMineTunnelLen = 0;
             personality.stripMineConsecutiveFails = 0;
             personality.currentTask = TaskType.STRIP_MINE;
+            // V5.205: 钻石也瞄准下挖 —— 朝舰队共享 DIAMOND_DEPOSIT / 大扫钻脉方向拐楼梯,整队围着已知钻脉挖。
+            com.maohi.fakeplayer.ai.StripMineBehavior.aimDiamondDescend(player, personality);
             com.maohi.fakeplayer.TaskLogger.log(player, "stripmine_enter",
                 "goal", "diamond", "startY", personality.stripMineStartY,
                 "targetY", smCfg.stripMineDiamondTargetY, "healthyPicks", healthyPicks);

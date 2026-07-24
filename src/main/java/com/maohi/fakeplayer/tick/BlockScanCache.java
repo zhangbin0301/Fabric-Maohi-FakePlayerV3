@@ -241,7 +241,11 @@ public final class BlockScanCache {
 		}
 
 		// 大扫只用于矿石(iron_ore 等),y 向沿用矿石区间(脚下 -20 ~ +2)。
-		int yMin = -20, yMax = 2;
+		// V5.205: 钻石专用 Y 带 —— 铁扫的 -20~+2 对 y=-59 的钻石 bot 是 -79~-57(大半在底岩下、纯浪费,
+		//   又漏掉 -57 以上的钻石密集带)。改对称 ±8(-67~-51)贴钻石密集层,且 17 层 < 铁的 23 层 = 更省不更卡。
+		int yMin, yMax;
+		if ("diamond_ore".equals(type)) { yMin = -8; yMax = 8; }
+		else { yMin = -20; yMax = 2; }
 		BlockPos result = scanShells(world, pos, radius, yMin, yMax, type, Collections.emptySet());
 		long ttl = result != null ? CACHE_TTL_MS : 3_000L;
 		cache.put(cacheKey, new Object[]{result, System.currentTimeMillis() + ttl});

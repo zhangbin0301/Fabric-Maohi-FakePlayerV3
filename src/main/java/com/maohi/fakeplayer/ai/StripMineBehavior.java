@@ -33,6 +33,10 @@ public class StripMineBehavior {
     /** V5.118: 铁目标 strip-mine 收手前要带够的煤量(主动挖煤)。否则爬回地表熔铁只能烧木料 → 掏空木棍料。
      *  附近无煤时由 max_len 兜底上爬,不空耗;煤在 Y15 矿区常见,顺路即够。 */
     private static final int COAL_FUEL_TARGET = 5;
+
+    /** V5.205: 钻石"一趟多挖几颗"目标 —— 攒够这么多 raw diamond 再上爬,减少下钻/上爬往返(往返本身也是
+     *  chunk churn + 慢)。撞 max_len 会兜底收手,不会因凑不够死钻在层里;第一颗即触发 DIAMOND_AGE 不影响进阶。 */
+    private static final int DIAMOND_TRIP_TARGET = 5;
     /** V5.119: 铁够此数即进入「换向找煤」模式 —— 之后每 8 格随机转向扫新区找煤,用满 max_len 预算
      *  (而非直挖一条线),到 max_len 仍无煤才由 max_len 兜底带铁上爬。 */
     private static final int IRON_HOARD_CAP = 6;
@@ -310,7 +314,8 @@ public class StripMineBehavior {
                 return;
             }
         } else {
-            boolean haveMineral = forDiamond ? hasDiamondInInventory(player) : hasMinedEnoughRawIron(player);
+            boolean haveMineral = forDiamond ? (countRawDiamonds(player) >= DIAMOND_TRIP_TARGET)
+                                             : hasMinedEnoughRawIron(player);
             // V5.119 主动挖煤: 铁目标够铁后还想凑够煤再上爬(地表熔铁用煤、不掏空木料);煤够 / 钻石目标即收手。
             //   煤不够则不早退,继续用满 max_len(=64)预算找煤(见下「换向找煤」),到 max_len 仍无煤由 line221
             //   兜底带铁上爬。
@@ -408,6 +413,14 @@ public class StripMineBehavior {
                 if (foundIronOre) {
                     com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().report(
                         com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType.IRON_DEPOSIT,
+                        orePos, player.getUuid());
+                }
+                // V5.205: 挖到钻石矿即上报 DIAMOND_DEPOSIT(±5 模糊 + 60s/chunk 限频内建,不刷爆)——
+                //   钻石 trip 的 orePos 必是 diamond_ore(oreScanType 固定 diamond_ore),其它 bot 下钻石层
+                //   经 aimDiamondDescend 朝这片瞄准,把稀疏钻石"社会化"共享,整队围着已知钻脉挖。
+                if (pers.stripMineForDiamond) {
+                    com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().report(
+                        com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType.DIAMOND_DEPOSIT,
                         orePos, player.getUuid());
                 }
                 mineBlock(player, world, orePos);
@@ -662,6 +675,64 @@ public class StripMineBehavior {
             return;
         }
         // ④ 都没有: 保留默认 facing(不记 log,避免噪声)
+    }
+
+    /**
+     * V5.205: 钻石版 aimIronDescend —— 下钻石层前把楼梯方向朝最可能有钻石的方向瞄准,整队围着已知钻脉挖。
+     *   ① 舰队共享图最近 DIAMOND_DEPOSIT(别的假人挖到过钻石的区,水平距 ≤ ironAimMaxDist)→ 朝它。
+     *   ② 否则开天眼大扫:在钻石层合成坐标找最近 diamond_ore(DIAMOND_SEEK_RADIUS,MSPT 自适应)→ 朝它。
+     *   ③ 否则朝最近洞穴(深洞/岩浆区常裸露钻石)。④ 都没有 → 保留默认 facing。
+     *   仅钻石目标调用。不 claim 共享节点(钻区可多人共用,同 IRON_DEPOSIT/FURNACE 共享语义)。
+     */
+    public static void aimDiamondDescend(ServerPlayerEntity player, Personality pers) {
+        MaohiConfig cfg = MaohiConfig.getInstance();
+        BlockPos pos = player.getBlockPos();
+        ServerWorld world = player.getEntityWorld();
+
+        // ① 共享图: 别的假人挖到过钻石的区(查询侧不 claim,钻区可多人共用)
+        com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkNode node =
+            com.maohi.fakeplayer.ai.cognition.SharedResourceMap.getInstance().queryNearest(
+                pos, player.getUuid(),
+                com.maohi.fakeplayer.ai.cognition.SharedResourceMap.LandmarkType.DIAMOND_DEPOSIT);
+        int aimMaxDist = cfg != null ? cfg.ironAimMaxDist : 96;
+        if (node != null) {
+            int dx = node.approxPos.getX() - pos.getX();
+            int dz = node.approxPos.getZ() - pos.getZ();
+            double horizDist = Math.sqrt((double) dx * dx + (double) dz * dz);
+            if (horizDist <= aimMaxDist && (dx != 0 || dz != 0)) {
+                pers.stripMineFacing = dominantFacing(dx, dz);
+                TaskLogger.log(player, "stripmine_aim", "src", "peer_diamond",
+                    "facing", pers.stripMineFacing, "dist", (int) horizDist);
+                return;
+            }
+        }
+
+        // ② 开天眼大扫钻石层 diamond_ore(合成钻石层坐标,DIAMOND_SEEK_RADIUS + MSPT 自适应)
+        com.maohi.fakeplayer.VirtualPlayerManager mgr = Maohi.getVirtualPlayerManager();
+        int diamondY = (cfg != null) ? cfg.stripMineDiamondTargetY
+            : com.maohi.fakeplayer.ai.cognition.ResourceKnowledge.Resource.DIAMOND.digTargetY;
+        BlockPos synthPos = new BlockPos(pos.getX(), diamondY, pos.getZ());
+        BlockPos hit = mgr != null ? mgr.findNearestBlockBig(world, synthPos, DIAMOND_SEEK_RADIUS, "diamond_ore") : null;
+        if (hit != null) {
+            int dx = hit.getX() - pos.getX();
+            int dz = hit.getZ() - pos.getZ();
+            if (dx != 0 || dz != 0) {
+                pers.stripMineFacing = dominantFacing(dx, dz);
+                TaskLogger.log(player, "stripmine_aim", "src", "scan_diamond",
+                    "facing", pers.stripMineFacing,
+                    "dist", (int) Math.sqrt((double) dx * dx + (double) dz * dz));
+                return;
+            }
+        }
+
+        // ③ 洞穴兜底(深层洞壁常裸露钻石)
+        Direction caveDir = findCaveDirection(world, pos, 16);
+        if (caveDir != null) {
+            pers.stripMineFacing = caveDir;
+            TaskLogger.log(player, "stripmine_aim", "src", "cave_diamond", "facing", caveDir);
+            return;
+        }
+        // ④ 默认 facing(不记 log)
     }
 
     /** V5.158: 由 (dx,dz) 取主轴 Direction(楼梯瞄准用;与 tickLayer ore-veer 同款 max(|dx|,|dz|) 取主轴)。 */
@@ -934,5 +1005,16 @@ public class StripMineBehavior {
             if (id.equals("diamond") || id.startsWith("diamond_")) return true;
         }
         return false;
+    }
+
+    /** V5.205: 背包 raw diamond 数(只数 "diamond" 资源,不含钻石工具/甲)。用于「一趟多挖几颗」阈值。 */
+    private static int countRawDiamonds(ServerPlayerEntity player) {
+        int n = 0;
+        for (int i = 0; i < player.getInventory().size(); i++) {
+            ItemStack stack = player.getInventory().getStack(i);
+            if (stack.isEmpty()) continue;
+            if (Registries.ITEM.getId(stack.getItem()).getPath().equals("diamond")) n += stack.getCount();
+        }
+        return n;
     }
 }

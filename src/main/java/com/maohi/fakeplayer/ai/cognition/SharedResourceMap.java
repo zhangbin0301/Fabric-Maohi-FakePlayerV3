@@ -43,6 +43,7 @@ public final class SharedResourceMap {
     public enum LandmarkType {
         VILLAGE,        // 村庄：食物/床/铁/作物 — 成就大礼包
         IRON_DEPOSIT,   // 露天铁矿块（非地下，bot 无需挖洞直接可见）
+        DIAMOND_DEPOSIT,// V5.205: 钻石矿脉(strip-mine 挖到 diamond_ore 时上报,±5 模糊+限频);其它 bot 下钻石层朝它瞄准
         COAL_VEIN,      // 大煤炭矿脉（≥8 个相邻）
         SPAWNER,        // 刷怪笼（经验农场候选）
         STRONGHOLD,     // 要塞（末地成就必需）
